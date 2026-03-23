@@ -69,6 +69,16 @@ export function parseContent(
   return textToModel(title || "Mindmap", content);
 }
 
+/** Convert MindMapModel to indented plain text */
+export function modelToText(model: MindMapModel, depth = 0): string {
+  const indent = "  ".repeat(depth);
+  let result = `${indent}${model.text}`;
+  for (const child of model.children) {
+    result += "\n" + modelToText(child, depth + 1);
+  }
+  return result;
+}
+
 /** Serialize model for API storage */
 export function serializeModel(model: MindMapModel): string {
   return JSON.stringify(model);

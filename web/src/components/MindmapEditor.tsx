@@ -1,10 +1,22 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
-import { findNode, updateNodeText } from "../domain/model";
+import {
+  findNode,
+  findParentAndIndex,
+  updateNodeText,
+  cloneModel,
+} from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import { flattenToNodes } from "../application/nodeUtils";
-import { parseContent, serializeModel } from "../application/persistence";
+import {
+  parseContent,
+  serializeModel,
+  modelToText,
+  textToModel,
+} from "../application/persistence";
+import CommandPalette from "./CommandPalette";
+import type { Command } from "./CommandPalette";
 import {
   handleEnter,
   handleTab,
@@ -44,6 +56,7 @@ export default function MindmapEditor({
     parseContent(initialContent, initialTitle)
   );
   const [isPublic, setIsPublic] = useState(initialIsPublic || false);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
 
   // Editing state
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -307,10 +320,110 @@ export default function MindmapEditor({
     }
   }, []);
 
+  // --- Command palette ---
+  const commands = useMemo<Command[]>(() => {
+    const copyAllText = () => {
+      const text = modelToText(model);
+      navigator.clipboard.writeText(text);
+    };
+    const copyBranch = () => {
+      if (!activeNodeId) {
+        copyAllText();
+        return;
+      }
+      const node = findNode(model, activeNodeId);
+      if (node) {
+        navigator.clipboard.writeText(modelToText(node));
+      }
+    };
+    const sendToChatGPT = () => {
+      const text = activeNodeId
+        ? modelToText(findNode(model, activeNodeId) || model)
+        : modelToText(model);
+      const prompt = `この箇条書きツリー形式のテキストデータを文章に整形してください。内容は「${model.text}」についてです。\n\n${text}`;
+      window.open(
+        `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`,
+        "_blank"
+      );
+    };
+    return [
+      { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
+      { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
+      { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
+    ];
+  }, [model, activeNodeId]);
+
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (isComposing) return;
+
+      // Command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setCmdPaletteOpen(true);
+        return;
+      }
+
+      // Copy active branch as plain text
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+        if (activeNodeId) {
+          const node = findNode(model, activeNodeId);
+          if (node) {
+            e.preventDefault();
+            navigator.clipboard.writeText(modelToText(node));
+          }
+        }
+        return;
+      }
+
+      // Paste plain text as tree nodes (children of active node)
+      if ((e.metaKey || e.ctrlKey) && e.key === "v") {
+        e.preventDefault();
+        navigator.clipboard.readText().then((clipText) => {
+          if (!clipText.trim()) return;
+          const targetId = activeNodeId || model.id;
+          // Commit current editing text before modifying the model
+          let baseModel = model;
+          if (activeNodeId) {
+            baseModel = updateNodeText(model, activeNodeId, editingText);
+          }
+          // Parse all lines as children of a temporary root
+          const parsed = textToModel("_", clipText);
+          const reId = (n: MindMapModel): MindMapModel => ({
+            id: `paste_${crypto.randomUUID().slice(0, 8)}`,
+            text: n.text,
+            children: n.children.map(reId),
+          });
+          const freshChildren = parsed.children.map(reId);
+          if (freshChildren.length === 0) return;
+          // Insert as siblings after active node
+          const newModel = cloneModel(baseModel);
+          const parentInfo = findParentAndIndex(newModel, targetId);
+          if (parentInfo) {
+            // Insert after active node in parent's children
+            parentInfo.parent.children.splice(
+              parentInfo.index + 1,
+              0,
+              ...freshChildren
+            );
+          } else {
+            // Active node is root — add as children of root
+            const root = findNode(newModel, targetId)!;
+            root.children.push(...freshChildren);
+          }
+          const lastChild = freshChildren[freshChildren.length - 1];
+          setModel(newModel);
+          setActiveNodeId(lastChild.id);
+          setEditingText(lastChild.text);
+          setCursorPos(lastChild.text.length);
+          setSelectionEnd(lastChild.text.length);
+          setSelAnchorNodeId(null);
+          setSelAnchorOffset(0);
+          if (noteId) saveNote(newModel);
+        });
+        return;
+      }
 
       // Undo / Redo
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
@@ -1030,8 +1143,25 @@ export default function MindmapEditor({
     cursorLayer.draw();
   }, [activeNodeId, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset]);
 
+  // Global Meta+P handler (when hidden input is not focused)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setCmdPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
+      <CommandPalette
+        commands={commands}
+        open={cmdPaletteOpen}
+        onClose={() => setCmdPaletteOpen(false)}
+      />
       <div className="flex items-center gap-2 px-4 py-2 border-b bg-gray-50">
         <input
           type="text"
