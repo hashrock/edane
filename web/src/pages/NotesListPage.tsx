@@ -9,19 +9,12 @@ type Note = {
   isPublic: boolean;
   createdAt: string;
   updatedAt: string;
-  userName?: string | null;
 };
 
 export default function NotesListPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [myNotes, setMyNotes] = useState<Note[]>([]);
-  const [publicNotes, setPublicNotes] = useState<Note[]>([]);
-
-  useEffect(() => {
-    api<Note[]>("/api/notes").then(setPublicNotes).catch(() => {});
-  }, []);
-
   useEffect(() => {
     if (user) {
       api<Note[]>("/api/notes/my").then(setMyNotes).catch(() => {});
@@ -49,7 +42,10 @@ export default function NotesListPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-4 md:py-8">
       <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 md:mb-8">
-        <h1 className="text-xl md:text-2xl font-bold">Mindmap Lite</h1>
+        <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+          <img src="/logo.svg" alt="" className="w-7 h-7 md:w-8 md:h-8" />
+          Edane
+        </h1>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {user ? (
             <div className="flex items-center gap-2 sm:gap-3">
@@ -141,34 +137,6 @@ export default function NotesListPage() {
         </section>
       )}
 
-      <section>
-        <h2 className="text-lg font-semibold mb-4">公開ノート</h2>
-        {publicNotes.length === 0 ? (
-          <p className="text-gray-500">まだ公開ノートがありません。</p>
-        ) : (
-          <div className="grid gap-3">
-            {publicNotes.map((note) => (
-              <a
-                key={note.id}
-                href={`/notes/${note.id}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate(`/notes/${note.id}`);
-                }}
-                className="block p-4 bg-white rounded-lg border hover:border-blue-400 transition"
-              >
-                <h3 className="font-medium">{note.title}</h3>
-                <div className="text-sm text-gray-500 mt-1">
-                  {note.userName && <span>by {note.userName}</span>}
-                  <span className="ml-2">
-                    {new Date(note.updatedAt).toLocaleDateString("ja-JP")}
-                  </span>
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

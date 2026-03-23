@@ -88,7 +88,7 @@ export function createDefaultModel(title?: string): MindMapModel {
   resetIdCounter();
   return {
     id: generateId(),
-    text: title || "Mindmap Lite",
+    text: title || "Edane",
     children: [
       {
         id: generateId(),

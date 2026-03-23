@@ -1,31 +1,12 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { notes, users } from "../db/schema";
+import { notes } from "../db/schema";
 import { desc, eq } from "drizzle-orm";
 import { getSession } from "../utils/session";
 import { encrypt, decrypt, isEncrypted } from "../utils/crypto";
 import type { Env } from "../global.d";
 
 const notesApi = new Hono<Env>();
-
-// GET /api/notes — list public notes
-notesApi.get("/", async (c) => {
-  const db = drizzle(c.env.DB);
-  const publicNotes = await db
-    .select({
-      id: notes.id,
-      title: notes.title,
-      isPublic: notes.isPublic,
-      createdAt: notes.createdAt,
-      updatedAt: notes.updatedAt,
-      userName: users.name,
-    })
-    .from(notes)
-    .leftJoin(users, eq(notes.userId, users.id))
-    .where(eq(notes.isPublic, true))
-    .orderBy(desc(notes.updatedAt));
-  return c.json(publicNotes);
-});
 
 // GET /api/notes/my — list current user's notes
 notesApi.get("/my", async (c) => {
