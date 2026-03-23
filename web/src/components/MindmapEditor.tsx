@@ -283,18 +283,16 @@ export default function MindmapEditor({
         undoManagerRef.current.handleTextChange(getEditorState());
       }
       const newText = e.target.value;
+      const pos = e.target.selectionStart ?? 0;
+      const end = e.target.selectionEnd ?? 0;
       setEditingText(newText);
+      setCursorPos(pos);
+      setSelectionEnd(end);
       setSelAnchorNodeId(null);
       setSelAnchorOffset(0);
       if (!isComposing && activeNodeId) {
         setModel((prev) => updateNodeText(prev, activeNodeId, newText));
       }
-      setTimeout(() => {
-        if (inputRef.current) {
-          setCursorPos(inputRef.current.selectionStart || 0);
-          setSelectionEnd(inputRef.current.selectionEnd || 0);
-        }
-      }, 0);
     },
     [isComposing, activeNodeId]
   );

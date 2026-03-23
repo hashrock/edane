@@ -156,11 +156,16 @@ export function splitNode(
   if (!node) return { model: cloned, newNodeId };
   const textAfter = node.text.substring(atPos);
   node.text = node.text.substring(0, atPos);
+
+  // When splitting at the start, children belong to the text portion (newNode)
   const newNode: MindMapModel = {
     id: newNodeId,
     text: textAfter,
-    children: [],
+    children: atPos === 0 ? node.children : [],
   };
+  if (atPos === 0) {
+    node.children = [];
+  }
 
   if (cloned.id === nodeId) {
     cloned.children.unshift(newNode);
