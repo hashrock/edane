@@ -57,4 +57,16 @@ app.use("*", async (c, next) => {
 app.route("/auth", auth);
 app.route("/api/notes", notesApi);
 
+// Serve static assets, with SPA fallback to index.html
+app.get("*", async (c) => {
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  if (res.status === 404) {
+    // SPA fallback: serve index.html for client-side routes
+    const url = new URL(c.req.url);
+    url.pathname = "/index.html";
+    return c.env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+  }
+  return res;
+});
+
 export default app;

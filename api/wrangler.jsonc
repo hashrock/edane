@@ -6,7 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "../web/dist",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "none"
   },
   "d1_databases": [
     {

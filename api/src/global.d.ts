@@ -8,6 +8,7 @@ declare module "hono" {
 
 type Env = {
   Bindings: {
+    ASSETS: Fetcher;
     DB: D1Database;
     GOOGLE_ID: string;
     GOOGLE_SECRET: string;
