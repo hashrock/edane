@@ -4,11 +4,10 @@
  */
 
 import type { MindMapModel } from "../domain/model";
-import { generateId, resetIdCounter } from "../domain/model";
+import { generateId } from "../domain/model";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
 export function textToModel(title: string, content: string): MindMapModel {
-  resetIdCounter();
   const root: MindMapModel = {
     id: generateId(),
     text: title,
@@ -58,8 +57,6 @@ export function parseContent(
       typeof parsed.id === "string" &&
       typeof parsed.text === "string"
     ) {
-      const maxId = findMaxNumericId(parsed);
-      resetIdCounter(maxId + 1);
       return parsed as MindMapModel;
     }
   } catch {
@@ -84,18 +81,7 @@ export function serializeModel(model: MindMapModel): string {
   return JSON.stringify(model);
 }
 
-function findMaxNumericId(model: MindMapModel): number {
-  let max = 0;
-  const match = model.id.match(/^node_(\d+)$/);
-  if (match) max = parseInt(match[1], 10);
-  for (const child of model.children) {
-    max = Math.max(max, findMaxNumericId(child));
-  }
-  return max;
-}
-
 export function createDefaultModel(title?: string): MindMapModel {
-  resetIdCounter();
   return {
     id: generateId(),
     text: title || "Edane",

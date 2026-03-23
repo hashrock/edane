@@ -6,6 +6,7 @@ import {
   findParentAndIndex,
   updateNodeText,
   cloneModel,
+  generateId,
 } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import { flattenToNodes } from "../application/nodeUtils";
@@ -346,12 +347,51 @@ export default function MindmapEditor({
         "_blank"
       );
     };
+    const pasteAsNodes = async () => {
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText.trim()) return;
+      const targetId = activeNodeId || model.id;
+      let baseModel = model;
+      if (activeNodeId) {
+        baseModel = updateNodeText(model, activeNodeId, editingText);
+      }
+      const parsed = textToModel("_", clipText);
+      const reId = (n: MindMapModel): MindMapModel => ({
+        id: generateId(),
+        text: n.text,
+        children: n.children.map(reId),
+      });
+      const freshChildren = parsed.children.map(reId);
+      if (freshChildren.length === 0) return;
+      const newModel = cloneModel(baseModel);
+      const parentInfo = findParentAndIndex(newModel, targetId);
+      if (parentInfo) {
+        parentInfo.parent.children.splice(
+          parentInfo.index + 1,
+          0,
+          ...freshChildren
+        );
+      } else {
+        const root = findNode(newModel, targetId)!;
+        root.children.push(...freshChildren);
+      }
+      const lastChild = freshChildren[freshChildren.length - 1];
+      setModel(newModel);
+      setActiveNodeId(lastChild.id);
+      setEditingText(lastChild.text);
+      setCursorPos(lastChild.text.length);
+      setSelectionEnd(lastChild.text.length);
+      setSelAnchorNodeId(null);
+      setSelAnchorOffset(0);
+      if (noteId) saveNote(newModel);
+    };
     return [
       { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
       { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
+      { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
     ];
-  }, [model, activeNodeId]);
+  }, [model, activeNodeId, editingText, noteId]);
 
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
@@ -362,66 +402,6 @@ export default function MindmapEditor({
       if ((e.metaKey || e.ctrlKey) && e.key === "p") {
         e.preventDefault();
         setCmdPaletteOpen(true);
-        return;
-      }
-
-      // Copy active branch as plain text
-      if ((e.metaKey || e.ctrlKey) && e.key === "c") {
-        if (activeNodeId) {
-          const node = findNode(model, activeNodeId);
-          if (node) {
-            e.preventDefault();
-            navigator.clipboard.writeText(modelToText(node));
-          }
-        }
-        return;
-      }
-
-      // Paste plain text as tree nodes (children of active node)
-      if ((e.metaKey || e.ctrlKey) && e.key === "v") {
-        e.preventDefault();
-        navigator.clipboard.readText().then((clipText) => {
-          if (!clipText.trim()) return;
-          const targetId = activeNodeId || model.id;
-          // Commit current editing text before modifying the model
-          let baseModel = model;
-          if (activeNodeId) {
-            baseModel = updateNodeText(model, activeNodeId, editingText);
-          }
-          // Parse all lines as children of a temporary root
-          const parsed = textToModel("_", clipText);
-          const reId = (n: MindMapModel): MindMapModel => ({
-            id: `paste_${crypto.randomUUID().slice(0, 8)}`,
-            text: n.text,
-            children: n.children.map(reId),
-          });
-          const freshChildren = parsed.children.map(reId);
-          if (freshChildren.length === 0) return;
-          // Insert as siblings after active node
-          const newModel = cloneModel(baseModel);
-          const parentInfo = findParentAndIndex(newModel, targetId);
-          if (parentInfo) {
-            // Insert after active node in parent's children
-            parentInfo.parent.children.splice(
-              parentInfo.index + 1,
-              0,
-              ...freshChildren
-            );
-          } else {
-            // Active node is root — add as children of root
-            const root = findNode(newModel, targetId)!;
-            root.children.push(...freshChildren);
-          }
-          const lastChild = freshChildren[freshChildren.length - 1];
-          setModel(newModel);
-          setActiveNodeId(lastChild.id);
-          setEditingText(lastChild.text);
-          setCursorPos(lastChild.text.length);
-          setSelectionEnd(lastChild.text.length);
-          setSelAnchorNodeId(null);
-          setSelAnchorOffset(0);
-          if (noteId) saveNote(newModel);
-        });
         return;
       }
 

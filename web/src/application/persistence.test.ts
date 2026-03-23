@@ -1,11 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { resetIdCounter } from "../domain/model";
+import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
 import { modelToText, textToModel } from "./persistence";
-
-beforeEach(() => {
-  resetIdCounter();
-});
 
 /** Strip IDs so we can compare tree structure and text only */
 function stripIds(model: MindMapModel): unknown {

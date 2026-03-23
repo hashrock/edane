@@ -12,14 +12,8 @@ export interface MindMapModel {
 
 // --- ID generation ---
 
-let _nextId = 0;
-
 export function generateId(): string {
-  return `node_${_nextId++}`;
-}
-
-export function resetIdCounter(start = 0): void {
-  _nextId = start;
+  return crypto.randomUUID();
 }
 
 // --- Tree queries ---
