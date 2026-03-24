@@ -3,3 +3,14 @@
 .konvajs-content {
   touch-action: none;
 }
+
+/* Electron transparent mode */
+.electron-mode,
+.electron-mode body {
+  background: transparent !important;
+}
+
+.electron-mode .electron-transparent {
+  background: transparent !important;
+  border-color: transparent !important;
+}

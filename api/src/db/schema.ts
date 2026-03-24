@@ -10,6 +10,18 @@ export const users = sqliteTable("users", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const apiTokens = sqliteTable("api_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  name: text("name").notNull().default("default"),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const notes = sqliteTable("notes", {
   id: text("id").primaryKey(),
   userId: text("user_id").references(() => users.id),

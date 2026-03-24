@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getSession } from "./utils/session";
+import { getUserByToken } from "./utils/apiToken";
 import { drizzle } from "drizzle-orm/d1";
 import { users } from "./db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "./routes/auth";
 import { notesApi } from "./routes/notes";
+import { tokensApi } from "./routes/tokens";
 import type { Env } from "./global.d";
 
 const DEV_USER = {
@@ -49,13 +51,15 @@ app.use("*", async (c, next) => {
     return;
   }
 
-  const user = await getSession(c);
+  // Try session cookie first, then Bearer token
+  const user = (await getSession(c)) || (await getUserByToken(c));
   c.set("user", user);
   await next();
 });
 
 app.route("/auth", auth);
 app.route("/api/notes", notesApi);
+app.route("/api/tokens", tokensApi);
 
 // Serve static assets, with SPA fallback to index.html
 app.get("*", async (c) => {

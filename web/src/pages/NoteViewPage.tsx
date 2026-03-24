@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import MindmapViewer from "../components/MindmapViewer";
+import { isElectron } from "../hooks/useElectron";
 
 type Note = {
   id: string;
@@ -31,17 +32,22 @@ export default function NoteViewPage() {
     );
   }
 
+  const electron = isElectron();
+
   if (!note) return null;
 
   return (
-    <div className="h-screen flex flex-col">
-      <header className="flex items-center gap-2 md:gap-4 px-3 md:px-4 py-2 border-b bg-white">
+    <div className={`h-screen flex flex-col ${electron ? "electron-transparent" : ""}`}>
+      <header
+        className="flex items-center gap-2 md:gap-4 px-3 md:px-4 py-2 border-b bg-white"
+        data-electron-interactive
+      >
         <Link to="/notes" className="text-blue-600 hover:underline text-sm">
           &larr; 一覧
         </Link>
         <h1 className="font-semibold text-sm md:text-base truncate">{note.title}</h1>
       </header>
-      <div className="flex-1">
+      <div className="flex-1" data-electron-interactive>
         <MindmapViewer initialContent={note.content} title={note.title} />
       </div>
     </div>
