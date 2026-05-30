@@ -20,7 +20,6 @@ import {
   dedentNode,
   splitNode,
   updateNodeText,
-  deleteNodeRange,
 } from "../domain/model";
 
 export interface EditorState {
@@ -63,8 +62,8 @@ export type EditorAction =
     }
   | { type: "setSelection"; cursorPos: number; selectionEnd: number }
   // --- range selection collapse ---
-  | { type: "collapseSelection" }
-  | { type: "collapseSelectionAndInsert"; char: string }
+  | { type: "deleteSelectedNodes" }
+  | { type: "deleteSelectedNodesAndInsert"; char: string }
   // --- pointer ---
   | {
       type: "activateNode";
@@ -418,48 +417,47 @@ export function editorReducer(
       };
     }
 
-    case "collapseSelection": {
-      const { model, activeNodeId, selAnchorNodeId, selAnchorOffset, cursorPos } =
-        state;
-      if (!activeNodeId || !selAnchorNodeId || selAnchorNodeId === activeNodeId)
-        return state;
-      const {
-        model: newModel,
-        cursorNodeId,
-        cursorOffset,
-      } = deleteNodeRange(
-        model,
-        selAnchorNodeId,
-        selAnchorOffset,
-        activeNodeId,
-        cursorPos
-      );
-      const node = findNode(newModel, cursorNodeId);
-      return {
-        ...state,
-        model: newModel,
-        activeNodeId: cursorNodeId,
-        editingText: node?.text ?? "",
-        cursorPos: cursorOffset,
-        selectionEnd: cursorOffset,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
-      };
+    case "deleteSelectedNodes": {
+      // Node selection deletes WHOLE nodes (not a partial text range). Each
+      // selected node is removed; any non-selected children are promoted by
+      // removeNode. The caret lands at the end of the node before the range.
+      const { model, activeNodeId, selAnchorNodeId } = state;
+      if (!activeNodeId || !selAnchorNodeId) return state;
+      const order = getFlatOrder(model);
+      const anchorIdx = order.indexOf(selAnchorNodeId);
+      const focusIdx = order.indexOf(activeNodeId);
+      if (anchorIdx < 0 || focusIdx < 0) return state;
+
+      const startIdx = Math.min(anchorIdx, focusIdx);
+      const endIdx = Math.max(anchorIdx, focusIdx);
+      const ids = order
+        .slice(startIdx, endIdx + 1)
+        .filter((id) => id !== model.id); // never delete the root
+      if (ids.length === 0) return state;
+
+      let newModel = model;
+      for (let i = ids.length - 1; i >= 0; i--) {
+        newModel = removeNode(newModel, ids[i]);
+      }
+      const prevId = startIdx > 0 ? order[startIdx - 1] : null;
+      const landId =
+        prevId && findNode(newModel, prevId) ? prevId : newModel.id;
+      return focusNodeState(state, newModel, landId);
     }
 
-    case "collapseSelectionAndInsert": {
-      // Collapse the multi-node range first, then insert the typed char.
-      const collapsed = editorReducer(state, { type: "collapseSelection" });
-      const nodeId = collapsed.activeNodeId;
-      if (!nodeId) return collapsed;
-      const node = findNode(collapsed.model, nodeId);
-      if (!node) return collapsed;
-      const cPos = collapsed.cursorPos;
+    case "deleteSelectedNodesAndInsert": {
+      // Replace a node selection: delete the nodes, then type the char at the
+      // caret of the landing node.
+      const deleted = editorReducer(state, { type: "deleteSelectedNodes" });
+      if (deleted === state || !deleted.activeNodeId) return deleted;
+      const node = findNode(deleted.model, deleted.activeNodeId);
+      if (!node) return deleted;
+      const cPos = deleted.cursorPos;
       const newText =
         node.text.substring(0, cPos) + action.char + node.text.substring(cPos);
       return {
-        ...collapsed,
-        model: updateNodeText(collapsed.model, nodeId, newText),
+        ...deleted,
+        model: updateNodeText(deleted.model, deleted.activeNodeId, newText),
         editingText: newText,
         cursorPos: cPos + 1,
         selectionEnd: cPos + 1,

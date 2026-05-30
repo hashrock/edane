@@ -173,49 +173,63 @@ describe("navigation", () => {
   });
 });
 
-describe("multi-node selection", () => {
-  it("collapseSelection deletes the range across nodes", () => {
-    const model = sampleModel();
-    // anchor in "A" at offset 1, focus in "b" at offset 0
-    const s: EditorState = {
+describe("node selection (whole-node)", () => {
+  // DFS order of sampleModel: root, a, a1, b
+  function nodeSelection(
+    model: MindMapModel,
+    anchorId: string,
+    focusId: string
+  ): EditorState {
+    return {
       model,
-      activeNodeId: "b",
-      editingText: "B",
+      activeNodeId: focusId,
+      editingText: findNode(model, focusId)?.text ?? "",
       cursorPos: 0,
       selectionEnd: 0,
-      selAnchorNodeId: "a",
-      selAnchorOffset: 1,
+      selAnchorNodeId: anchorId,
+      selAnchorOffset: 0,
     };
+  }
+
+  it("deleteSelectedNodes removes the whole selected node range", () => {
+    const model = sampleModel();
+    const s = nodeSelection(model, "a", "b");
     expect(isMultiNodeSelection(s)).toBe(true);
-    const next = editorReducer(s, { type: "collapseSelection" });
+    const next = editorReducer(s, { type: "deleteSelectedNodes" });
     expect(isMultiNodeSelection(next)).toBe(false);
     expect(next.selAnchorNodeId).toBeNull();
-    // The nodes between anchor and focus are removed
-    const order = getFlatOrder(next.model);
-    expect(order).not.toContain("a1");
-    expect(order).not.toContain("b");
+    expect(getFlatOrder(next.model)).toEqual(["root"]); // a, a1, b gone
+    expect(next.activeNodeId).toBe("root");
   });
 
-  it("collapseSelectionAndInsert collapses then inserts a char", () => {
+  it("keeps unselected nodes and lands the caret before the range", () => {
     const model = sampleModel();
-    const s: EditorState = {
-      model,
-      activeNodeId: "b",
-      editingText: "B",
-      cursorPos: 0,
-      selectionEnd: 0,
-      selAnchorNodeId: "a",
-      selAnchorOffset: 1,
-    };
-    const next = editorReducer(s, {
-      type: "collapseSelectionAndInsert",
+    const next = editorReducer(nodeSelection(model, "a1", "b"), {
+      type: "deleteSelectedNodes",
+    });
+    expect(getFlatOrder(next.model)).toEqual(["root", "a"]);
+    expect(next.activeNodeId).toBe("a");
+  });
+
+  it("never deletes the root node (promotes its children)", () => {
+    const model = sampleModel();
+    const next = editorReducer(nodeSelection(model, "root", "a"), {
+      type: "deleteSelectedNodes",
+    });
+    expect(findNode(next.model, "root")).not.toBeNull();
+    expect(findNode(next.model, "a")).toBeNull();
+    expect(findNode(next.model, "a1")).not.toBeNull(); // promoted to root
+  });
+
+  it("deleteSelectedNodesAndInsert types at the landing caret", () => {
+    const model = sampleModel();
+    const next = editorReducer(nodeSelection(model, "a", "b"), {
+      type: "deleteSelectedNodesAndInsert",
       char: "X",
     });
-    // collapse merges "A"(before offset 1) + "B"(after offset 0) → "AB",
-    // then "X" is inserted at the cursor (offset 1) → "AXB"
-    const node = findNode(next.model, next.activeNodeId!)!;
-    expect(node.text).toBe("AXB");
-    expect(next.cursorPos).toBe(2);
+    expect(next.activeNodeId).toBe("root");
+    expect(findNode(next.model, "root")!.text).toBe("RootX");
+    expect(next.cursorPos).toBe(5);
   });
 });
 

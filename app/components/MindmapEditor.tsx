@@ -364,7 +364,7 @@ export default function MindmapEditor({
       if (isMultiNodeSelection(st)) {
         e.preventDefault();
         e.clipboardData.setData("text/plain", selectionNodesToText(st));
-        dispatch({ type: "collapseSelection" }, "delete-range");
+        dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
       }
       // Otherwise: native cut of the in-node text selection.
     },
@@ -383,7 +383,7 @@ export default function MindmapEditor({
       if (!text.includes("\n") && !multi) return;
 
       e.preventDefault();
-      if (multi) dispatch({ type: "collapseSelection" }, "delete-range");
+      if (multi) dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
 
       if (text.includes("\n")) {
         pasteTextAsNodes(text);
@@ -491,7 +491,7 @@ export default function MindmapEditor({
         return;
       }
 
-      // If multi-node selection, collapse it before most actions
+      // Node selection: act on WHOLE nodes (delete / replace).
       if (isMultiNodeSelection(state)) {
         if (
           e.key === "Backspace" ||
@@ -499,14 +499,14 @@ export default function MindmapEditor({
           e.key === "Enter"
         ) {
           e.preventDefault();
-          dispatch({ type: "collapseSelection" }, "delete-range");
+          dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
           return;
         }
         if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();
           dispatch(
-            { type: "collapseSelectionAndInsert", char: e.key },
-            "delete-range"
+            { type: "deleteSelectedNodesAndInsert", char: e.key },
+            "delete-nodes"
           );
           return;
         }
@@ -1045,57 +1045,42 @@ export default function MindmapEditor({
       selAnchorNodeId !== null && selAnchorNodeId !== activeNodeId;
 
     if (isMulti) {
-      // Multi-node selection highlight
+      // Node selection: highlight each selected node's WHOLE rectangle with a
+      // filled outline (distinct from the in-node text-selection highlight).
       const order = getFlatOrder(modelRef.current);
       const anchorIdx = order.indexOf(selAnchorNodeId);
       const focusIdx = order.indexOf(activeNodeId);
       const startIdx = Math.min(anchorIdx, focusIdx);
       const endIdx = Math.max(anchorIdx, focusIdx);
 
-      // Determine start/end offsets based on direction
-      const isForward = anchorIdx <= focusIdx;
-      const startNodeId = isForward ? selAnchorNodeId : activeNodeId;
-      const startOffset = isForward ? selAnchorOffset : cursorPos;
-      const endNodeId = isForward ? activeNodeId : selAnchorNodeId;
-      const endOffset = isForward ? cursorPos : selAnchorOffset;
-
       for (let i = startIdx; i <= endIdx; i++) {
         const nodeId = order[i];
         const node = nodes.find((n) => n.id === nodeId);
         if (!node) continue;
 
-        const nodeOffsets = cursorOffsetsRef.current.get(nodeId);
         const isRoot = nodes.indexOf(node) === 0;
-        const modelNode = findNode(modelRef.current, nodeId);
-        const textLen = modelNode?.text.length || 0;
+        const offsets = cursorOffsetsRef.current.get(nodeId);
+        const textWidth = offsets
+          ? offsets[offsets.length - 1]
+          : measureEmptyWidth();
+        const rectWidth = Math.max(
+          textWidth + nodePadding * 2,
+          isRoot ? 100 : 80
+        );
+        const rectHeight = 32;
 
-        let hlStart = 0;
-        let hlEnd = textLen;
-
-        if (nodeId === startNodeId) {
-          hlStart = startOffset;
-        }
-        if (nodeId === endNodeId) {
-          hlEnd = endOffset;
-        }
-
-        if (hlStart < hlEnd && nodeOffsets) {
-          const startX = nodeOffsets[hlStart] || 0;
-          const endX = nodeOffsets[hlEnd] || 0;
-          if (endX > startX) {
-            const highlight = new Konva.Rect({
-              x: node.x + nodePadding + startX,
-              y: node.y - 10,
-              width: endX - startX,
-              height: 20,
-              fill: isRoot
-                ? "rgba(255, 255, 255, 0.3)"
-                : "rgba(16, 185, 129, 0.18)",
-              listening: false,
-            });
-            cursorLayer.add(highlight);
-          }
-        }
+        const sel = new Konva.Rect({
+          x: node.x,
+          y: node.y - rectHeight / 2,
+          width: rectWidth,
+          height: rectHeight,
+          cornerRadius: 12,
+          fill: "rgba(16, 185, 129, 0.16)",
+          stroke: "#10b981",
+          strokeWidth: 1.5,
+          listening: false,
+        });
+        cursorLayer.add(sel);
       }
     } else {
       // Single-node selection or cursor
