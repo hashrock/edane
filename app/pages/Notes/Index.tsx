@@ -36,7 +36,7 @@ export default function NotesIndex({
   return (
     <div className="max-w-3xl mx-auto px-6 py-7 md:py-9">
       <Head title="Edane" />
-      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
+      <header className="anim-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
         <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
           <img src="/logo.svg" alt="" className="w-7 h-7" />
           Edane
@@ -96,7 +96,8 @@ export default function NotesIndex({
               {notes.map((note, index) => (
                 <div
                   key={note.id}
-                  className={`group flex items-center transition-colors hover:bg-slate-50 ${index !== 0 ? "border-t border-slate-100" : ""}`}
+                  style={{ animationDelay: `${index * 40}ms` }}
+                  className={`anim-item group flex items-center transition-colors hover:bg-slate-50 ${index !== 0 ? "border-t border-slate-100" : ""}`}
                 >
                   <Link
                     href={`/notes/${note.id}/edit`}
