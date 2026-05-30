@@ -109,9 +109,10 @@ describe("MindmapEditor browser performance", () => {
       const mv = api().getRedrawStats();
       const perMove = mv.redrawTotalMs / Math.max(1, mv.redrawCount);
 
+      const insDraw = ins.redrawDrawMs / Math.max(1, ins.redrawCount);
       const summary =
         `[perf][${SIZE} nodes] redraw — char input: ${perInsert.toFixed(2)} ms/keystroke` +
-        ` | cursor move: ${perMove.toFixed(2)} ms/move`;
+        ` (draw ${insDraw.toFixed(2)} ms) | cursor move: ${perMove.toFixed(2)} ms/move`;
       // Surfaced in the reporter (browser console isn't forwarded to the terminal).
       await annotate(summary, "perf");
 

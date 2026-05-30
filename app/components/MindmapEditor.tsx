@@ -21,11 +21,64 @@ import {
 } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
 
+// --- Text measurement (cached) ---
+// The canvas redraw needs each node's width and per-character cursor offsets.
+// Measuring via Konva.Text objects is very expensive (one object per character,
+// for every node, on every redraw). Instead we measure with a single shared 2D
+// context and cache offsets per text string — only the actively edited node's
+// text changes per keystroke, so every other node is an O(1) cache hit.
+const NODE_FONT = "14px sans-serif";
+const NODE_FONT_ITALIC = "italic 14px sans-serif";
+let _measureCtx: CanvasRenderingContext2D | null | undefined;
+const _offsetCache = new Map<string, number[]>();
+let _emptyWidth = -1;
+
+function getMeasureCtx(): CanvasRenderingContext2D | null {
+  if (_measureCtx === undefined) {
+    _measureCtx = document.createElement("canvas").getContext("2d");
+    if (_measureCtx) _measureCtx.font = NODE_FONT;
+  }
+  return _measureCtx;
+}
+
+/** Cumulative prefix widths for `text`: [0, w(c0), w(c0c1), …, fullWidth]. */
+function measureOffsets(text: string): number[] {
+  const cached = _offsetCache.get(text);
+  if (cached) return cached;
+  const ctx = getMeasureCtx();
+  const offsets: number[] = [0];
+  if (ctx) {
+    for (let i = 0; i < text.length; i++) {
+      offsets.push(ctx.measureText(text.slice(0, i + 1)).width);
+    }
+  } else {
+    for (let i = 0; i < text.length; i++) offsets.push((i + 1) * 8);
+  }
+  if (_offsetCache.size > 4000) _offsetCache.clear();
+  _offsetCache.set(text, offsets);
+  return offsets;
+}
+
+/** Width of the italic "empty" placeholder (measured once). */
+function measureEmptyWidth(): number {
+  if (_emptyWidth >= 0) return _emptyWidth;
+  const ctx = getMeasureCtx();
+  if (ctx) {
+    ctx.font = NODE_FONT_ITALIC;
+    _emptyWidth = ctx.measureText("empty").width;
+    ctx.font = NODE_FONT;
+  } else {
+    _emptyWidth = 40;
+  }
+  return _emptyWidth;
+}
+
 /** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
 export interface RedrawStats {
   redrawCount: number;
   redrawTotalMs: number;
   redrawLastMs: number;
+  redrawDrawMs: number;
 }
 
 export interface MindmapTestApi {
@@ -111,7 +164,12 @@ export default function MindmapEditor({
   const undoManagerRef = useRef(new UndoManager());
   const isComposingRef = useRef(false);
   // Non-production perf counters for the (expensive) main canvas redraw.
-  const perfRef = useRef({ redrawCount: 0, redrawTotalMs: 0, redrawLastMs: 0 });
+  const perfRef = useRef({
+    redrawCount: 0,
+    redrawTotalMs: 0,
+    redrawLastMs: 0,
+    redrawDrawMs: 0,
+  });
   const modelRef = useRef(model);
   modelRef.current = model;
 
@@ -701,7 +759,7 @@ export default function MindmapEditor({
     const nodeMap: Record<string, MindMapNode> = {};
     nodes.forEach((n) => (nodeMap[n.id] = n));
 
-    // Pre-calculate text widths and character offsets
+    // Pre-calculate text widths and character offsets (cached, see top of file)
     const textWidths = new Map<string, number>();
     const cursorOffsets = new Map<string, number[]>();
     const nodePadding = 20;
@@ -709,29 +767,13 @@ export default function MindmapEditor({
     nodes.forEach((node) => {
       // For active node during editing, use editingText
       const displayRaw = activeNodeId === node.id ? editingText : node.text;
-      const isEmpty = displayRaw === "";
-      const displayText = isEmpty ? "empty" : displayRaw;
-
-      const t = new Konva.Text({
-        text: displayText,
-        fontSize: 14,
-        fontFamily: "sans-serif",
-        fontStyle: isEmpty ? "italic" : "normal",
-      });
-      textWidths.set(node.id, t.width());
-
-      if (displayRaw.length > 0) {
-        const offsets: number[] = [0];
-        for (let i = 0; i < displayRaw.length; i++) {
-          const partial = new Konva.Text({
-            text: displayRaw.substring(0, i + 1),
-            fontSize: 14,
-            fontFamily: "sans-serif",
-          });
-          offsets.push(partial.width());
-        }
-        cursorOffsets.set(node.id, offsets);
+      if (displayRaw === "") {
+        textWidths.set(node.id, measureEmptyWidth());
+        return;
       }
+      const offsets = measureOffsets(displayRaw);
+      textWidths.set(node.id, offsets[offsets.length - 1]);
+      cursorOffsets.set(node.id, offsets);
     });
     cursorOffsetsRef.current = cursorOffsets;
 
@@ -793,10 +835,14 @@ export default function MindmapEditor({
             ? "#0f172a"
             : "#e2e8f0",
         strokeWidth: isActive ? 2 : 1,
-        shadowColor: isRoot ? "#0f172a" : "#0f172a",
-        shadowBlur: isRoot ? 16 : 3,
-        shadowOpacity: isRoot ? 0.18 : 0.06,
-        shadowOffsetY: isRoot ? 6 : 1,
+        // Shadow blur is the dominant raster cost; keep the soft shadow only on
+        // the single root node and drop the near-invisible one on every other.
+        shadowColor: "#0f172a",
+        shadowBlur: isRoot ? 16 : 0,
+        shadowOpacity: isRoot ? 0.18 : 0,
+        shadowOffsetY: isRoot ? 6 : 0,
+        // Skip Konva's extra offscreen buffer for fill+stroke shapes.
+        perfectDrawEnabled: false,
       });
       group.add(rect);
 
@@ -871,13 +917,15 @@ export default function MindmapEditor({
       layer.add(group);
     });
 
+    const drawStart = import.meta.env.PROD ? 0 : performance.now();
     layer.draw();
 
     if (!import.meta.env.PROD) {
-      const dt = performance.now() - perfStart;
+      const now = performance.now();
       perfRef.current.redrawCount += 1;
-      perfRef.current.redrawTotalMs += dt;
-      perfRef.current.redrawLastMs = dt;
+      perfRef.current.redrawTotalMs += now - perfStart;
+      perfRef.current.redrawLastMs = now - perfStart;
+      perfRef.current.redrawDrawMs += now - drawStart;
     }
   }, [nodes, activeNodeId, editingText, konvaReady, dispatch]);
 
@@ -1024,6 +1072,7 @@ export default function MindmapEditor({
           redrawCount: 0,
           redrawTotalMs: 0,
           redrawLastMs: 0,
+          redrawDrawMs: 0,
         };
       },
     };
