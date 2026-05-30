@@ -1047,6 +1047,9 @@ export default function MindmapEditor({
                 if (noteId) saveNote(model);
               }}
               onKeyDown={(e) => {
+                // Enter/Escape while an IME composition is active confirm or
+                // cancel the conversion — don't end title editing then.
+                if (e.nativeEvent.isComposing) return;
                 if (e.key === "Enter" || e.key === "Escape") {
                   e.currentTarget.blur();
                 }
