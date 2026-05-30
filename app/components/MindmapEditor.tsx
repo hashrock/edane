@@ -2,13 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "@inertiajs/react";
 import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
-import {
-  findNode,
-  findParentAndIndex,
-  updateNodeText,
-  cloneModel,
-  generateId,
-} from "../domain/model";
+import { findNode, getFlatOrder, generateId } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import { flattenToNodes } from "../application/nodeUtils";
 import {
@@ -20,25 +14,12 @@ import {
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import {
-  handleEnter,
-  handleTab,
-  handleBackspaceAtStart,
-  handleDeleteAtEnd,
-  handleArrowUp,
-  handleArrowDown,
-  handleCmdLeft,
-  handleCmdRight,
-  handleCmdShiftLeft,
-  handleCmdShiftRight,
-  handleArrowLeftEdge,
-  handleArrowRightEdge,
+  editorReducer,
   isMultiNodeSelection,
-  collapseMultiNodeSelection,
   type EditorState,
-  type StateUpdate,
-} from "../application/editorActions";
+  type EditorAction,
+} from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
-import { getFlatOrder } from "../domain/model";
 
 interface Props {
   noteId?: string;
@@ -53,26 +34,41 @@ export default function MindmapEditor({
   initialTitle,
   initialIsPublic,
 }: Props) {
-  // Model state
-  const [model, setModel] = useState<MindMapModel>(() =>
-    parseContent(initialContent, initialTitle)
-  );
+  // --- Single source of truth: the full editor state ---
+  const [state, setStateRaw] = useState<EditorState>(() => ({
+    model: parseContent(initialContent, initialTitle),
+    activeNodeId: null,
+    editingText: "",
+    cursorPos: 0,
+    selectionEnd: 0,
+    selAnchorNodeId: null,
+    selAnchorOffset: 0,
+  }));
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Derived views of the editor state (keeps downstream code/deps unchanged)
+  const {
+    model,
+    activeNodeId,
+    editingText,
+    cursorPos,
+    selectionEnd,
+    selAnchorNodeId,
+    selAnchorOffset,
+  } = state;
+
+  // --- UI-only state (not part of the editing document) ---
   const [isPublic, setIsPublic] = useState(initialIsPublic || false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
-
-  // Editing state
-  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState("");
-  const [cursorPos, setCursorPos] = useState(0);
-  const [selectionEnd, setSelectionEnd] = useState(0);
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
-  // Multi-node selection anchor (null = no multi-node selection)
-  const [selAnchorNodeId, setSelAnchorNodeId] = useState<string | null>(null);
-  const [selAnchorOffset, setSelAnchorOffset] = useState(0);
   const [konvaReady, setKonvaReady] = useState(false);
-  const [inputPos, setInputPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [inputPos, setInputPos] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -91,8 +87,25 @@ export default function MindmapEditor({
   } | null>(null);
   const wasDraggingRef = useRef(false);
   const undoManagerRef = useRef(new UndoManager());
+  const isComposingRef = useRef(false);
   const modelRef = useRef(model);
   modelRef.current = model;
+
+  // --- Central dispatch: state -> action -> newState ---
+  // Pure reducer computes the complete next state; a no-op returns the same
+  // reference so we skip re-render and undo bookkeeping.
+  const dispatch = useCallback(
+    (action: EditorAction, undoType?: string): EditorState => {
+      const prev = stateRef.current;
+      const next = editorReducer(prev, action);
+      if (next === prev) return prev;
+      if (undoType) undoManagerRef.current.push(undoType, prev, next);
+      stateRef.current = next;
+      setStateRaw(next);
+      return next;
+    },
+    []
+  );
 
   // Derived: flat nodes with layout
   const nodes = useMemo(() => {
@@ -152,183 +165,78 @@ export default function MindmapEditor({
     return () => clearInterval(interval);
   }, [activeNodeId, cursorPos, editingText]);
 
-  // --- Build current editor state for action functions ---
-  const getEditorState = useCallback(
-    (): EditorState => ({
-      model: modelRef.current,
-      activeNodeId,
-      editingText,
-      cursorPos,
-      selectionEnd,
-      selAnchorNodeId,
-      selAnchorOffset,
-    }),
-    [activeNodeId, editingText, cursorPos, selectionEnd, selAnchorNodeId, selAnchorOffset]
-  );
-
-  // --- Undo manager setup ---
+  // --- Undo manager: commit pending text using the latest state ---
   useEffect(() => {
-    undoManagerRef.current.setCommitCallback(() => getEditorState());
-  }, [getEditorState]);
-
-  /** Restore full editor state (for undo/redo) */
-  const applyFullState = useCallback((state: EditorState) => {
-    setModel(state.model);
-    setActiveNodeId(state.activeNodeId);
-    setEditingText(state.editingText);
-    setCursorPos(state.cursorPos);
-    setSelectionEnd(state.selectionEnd);
-    setSelAnchorNodeId(state.selAnchorNodeId);
-    setSelAnchorOffset(state.selAnchorOffset);
-    if (inputRef.current) {
-      inputRef.current.value = state.editingText;
-      const pos = state.cursorPos;
-      const sel = state.selectionEnd;
-      inputRef.current.setSelectionRange(pos, sel);
-      if (state.activeNodeId) inputRef.current.focus();
-    }
+    undoManagerRef.current.setCommitCallback(() => stateRef.current);
   }, []);
 
-  /** Push a structural command to the undo stack */
-  const pushUndoable = useCallback(
-    (type: string, stateBefore: EditorState, stateAfter: EditorState) => {
-      undoManagerRef.current.push(type, stateBefore, stateAfter);
-    },
-    []
-  );
-
-  // --- Apply state update from an action ---
-  const applyUpdate = useCallback(
-    (update: StateUpdate) => {
-      if (!update) return false;
-      if (update.model !== undefined) setModel(update.model);
-      // For node changes, resolve the text from the new model
-      const targetNodeId =
-        update.activeNodeId !== undefined
-          ? update.activeNodeId
-          : activeNodeId;
-      if (update.activeNodeId !== undefined) {
-        setActiveNodeId(update.activeNodeId);
-        if (update.editingText === undefined && update.activeNodeId) {
-          // Changing active node without explicit text: resolve from model
-          const m = update.model ?? modelRef.current;
-          const node = findNode(m, update.activeNodeId);
-          const text = node?.text || "";
-          setEditingText(text);
-          // Default cursor to end of text
-          const pos = update.cursorPos ?? text.length;
-          setCursorPos(pos);
-          setSelectionEnd(update.selectionEnd ?? pos);
-          if (inputRef.current) {
-            inputRef.current.value = text;
-            inputRef.current.setSelectionRange(pos, update.selectionEnd ?? pos);
-            inputRef.current.focus();
-          }
-          return true;
-        }
-      }
-      if (update.editingText !== undefined) setEditingText(update.editingText);
-      if (update.cursorPos !== undefined) setCursorPos(update.cursorPos);
-      if (update.selectionEnd !== undefined)
-        setSelectionEnd(update.selectionEnd);
-      if (update.selAnchorNodeId !== undefined)
-        setSelAnchorNodeId(update.selAnchorNodeId);
-      if (update.selAnchorOffset !== undefined)
-        setSelAnchorOffset(update.selAnchorOffset);
-      // Sync hidden input
-      if (
-        update.editingText !== undefined ||
-        update.cursorPos !== undefined ||
-        update.activeNodeId !== undefined
-      ) {
-        const text =
-          update.editingText ?? editingText;
-        const pos = update.cursorPos ?? cursorPos;
-        const sel = update.selectionEnd ?? pos;
-        if (inputRef.current) {
-          inputRef.current.value = text;
-          inputRef.current.setSelectionRange(pos, sel);
-          inputRef.current.focus();
-        }
-      }
-      return true;
-    },
-    [activeNodeId, editingText, cursorPos]
-  );
-
-  // --- Node activation (for click/dblclick) ---
-  const activateNode = useCallback(
-    (nodeId: string, cursor?: number) => {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      const modelNode = findNode(modelRef.current, nodeId);
-      const text = modelNode?.text || "";
-      const pos = cursor ?? text.length;
-      applyUpdate({
-        activeNodeId: nodeId,
-        editingText: text,
-        cursorPos: pos,
-        selectionEnd: pos,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
-      });
-    },
-    [nodes, applyUpdate]
-  );
+  // --- Sync the hidden input to the editor state (single place) ---
+  // Replaces the scattered value/setSelectionRange/focus calls.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || isComposingRef.current) return;
+    if (el.value !== editingText) el.value = editingText;
+    el.setSelectionRange(cursorPos, selectionEnd);
+    if (activeNodeId) el.focus();
+  }, [editingText, cursorPos, selectionEnd, activeNodeId]);
 
   // --- Input handling ---
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      // Record state before first keystroke of a batch
-      if (!undoManagerRef.current.hasPendingText()) {
-        undoManagerRef.current.handleTextChange(getEditorState());
-      } else {
-        undoManagerRef.current.handleTextChange(getEditorState());
-      }
-      const newText = e.target.value;
-      const pos = e.target.selectionStart ?? 0;
-      const end = e.target.selectionEnd ?? 0;
-      setEditingText(newText);
-      setCursorPos(pos);
-      setSelectionEnd(end);
-      setSelAnchorNodeId(null);
-      setSelAnchorOffset(0);
-      if (!isComposing && activeNodeId) {
-        setModel((prev) => updateNodeText(prev, activeNodeId, newText));
-      }
+      const el = e.target;
+      const newText = el.value;
+      const pos = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? 0;
+      // Snapshot the pre-typing state once per debounce batch
+      undoManagerRef.current.handleTextChange(stateRef.current);
+      dispatch({
+        type: "typeText",
+        text: newText,
+        cursorPos: pos,
+        selectionEnd: end,
+        // Don't commit to the model mid-IME-composition
+        commitModel: !isComposingRef.current,
+      });
     },
-    [isComposing, activeNodeId]
+    [dispatch]
   );
 
   const handleCompositionEnd = useCallback(() => {
     setIsComposing(false);
-    if (activeNodeId && inputRef.current) {
-      const finalText = inputRef.current.value;
-      setEditingText(finalText);
-      setModel((prev) => updateNodeText(prev, activeNodeId, finalText));
-      setTimeout(() => {
-        if (inputRef.current) {
-          setCursorPos(inputRef.current.selectionStart || 0);
-          setSelectionEnd(inputRef.current.selectionEnd || 0);
-        }
-      }, 0);
-    }
-  }, [activeNodeId]);
+    isComposingRef.current = false;
+    const el = inputRef.current;
+    if (!el || !stateRef.current.activeNodeId) return;
+    const finalText = el.value;
+    const pos = el.selectionStart ?? finalText.length;
+    const end = el.selectionEnd ?? pos;
+    undoManagerRef.current.handleTextChange(stateRef.current);
+    dispatch({
+      type: "typeText",
+      text: finalText,
+      cursorPos: pos,
+      selectionEnd: end,
+      commitModel: true,
+    });
+  }, [dispatch]);
 
   const handleSelect = useCallback(() => {
-    if (inputRef.current) {
-      setCursorPos(inputRef.current.selectionStart || 0);
-      setSelectionEnd(inputRef.current.selectionEnd || 0);
-    }
-  }, []);
+    const el = inputRef.current;
+    if (!el) return;
+    dispatch({
+      type: "setSelection",
+      cursorPos: el.selectionStart || 0,
+      selectionEnd: el.selectionEnd || 0,
+    });
+  }, [dispatch]);
 
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
     const copyAllText = () => {
-      const text = modelToText(model);
+      const text = modelToText(stateRef.current.model);
       navigator.clipboard.writeText(text);
     };
     const copyBranch = () => {
+      const { model, activeNodeId } = stateRef.current;
       if (!activeNodeId) {
         copyAllText();
         return;
@@ -339,6 +247,7 @@ export default function MindmapEditor({
       }
     };
     const sendToChatGPT = () => {
+      const { model, activeNodeId } = stateRef.current;
       const text = activeNodeId
         ? modelToText(findNode(model, activeNodeId) || model)
         : modelToText(model);
@@ -351,11 +260,8 @@ export default function MindmapEditor({
     const pasteAsNodes = async () => {
       const clipText = await navigator.clipboard.readText();
       if (!clipText.trim()) return;
-      const targetId = activeNodeId || model.id;
-      let baseModel = model;
-      if (activeNodeId) {
-        baseModel = updateNodeText(model, activeNodeId, editingText);
-      }
+      const cur = stateRef.current;
+      const targetId = cur.activeNodeId || cur.model.id;
       const parsed = textToModel("_", clipText);
       const reId = (n: MindMapModel): MindMapModel => ({
         id: generateId(),
@@ -364,27 +270,11 @@ export default function MindmapEditor({
       });
       const freshChildren = parsed.children.map(reId);
       if (freshChildren.length === 0) return;
-      const newModel = cloneModel(baseModel);
-      const parentInfo = findParentAndIndex(newModel, targetId);
-      if (parentInfo) {
-        parentInfo.parent.children.splice(
-          parentInfo.index + 1,
-          0,
-          ...freshChildren
-        );
-      } else {
-        const root = findNode(newModel, targetId)!;
-        root.children.push(...freshChildren);
-      }
-      const lastChild = freshChildren[freshChildren.length - 1];
-      setModel(newModel);
-      setActiveNodeId(lastChild.id);
-      setEditingText(lastChild.text);
-      setCursorPos(lastChild.text.length);
-      setSelectionEnd(lastChild.text.length);
-      setSelAnchorNodeId(null);
-      setSelAnchorOffset(0);
-      if (noteId) saveNote(newModel);
+      const next = dispatch(
+        { type: "insertNodes", targetId, nodes: freshChildren },
+        "paste"
+      );
+      if (noteId) saveNote(next.model);
     };
     return [
       { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
@@ -392,7 +282,7 @@ export default function MindmapEditor({
       { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
     ];
-  }, [model, activeNodeId, editingText, noteId]);
+  }, [dispatch, noteId, saveNote]);
 
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
@@ -409,19 +299,16 @@ export default function MindmapEditor({
       // Undo / Redo
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
         e.preventDefault();
-        if (e.shiftKey) {
-          const state = undoManagerRef.current.redo();
-          if (state) applyFullState(state);
-        } else {
-          const state = undoManagerRef.current.undo();
-          if (state) applyFullState(state);
-        }
+        const restored = e.shiftKey
+          ? undoManagerRef.current.redo()
+          : undoManagerRef.current.undo();
+        if (restored) dispatch({ type: "replace", state: restored });
         return;
       }
 
-      if (!activeNodeId) return;
+      const state = stateRef.current;
+      if (!state.activeNodeId) return;
 
-      const state = getEditorState();
       const pos = inputRef.current?.selectionStart || 0;
       const selEnd = inputRef.current?.selectionEnd || 0;
 
@@ -430,115 +317,81 @@ export default function MindmapEditor({
         if (
           e.key === "Backspace" ||
           e.key === "Delete" ||
-          e.key === "Enter" ||
-          (e.key.length === 1 && !e.metaKey && !e.ctrlKey)
+          e.key === "Enter"
         ) {
           e.preventDefault();
-          undoManagerRef.current.commitPendingText();
-          const collapsed = collapseMultiNodeSelection(state);
-          if (collapsed) {
-            applyUpdate(collapsed);
-            pushUndoable("delete-range", state, { ...state, ...collapsed });
-            // For single-char typing, insert the char after collapse
-            if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
-              // After collapse, insert the typed character
-              setTimeout(() => {
-                const m = modelRef.current;
-                const nodeId = collapsed.activeNodeId;
-                if (!nodeId) return;
-                const node = findNode(m, nodeId);
-                if (!node) return;
-                const cPos = collapsed.cursorPos ?? 0;
-                const newText =
-                  node.text.substring(0, cPos) +
-                  e.key +
-                  node.text.substring(cPos);
-                setModel(updateNodeText(m, nodeId, newText));
-                setEditingText(newText);
-                setCursorPos(cPos + 1);
-                setSelectionEnd(cPos + 1);
-                if (inputRef.current) {
-                  inputRef.current.value = newText;
-                  inputRef.current.setSelectionRange(cPos + 1, cPos + 1);
-                }
-              }, 0);
-            }
-          }
+          dispatch({ type: "collapseSelection" }, "delete-range");
           return;
         }
-        // Arrow keys / Escape: clear multi-node selection
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          dispatch(
+            { type: "collapseSelectionAndInsert", char: e.key },
+            "delete-range"
+          );
+          return;
+        }
+        // Arrow keys / Escape: clear the multi-node selection, then fall through
         if (e.key.startsWith("Arrow") || e.key === "Escape") {
-          setSelAnchorNodeId(null);
-          setSelAnchorOffset(0);
-          // Fall through to normal handling
+          dispatch({
+            type: "activateNode",
+            nodeId: state.activeNodeId,
+            cursorPos: state.cursorPos,
+            selectionEnd: state.selectionEnd,
+            anchorNodeId: null,
+            anchorOffset: 0,
+          });
         }
       }
 
       if (e.key === "Enter") {
         e.preventDefault();
-        undoManagerRef.current.commitPendingText();
-        const update = handleEnter(state, pos);
-        if (update) {
-          applyUpdate(update);
-          pushUndoable("enter", state, { ...state, ...update });
-        }
+        dispatch({ type: "enter", pos }, "enter");
         return;
       }
 
       if (e.key === "Tab") {
         e.preventDefault();
-        undoManagerRef.current.commitPendingText();
-        const update = handleTab(state, e.shiftKey);
-        if (update) {
-          applyUpdate(update);
-          pushUndoable("indent", state, { ...state, ...update });
-        }
+        dispatch({ type: "tab", shift: e.shiftKey }, "indent");
         return;
       }
 
       if (e.key === "Backspace" && pos === 0 && pos === selEnd) {
         e.preventDefault();
-        undoManagerRef.current.commitPendingText();
-        const update = handleBackspaceAtStart(state);
-        if (update) {
-          applyUpdate(update);
-          pushUndoable("backspace", state, { ...state, ...update });
-        }
+        dispatch({ type: "backspaceAtStart" }, "backspace");
         return;
       }
 
       if (e.key === "Delete" && pos === selEnd) {
-        const update = handleDeleteAtEnd(state, pos);
-        if (update) {
+        const prev = stateRef.current;
+        const next = dispatch({ type: "deleteAtEnd", pos }, "delete");
+        if (next !== prev) {
           e.preventDefault();
-          undoManagerRef.current.commitPendingText();
-          applyUpdate(update);
-          pushUndoable("delete", state, { ...state, ...update });
           return;
         }
       }
 
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        applyUpdate(handleArrowUp(state));
+        dispatch({ type: "moveUp" });
         return;
       }
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        applyUpdate(handleArrowDown(state));
+        dispatch({ type: "moveDown" });
         return;
       }
 
       if (e.key === "ArrowLeft") {
         if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
           e.preventDefault();
-          applyUpdate(handleCmdShiftLeft(state, pos, selEnd));
+          dispatch({ type: "cmdShiftLeft", pos, selEnd });
           return;
         }
         if (e.metaKey || e.ctrlKey) {
           e.preventDefault();
-          applyUpdate(handleCmdLeft(state, pos));
+          dispatch({ type: "cmdLeft", pos });
           return;
         }
         if (e.shiftKey) {
@@ -547,7 +400,7 @@ export default function MindmapEditor({
         }
         if (pos === 0 && pos === selEnd) {
           e.preventDefault();
-          applyUpdate(handleArrowLeftEdge(state));
+          dispatch({ type: "arrowLeftEdge" });
           return;
         }
       }
@@ -555,47 +408,42 @@ export default function MindmapEditor({
       if (e.key === "ArrowRight") {
         if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
           e.preventDefault();
-          applyUpdate(handleCmdShiftRight(state, pos, selEnd));
+          dispatch({ type: "cmdShiftRight", pos, selEnd });
           return;
         }
         if (e.metaKey || e.ctrlKey) {
           e.preventDefault();
-          applyUpdate(handleCmdRight(state, pos));
+          dispatch({ type: "cmdRight", pos });
           return;
         }
         if (e.shiftKey) {
           // Shift+Right: let native input handle selection extension
           return;
         }
-        const currentNode = findNode(modelRef.current, activeNodeId);
-        if (
-          currentNode &&
-          pos >= currentNode.text.length &&
-          pos === selEnd
-        ) {
+        const currentNode = findNode(modelRef.current, state.activeNodeId);
+        if (currentNode && pos >= currentNode.text.length && pos === selEnd) {
           e.preventDefault();
-          applyUpdate(handleArrowRightEdge(state));
+          dispatch({ type: "arrowRightEdge" });
           return;
         }
       }
 
       if (e.key === "Escape") {
         e.preventDefault();
-        setActiveNodeId(null);
+        dispatch({ type: "deselect" });
         inputRef.current?.blur();
         return;
       }
     },
-    [isComposing, activeNodeId, getEditorState, applyUpdate, applyFullState, pushUndoable]
+    [isComposing, dispatch]
   );
 
   // --- Title editing ---
   const handleTitleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newTitle = e.target.value;
-      setModel((prev) => updateNodeText(prev, prev.id, newTitle));
+      dispatch({ type: "setTitle", text: e.target.value });
     },
-    []
+    [dispatch]
   );
 
   // --- Konva setup ---
@@ -665,7 +513,7 @@ export default function MindmapEditor({
           return;
         }
         if (e.target === stage) {
-          setActiveNodeId(null);
+          dispatch({ type: "deselect" });
         }
       });
 
@@ -709,31 +557,13 @@ export default function MindmapEditor({
           }
         }
 
-        if (closestNode.id === drag.nodeId) {
-          // Same node: single-node selection
-          const start = Math.min(drag.anchorCharIdx, charIdx);
-          const end = Math.max(drag.anchorCharIdx, charIdx);
-          setCursorPos(start);
-          setSelectionEnd(end);
-          setSelAnchorNodeId(drag.nodeId);
-          setSelAnchorOffset(drag.anchorCharIdx);
-          if (inputRef.current) {
-            inputRef.current.setSelectionRange(start, end);
-          }
-        } else {
-          // Multi-node: focus moves to the closest node
-          setActiveNodeId(closestNode.id);
-          const modelNode = findNode(modelRef.current, closestNode.id);
-          setEditingText(modelNode?.text || "");
-          setCursorPos(charIdx);
-          setSelectionEnd(charIdx);
-          setSelAnchorNodeId(drag.nodeId);
-          setSelAnchorOffset(drag.anchorCharIdx);
-          if (inputRef.current) {
-            inputRef.current.value = modelNode?.text || "";
-            inputRef.current.setSelectionRange(charIdx, charIdx);
-          }
-        }
+        dispatch({
+          type: "dragSelect",
+          anchorNodeId: drag.nodeId,
+          anchorOffset: drag.anchorCharIdx,
+          focusNodeId: closestNode.id,
+          focusOffset: charIdx,
+        });
       });
 
       stage.on("mouseup touchend", () => {
@@ -763,7 +593,7 @@ export default function MindmapEditor({
         cursorLayerRef.current = null;
       }
     };
-  }, []);
+  }, [dispatch]);
 
   // --- Auto-scroll to active node ---
   useEffect(() => {
@@ -852,8 +682,7 @@ export default function MindmapEditor({
 
     nodes.forEach((node) => {
       // For active node during editing, use editingText
-      const displayRaw =
-        activeNodeId === node.id ? editingText : node.text;
+      const displayRaw = activeNodeId === node.id ? editingText : node.text;
       const isEmpty = displayRaw === "";
       const displayText = isEmpty ? "empty" : displayRaw;
 
@@ -904,8 +733,7 @@ export default function MindmapEditor({
     // Draw nodes
     nodes.forEach((node, index) => {
       const isRoot = index === 0;
-      const displayRaw =
-        activeNodeId === node.id ? editingText : node.text;
+      const displayRaw = activeNodeId === node.id ? editingText : node.text;
       const isEmpty = displayRaw === "";
       const isActive = activeNodeId === node.id;
       const displayText = isEmpty ? "empty" : displayRaw;
@@ -986,48 +814,39 @@ export default function MindmapEditor({
           charIdx = bestIdx;
         }
 
-        setActiveNodeId(node.id);
-        const modelNode = findNode(modelRef.current, node.id);
-        setEditingText(modelNode?.text || "");
-        setCursorPos(charIdx);
-        setSelectionEnd(charIdx);
-        setSelAnchorNodeId(node.id);
-        setSelAnchorOffset(charIdx);
+        // Activate the node at the clicked caret position (no anchor yet —
+        // a drag will set the anchor on the first mousemove).
+        dispatch({
+          type: "activateNode",
+          nodeId: node.id,
+          cursorPos: charIdx,
+          selectionEnd: charIdx,
+          anchorNodeId: null,
+          anchorOffset: 0,
+        });
 
         // Start drag selection
         dragStateRef.current = { nodeId: node.id, anchorCharIdx: charIdx };
-        const stageRef = konvaStageRef.current;
-        if (stageRef) stageRef.draggable(false);
+        if (stage) stage.draggable(false);
 
-        setTimeout(() => {
-          if (inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.setSelectionRange(charIdx, charIdx);
-          }
-        }, 0);
+        // Focus the hidden input in a macrotask so it survives the click
+        // event's default focus handling (mousedown → mouseup → click are
+        // separate tasks; the click default would otherwise blur the input,
+        // overriding the focus applied by the input-sync effect).
+        setTimeout(() => inputRef.current?.focus(), 0);
       });
 
       // Double-click → select all text
       group.on("dblclick dbltap", () => {
-        const modelNode = findNode(modelRef.current, node.id);
-        if (!modelNode) return;
-        setActiveNodeId(node.id);
-        setEditingText(modelNode.text);
-        setCursorPos(0);
-        setSelectionEnd(modelNode.text.length);
-        setTimeout(() => {
-          if (inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.setSelectionRange(0, modelNode.text.length);
-          }
-        }, 0);
+        dispatch({ type: "selectAllInNode", nodeId: node.id });
+        setTimeout(() => inputRef.current?.focus(), 0);
       });
 
       layer.add(group);
     });
 
     layer.draw();
-  }, [nodes, activeNodeId, editingText, konvaReady]);
+  }, [nodes, activeNodeId, editingText, konvaReady, dispatch]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -1246,7 +1065,10 @@ export default function MindmapEditor({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onSelect={handleSelect}
-          onCompositionStart={() => setIsComposing(true)}
+          onCompositionStart={() => {
+            setIsComposing(true);
+            isComposingRef.current = true;
+          }}
           onCompositionEnd={handleCompositionEnd}
           style={{
             position: "absolute",

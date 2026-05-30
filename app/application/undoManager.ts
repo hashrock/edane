@@ -4,7 +4,7 @@
  * Text typing is batched via a debounce timer.
  */
 
-import type { EditorState } from "./editorActions";
+import type { EditorState } from "./editorReducer";
 
 export interface UndoableCommand {
   type: string;
