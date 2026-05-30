@@ -20,6 +20,8 @@ import {
   dedentNode,
   splitNode,
   updateNodeText,
+  toggleCollapse,
+  addChildToNode,
 } from "../domain/model";
 
 export interface EditorState {
@@ -82,6 +84,10 @@ export type EditorAction =
       focusOffset: number;
     }
   | { type: "deselect" }
+  // --- context-menu node ops ---
+  | { type: "toggleCollapse"; nodeId: string }
+  | { type: "addChild"; nodeId: string }
+  | { type: "deleteNode"; nodeId: string }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -555,6 +561,46 @@ export function editorReducer(
         selAnchorNodeId: null,
         selAnchorOffset: 0,
       };
+    }
+
+    case "toggleCollapse": {
+      const node = findNode(state.model, action.nodeId);
+      if (!node || node.children.length === 0) return state;
+      const newModel = toggleCollapse(state.model, action.nodeId);
+      // If the focused node just got hidden, move focus to the toggled node.
+      if (
+        state.activeNodeId &&
+        !getFlatOrder(newModel).includes(state.activeNodeId)
+      ) {
+        return focusNodeState(state, newModel, action.nodeId);
+      }
+      return { ...state, model: newModel };
+    }
+
+    case "addChild": {
+      const parent = findNode(state.model, action.nodeId);
+      if (!parent) return state;
+      const newId = generateId();
+      const newNode: MindMapModel = { id: newId, text: "", children: [] };
+      // Expand first so the new child is visible, then append it.
+      let newModel = toggleCollapse(state.model, action.nodeId, false);
+      newModel = addChildToNode(newModel, action.nodeId, newNode);
+      return focusNodeState(state, newModel, newId);
+    }
+
+    case "deleteNode": {
+      if (action.nodeId === state.model.id) return state; // never delete root
+      const order = getFlatOrder(state.model);
+      const idx = order.indexOf(action.nodeId);
+      const newModel = removeNode(state.model, action.nodeId);
+      // Only refocus if the currently active node disappeared.
+      if (state.activeNodeId && !findNode(newModel, state.activeNodeId)) {
+        const prevId = idx > 0 ? order[idx - 1] : null;
+        const landId =
+          prevId && findNode(newModel, prevId) ? prevId : newModel.id;
+        return focusNodeState(state, newModel, landId);
+      }
+      return { ...state, model: newModel };
     }
 
     case "setTitle": {

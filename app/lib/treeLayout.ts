@@ -9,15 +9,22 @@ interface NodeLayout {
   y?: number;
 }
 
-const NODE_HEIGHT = 40;
+// Slot floor so single-line nodes keep their original vertical rhythm.
+const NODE_MIN_HEIGHT = 40;
 const NODE_MIN_WIDTH = 100;
 const NODE_PADDING = 20;
 const HORIZONTAL_GAP = 120;
 const VERTICAL_GAP = 10;
 
-function getNodeWidth(text: string): number {
-  if (text === "") return 60;
-  return Math.max(NODE_MIN_WIDTH, text.length * 8 + NODE_PADDING * 2);
+/** Visual box width (measured text width + horizontal padding), with a floor. */
+function effectiveWidth(node: MindMapNode): number {
+  const textWidth = node.width || 0;
+  return Math.max(NODE_MIN_WIDTH, textWidth + NODE_PADDING * 2);
+}
+
+/** Slot height used for vertical packing (measured box height, with a floor). */
+function slotHeight(node: MindMapNode): number {
+  return Math.max(NODE_MIN_HEIGHT, node.height || 0);
 }
 
 export function calculateNodeSizes(
@@ -28,9 +35,9 @@ export function calculateNodeSizes(
   nodes.forEach((node) => {
     layoutMap.set(node.id, {
       node,
-      width: getNodeWidth(node.text),
-      height: NODE_HEIGHT,
-      subtreeHeight: NODE_HEIGHT,
+      width: effectiveWidth(node),
+      height: slotHeight(node),
+      subtreeHeight: slotHeight(node),
     });
   });
 
@@ -40,19 +47,18 @@ export function calculateNodeSizes(
 
     const node = layout.node;
     if (node.children.length === 0) {
-      return NODE_HEIGHT;
+      layout.subtreeHeight = layout.height;
+      return layout.subtreeHeight;
     }
 
-    let totalHeight = 0;
+    let childrenHeight = 0;
     node.children.forEach((childId, index) => {
-      const childHeight = calculateSubtreeHeight(childId);
-      totalHeight += childHeight;
-      if (index > 0) {
-        totalHeight += VERTICAL_GAP;
-      }
+      childrenHeight += calculateSubtreeHeight(childId);
+      if (index > 0) childrenHeight += VERTICAL_GAP;
     });
 
-    layout.subtreeHeight = Math.max(NODE_HEIGHT, totalHeight);
+    // A tall (multi-line) parent must not be shorter than its own box.
+    layout.subtreeHeight = Math.max(layout.height, childrenHeight);
     return layout.subtreeHeight;
   }
 
@@ -92,8 +98,17 @@ export function assignNodePositions(
     const parent = parentLayout.node;
     if (parent.children.length === 0) return;
 
+    // Total height occupied by the children block (sum of subtrees + gaps).
+    let childrenBlock = 0;
+    parent.children.forEach((childId, index) => {
+      const childLayout = layoutMap.get(childId);
+      if (!childLayout) return;
+      childrenBlock += childLayout.subtreeHeight;
+      if (index > 0) childrenBlock += VERTICAL_GAP;
+    });
+
     // Top of the children block, centered vertically on the parent.
-    let currentY = parentLayout.y - parentLayout.subtreeHeight / 2;
+    let currentY = parentLayout.y - childrenBlock / 2;
 
     parent.children.forEach((childId) => {
       const childLayout = layoutMap.get(childId);

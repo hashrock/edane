@@ -12,6 +12,10 @@ function nodes(
     x: 0,
     y: 0,
     children,
+    width: 60,
+    height: 32,
+    collapsed: false,
+    childCount: children.length,
   }));
 }
 

@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { MindMapNode } from "../types/MindMap";
 import { layoutMindMap } from "../lib/treeLayout";
+import { LINE_HEIGHT } from "../lib/measureText";
 import { parseContent } from "../application/persistence";
 import { flattenToNodes } from "../application/nodeUtils";
+
+const KONVA_LINE_HEIGHT = LINE_HEIGHT / 14;
+const PADDING = 20;
 
 interface Props {
   initialContent: string;
@@ -45,22 +49,11 @@ export default function MindmapViewer({ initialContent, title }: Props) {
       const nodeMap: Record<string, MindMapNode> = {};
       nodes.forEach((n) => (nodeMap[n.id] = n));
 
-      const textWidths = new Map<string, number>();
-      nodes.forEach((node) => {
-        const displayText = node.text === "" ? "empty" : node.text;
-        const t = new Konva.Text({
-          text: displayText,
-          fontSize: 14,
-          fontFamily: "sans-serif",
-        });
-        textWidths.set(node.id, t.width());
-      });
-
       nodes.forEach((node) => {
         node.children.forEach((childId) => {
           const child = nodeMap[childId];
           if (!child) return;
-          const parentWidth = textWidths.get(node.id) || 100;
+          const parentWidth = node.width || 100;
           const startX = node.x + parentWidth + 40;
           const startY = node.y;
           const endX = child.x;
@@ -80,13 +73,14 @@ export default function MindmapViewer({ initialContent, title }: Props) {
         const isRoot = index === 0;
         const isEmpty = node.text === "";
         const displayText = isEmpty ? "empty" : node.text;
-        const textWidth = textWidths.get(node.id) || 100;
-        const padding = 20;
+        const textWidth = node.width || 100;
         const rectWidth = Math.max(
-          textWidth + padding * 2,
+          textWidth + PADDING * 2,
           isRoot ? 100 : 80
         );
-        const rectHeight = 32;
+        const rectHeight = node.height;
+        const lineCount = isEmpty ? 1 : node.text.split("\n").length;
+        const blockHeight = lineCount * LINE_HEIGHT;
 
         const rect = new Konva.Rect({
           x: node.x,
@@ -101,15 +95,42 @@ export default function MindmapViewer({ initialContent, title }: Props) {
         layer.add(rect);
 
         const textNode = new Konva.Text({
-          x: node.x + padding,
-          y: node.y - 7,
+          x: node.x + PADDING,
+          y: node.y - blockHeight / 2 + 2,
           text: displayText,
           fontSize: 14,
           fontFamily: "sans-serif",
+          lineHeight: KONVA_LINE_HEIGHT,
           fill: isRoot ? "#ffffff" : isEmpty ? "#808080" : "#000000",
           fontStyle: isEmpty ? "italic" : "normal",
         });
         layer.add(textNode);
+
+        // Collapsed indicator: pill showing the hidden child count.
+        if (node.collapsed && node.childCount > 0) {
+          const badgeR = 9;
+          const badgeX = node.x + rectWidth + 4 + badgeR;
+          layer.add(
+            new Konva.Circle({
+              x: badgeX,
+              y: node.y,
+              radius: badgeR,
+              fill: "#10b981",
+            })
+          );
+          layer.add(
+            new Konva.Text({
+              x: badgeX - badgeR,
+              y: node.y - 6,
+              width: badgeR * 2,
+              align: "center",
+              text: String(node.childCount),
+              fontSize: 11,
+              fontFamily: "sans-serif",
+              fill: "#ffffff",
+            })
+          );
+        }
       });
 
       layer.draw();

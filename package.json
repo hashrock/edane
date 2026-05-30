@@ -18,6 +18,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@chenglou/pretext": "^0.0.7",
     "@hono/inertia": "^0.2.0",
     "@hono/oauth-providers": "^0.8.5",
     "@inertiajs/core": "^3.0.3",

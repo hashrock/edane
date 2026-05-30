@@ -68,7 +68,8 @@ describe("MindmapEditor (browser e2e)", () => {
     // not focusable and would otherwise blur the input on the trailing click).
     await waitFor(() => api().getActiveNodeId() === "hello");
     await waitFor(
-      () => (document.activeElement as HTMLElement | null)?.tagName === "INPUT"
+      () =>
+        (document.activeElement as HTMLElement | null)?.tagName === "TEXTAREA"
     );
 
     // Typing must reach the input and update the model.

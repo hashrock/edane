@@ -4,7 +4,9 @@ import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
 import { findNode, getFlatOrder, generateId } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
+import { LINE_HEIGHT } from "../lib/measureText";
 import { flattenToNodes } from "../application/nodeUtils";
+import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import {
   parseContent,
   serializeModel,
@@ -72,6 +74,84 @@ function measureEmptyWidth(): number {
     _emptyWidth = 40;
   }
   return _emptyWidth;
+}
+
+// --- Multi-line geometry ---
+// Konva's lineHeight is a multiple of fontSize (14px), so LINE_HEIGHT/14 gives
+// us the same px line box pretext used to measure node height.
+const KONVA_LINE_HEIGHT = LINE_HEIGHT / 14;
+const NODE_PADDING = 20;
+
+interface LineData {
+  lines: string[];
+  /** Per-line cumulative char x-offsets (from measureOffsets). */
+  lineOffsets: number[][];
+  /** Absolute start index of each line in the full string. */
+  lineStarts: number[];
+}
+
+/** Split node text into lines and pre-measure each line's caret offsets. */
+function buildLineData(text: string): LineData {
+  const lines = text.split("\n");
+  const lineOffsets = lines.map((l) => measureOffsets(l));
+  const lineStarts: number[] = [];
+  let acc = 0;
+  for (let i = 0; i < lines.length; i++) {
+    lineStarts[i] = acc;
+    acc += lines[i].length + 1; // +1 for the consumed "\n"
+  }
+  return { lines, lineOffsets, lineStarts };
+}
+
+/** Absolute string offset → { line, column-within-line }. */
+function posToLineCol(
+  data: LineData,
+  pos: number
+): { line: number; col: number } {
+  const { lines, lineStarts } = data;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (pos >= lineStarts[i]) {
+      return { line: i, col: Math.min(pos - lineStarts[i], lines[i].length) };
+    }
+  }
+  return { line: 0, col: 0 };
+}
+
+/** { line, column } → absolute string offset (clamped to the line's length). */
+function lineColToPos(data: LineData, line: number, col: number): number {
+  const l = Math.max(0, Math.min(line, data.lines.length - 1));
+  return data.lineStarts[l] + Math.min(col, data.lines[l].length);
+}
+
+/** Widest line's measured width (px). */
+function lineDataWidth(data: LineData): number {
+  let w = 0;
+  for (const offs of data.lineOffsets) w = Math.max(w, offs[offs.length - 1] || 0);
+  return w;
+}
+
+/** Find the caret column nearest `relX` within a line's offsets. */
+function nearestCol(offsets: number[] | undefined, relX: number): number {
+  if (!offsets) return 0;
+  let col = 0;
+  let best = Math.abs(relX);
+  for (let i = 1; i < offsets.length; i++) {
+    const d = Math.abs(relX - offsets[i]);
+    if (d < best) {
+      best = d;
+      col = i;
+    }
+  }
+  return col;
+}
+
+/** Vertical caret move within a node; returns new pos or null if no such line. */
+function verticalMove(text: string, pos: number, dir: -1 | 1): number | null {
+  const data = buildLineData(text);
+  const { line, col } = posToLineCol(data, pos);
+  const target = line + dir;
+  if (target < 0 || target >= data.lines.length) return null;
+  return lineColToPos(data, target, col);
 }
 
 /** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
@@ -153,9 +233,15 @@ export default function MindmapEditor({
     x: 0,
     y: 0,
   });
+  // Right-click context menu over a node (null = closed).
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId: string;
+  } | null>(null);
 
   // Refs
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const konvaStageRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -164,7 +250,7 @@ export default function MindmapEditor({
   const saveTimerRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const saveStatusRef = useRef<HTMLSpanElement>(null);
-  const cursorOffsetsRef = useRef<Map<string, number[]>>(new Map());
+  const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<{
     nodeId: string;
     anchorCharIdx: number;
@@ -273,7 +359,7 @@ export default function MindmapEditor({
 
   // --- Input handling ---
   const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const el = e.target;
       const newText = el.value;
       const pos = el.selectionStart ?? 0;
@@ -344,7 +430,7 @@ export default function MindmapEditor({
     [dispatch, noteId, saveNote]
   );
 
-  const handleCopy = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const st = stateRef.current;
     if (isMultiNodeSelection(st)) {
       // Multi-node selection: copy the selected nodes as indented text.
@@ -359,7 +445,7 @@ export default function MindmapEditor({
   }, []);
 
   const handleCut = useCallback(
-    (e: React.ClipboardEvent<HTMLInputElement>) => {
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
       if (isMultiNodeSelection(st)) {
         e.preventDefault();
@@ -372,7 +458,7 @@ export default function MindmapEditor({
   );
 
   const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLInputElement>) => {
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const text = e.clipboardData.getData("text");
       if (!text) return;
       const st = stateRef.current;
@@ -449,9 +535,55 @@ export default function MindmapEditor({
     ];
   }, [pasteTextAsNodes]);
 
+  // --- Right-click context menu items (for the node under the cursor) ---
+  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!contextMenu) return [];
+    const nodeId = contextMenu.nodeId;
+    const node = findNode(modelRef.current, nodeId);
+    if (!node) return [];
+    const isRoot = node.id === modelRef.current.id;
+    const hasChildren = node.children.length > 0;
+    const items: ContextMenuItem[] = [];
+
+    if (hasChildren) {
+      items.push({
+        label: node.collapsed ? "展開する" : "折りたたむ",
+        onSelect: () => {
+          const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
+          if (noteId) saveNote(next.model);
+        },
+      });
+    }
+    items.push({
+      label: "子ノードを追加",
+      onSelect: () => {
+        const next = dispatch({ type: "addChild", nodeId }, "add-child");
+        if (noteId) saveNote(next.model);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      },
+    });
+    items.push({
+      label: "枝をテキストコピー",
+      onSelect: () => {
+        navigator.clipboard.writeText(modelToText(node));
+      },
+    });
+    if (!isRoot) {
+      items.push({
+        label: "ノードを削除",
+        danger: true,
+        onSelect: () => {
+          const next = dispatch({ type: "deleteNode", nodeId }, "delete-node");
+          if (noteId) saveNote(next.model);
+        },
+      });
+    }
+    return items;
+  }, [contextMenu, dispatch, noteId, saveNote]);
+
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isComposing) return;
 
       // Command palette
@@ -523,6 +655,12 @@ export default function MindmapEditor({
         }
       }
 
+      // Shift+Enter inserts a line break inside the node; let the textarea's
+      // native handling add the "\n" (onChange then commits it to the model).
+      if (e.key === "Enter" && e.shiftKey) {
+        return;
+      }
+
       if (e.key === "Enter") {
         e.preventDefault();
         dispatch({ type: "enter", pos }, "enter");
@@ -552,12 +690,24 @@ export default function MindmapEditor({
 
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        dispatch({ type: "moveUp" });
+        // Move between lines inside a multi-line node; cross to the previous
+        // node only from the first line.
+        const newPos = verticalMove(state.editingText, pos, -1);
+        if (newPos !== null) {
+          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
+        } else {
+          dispatch({ type: "moveUp" });
+        }
         return;
       }
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
+        const newPos = verticalMove(state.editingText, pos, 1);
+        if (newPos !== null) {
+          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
+          return;
+        }
         dispatch({ type: "moveDown" });
         return;
       }
@@ -707,7 +857,6 @@ export default function MindmapEditor({
         const worldY = (pointer.y - stage.y()) / scale;
 
         const currentNodes = nodesRef.current;
-        const nodePadding = 20;
 
         // Find closest node by Y
         let closestNode = currentNodes.find((n) => n.id === drag.nodeId);
@@ -721,19 +870,22 @@ export default function MindmapEditor({
         }
         if (!closestNode) return;
 
-        // Find char position within closest node
-        const relX = worldX - closestNode.x - nodePadding;
-        const offsets = cursorOffsetsRef.current.get(closestNode.id);
+        // Find char position within closest node (line by Y, column by X).
+        const data = lineDataRef.current.get(closestNode.id);
         let charIdx = 0;
-        if (offsets) {
-          let bestDist = Math.abs(relX);
-          for (let i = 1; i < offsets.length; i++) {
-            const d = Math.abs(relX - offsets[i]);
-            if (d < bestDist) {
-              bestDist = d;
-              charIdx = i;
-            }
-          }
+        if (data) {
+          const blockHeight = data.lines.length * LINE_HEIGHT;
+          const relY = worldY - (closestNode.y - blockHeight / 2);
+          const line = Math.max(
+            0,
+            Math.min(data.lines.length - 1, Math.floor(relY / LINE_HEIGHT))
+          );
+          const relX = worldX - closestNode.x - NODE_PADDING;
+          charIdx = lineColToPos(
+            data,
+            line,
+            nearestCol(data.lineOffsets[line], relX)
+          );
         }
 
         dispatch({
@@ -835,11 +987,18 @@ export default function MindmapEditor({
     if (!activeNode) return;
 
     const scale = stage.scaleX();
-    const offsets = cursorOffsetsRef.current.get(activeNodeId);
-    const cursorX = offsets?.[cursorPos] || 0;
+    const data = lineDataRef.current.get(activeNodeId);
+    let cursorX = 0;
+    let lineCenterOffset = 0;
+    if (data) {
+      const { line, col } = posToLineCol(data, cursorPos);
+      cursorX = data.lineOffsets[line]?.[col] || 0;
+      const blockHeight = data.lines.length * LINE_HEIGHT;
+      lineCenterOffset = -blockHeight / 2 + line * LINE_HEIGHT + LINE_HEIGHT / 2;
+    }
 
-    const screenX = (activeNode.x + 20 + cursorX) * scale + stage.x();
-    const screenY = activeNode.y * scale + stage.y();
+    const screenX = (activeNode.x + NODE_PADDING + cursorX) * scale + stage.x();
+    const screenY = (activeNode.y + lineCenterOffset) * scale + stage.y();
     setInputPos({ x: screenX, y: screenY });
   }, [activeNodeId, nodes, cursorPos, editingText]);
 
@@ -856,23 +1015,22 @@ export default function MindmapEditor({
     const nodeMap: Record<string, MindMapNode> = {};
     nodes.forEach((n) => (nodeMap[n.id] = n));
 
-    // Pre-calculate text widths and character offsets (cached, see top of file)
+    // Pre-calculate per-node line data + widths (cached, see top of file).
     const textWidths = new Map<string, number>();
-    const cursorOffsets = new Map<string, number[]>();
-    const nodePadding = 20;
+    const lineDataMap = new Map<string, LineData>();
+    const nodePadding = NODE_PADDING;
 
     nodes.forEach((node) => {
       // For active node during editing, use editingText
       const displayRaw = activeNodeId === node.id ? editingText : node.text;
-      if (displayRaw === "") {
-        textWidths.set(node.id, measureEmptyWidth());
-        return;
-      }
-      const offsets = measureOffsets(displayRaw);
-      textWidths.set(node.id, offsets[offsets.length - 1]);
-      cursorOffsets.set(node.id, offsets);
+      const data = buildLineData(displayRaw);
+      lineDataMap.set(node.id, data);
+      textWidths.set(
+        node.id,
+        displayRaw === "" ? measureEmptyWidth() : lineDataWidth(data)
+      );
     });
-    cursorOffsetsRef.current = cursorOffsets;
+    lineDataRef.current = lineDataMap;
 
     // Draw connections
     nodes.forEach((node) => {
@@ -902,12 +1060,15 @@ export default function MindmapEditor({
       const isEmpty = displayRaw === "";
       const isActive = activeNodeId === node.id;
       const displayText = isEmpty ? "empty" : displayRaw;
+      const data = lineDataMap.get(node.id)!;
+      const lineCount = data.lines.length;
       const textWidth = textWidths.get(node.id) || 100;
       const rectWidth = Math.max(
         textWidth + nodePadding * 2,
         isRoot ? 100 : 80
       );
-      const rectHeight = 32;
+      const blockHeight = lineCount * LINE_HEIGHT;
+      const rectHeight = Math.max(32, blockHeight + 14);
 
       const group = new Konva.Group();
 
@@ -945,15 +1106,42 @@ export default function MindmapEditor({
 
       const textNode = new Konva.Text({
         x: node.x + nodePadding,
-        y: node.y - 7,
+        y: node.y - blockHeight / 2 + 2,
         text: displayText,
         fontSize: 14,
         fontFamily: "sans-serif",
+        lineHeight: KONVA_LINE_HEIGHT,
         fill: isRoot ? "#ffffff" : isEmpty ? "#94a3b8" : "#0f172a",
         fontStyle: isEmpty ? "italic" : "normal",
         listening: false,
       });
       group.add(textNode);
+
+      // Collapsed indicator: a small pill on the right showing hidden child count.
+      if (node.collapsed && node.childCount > 0) {
+        const badgeR = 9;
+        const badgeX = node.x + rectWidth + 4 + badgeR;
+        const badge = new Konva.Circle({
+          x: badgeX,
+          y: node.y,
+          radius: badgeR,
+          fill: "#10b981",
+          listening: false,
+        });
+        group.add(badge);
+        const badgeText = new Konva.Text({
+          x: badgeX - badgeR,
+          y: node.y - 6,
+          width: badgeR * 2,
+          align: "center",
+          text: String(node.childCount),
+          fontSize: 11,
+          fontFamily: "sans-serif",
+          fill: "#ffffff",
+          listening: false,
+        });
+        group.add(badgeText);
+      }
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
@@ -964,24 +1152,21 @@ export default function MindmapEditor({
         if (!pointer) return;
 
         const scale = stage.scaleX();
-        const clickX =
-          (pointer.x - stage.x()) / scale - node.x - nodePadding;
+        const worldX = (pointer.x - stage.x()) / scale;
+        const worldY = (pointer.y - stage.y()) / scale;
 
-        // Find closest character position
-        const offsets = cursorOffsets.get(node.id);
-        let charIdx = displayRaw.length;
-        if (offsets) {
-          let bestIdx = 0;
-          let bestDist = Math.abs(clickX);
-          for (let i = 1; i < offsets.length; i++) {
-            const dist = Math.abs(clickX - offsets[i]);
-            if (dist < bestDist) {
-              bestDist = dist;
-              bestIdx = i;
-            }
-          }
-          charIdx = bestIdx;
-        }
+        // Find the clicked caret position: line by Y, column by X.
+        const relY = worldY - (node.y - blockHeight / 2);
+        const line = Math.max(
+          0,
+          Math.min(lineCount - 1, Math.floor(relY / LINE_HEIGHT))
+        );
+        const relX = worldX - node.x - nodePadding;
+        const charIdx = lineColToPos(
+          data,
+          line,
+          nearestCol(data.lineOffsets[line], relX)
+        );
 
         // Activate the node at the clicked caret position (no anchor yet —
         // a drag will set the anchor on the first mousemove).
@@ -1009,6 +1194,17 @@ export default function MindmapEditor({
       group.on("dblclick dbltap", () => {
         dispatch({ type: "selectAllInNode", nodeId: node.id });
         setTimeout(() => inputRef.current?.focus(), 0);
+      });
+
+      // Right-click → open the node context menu at the cursor.
+      group.on("contextmenu", (e: any) => {
+        e.evt.preventDefault();
+        e.cancelBubble = true;
+        setContextMenu({
+          x: e.evt.clientX,
+          y: e.evt.clientY,
+          nodeId: node.id,
+        });
       });
 
       layer.add(group);
@@ -1040,7 +1236,7 @@ export default function MindmapEditor({
 
     cursorLayer.destroyChildren();
 
-    const nodePadding = 20;
+    const nodePadding = NODE_PADDING;
     const isMulti =
       selAnchorNodeId !== null && selAnchorNodeId !== activeNodeId;
 
@@ -1059,15 +1255,14 @@ export default function MindmapEditor({
         if (!node) continue;
 
         const isRoot = nodes.indexOf(node) === 0;
-        const offsets = cursorOffsetsRef.current.get(nodeId);
-        const textWidth = offsets
-          ? offsets[offsets.length - 1]
-          : measureEmptyWidth();
+        const data = lineDataRef.current.get(nodeId);
+        const textWidth =
+          data && node.text !== "" ? lineDataWidth(data) : measureEmptyWidth();
         const rectWidth = Math.max(
           textWidth + nodePadding * 2,
           isRoot ? 100 : 80
         );
-        const rectHeight = 32;
+        const rectHeight = node.height;
 
         const sel = new Konva.Rect({
           x: node.x,
@@ -1088,40 +1283,56 @@ export default function MindmapEditor({
       if (!activeNode) return;
 
       const isRoot = nodes.indexOf(activeNode) === 0;
-      const offsets = cursorOffsetsRef.current.get(activeNodeId);
+      const data = lineDataRef.current.get(activeNodeId);
+      const blockHeight = (data ? data.lines.length : 1) * LINE_HEIGHT;
+      const textTop = activeNode.y - blockHeight / 2;
 
-      // Selection highlight
-      if (cursorPos !== selectionEnd) {
-        const selStart = Math.min(cursorPos, selectionEnd);
-        const selEndPos = Math.max(cursorPos, selectionEnd);
-        const selStartX = offsets?.[selStart] || 0;
-        const selEndX = offsets?.[selEndPos] || 0;
-        if (selEndX > selStartX) {
-          const highlight = new Konva.Rect({
-            x: activeNode.x + nodePadding + selStartX,
-            y: activeNode.y - 10,
-            width: selEndX - selStartX,
-            height: 20,
-            fill: isRoot
-              ? "rgba(255, 255, 255, 0.3)"
-              : "rgba(16, 185, 129, 0.18)",
-            listening: false,
-          });
-          cursorLayer.add(highlight);
+      // Selection highlight (per line, so it spans multi-line ranges).
+      if (data && cursorPos !== selectionEnd) {
+        const a = Math.min(cursorPos, selectionEnd);
+        const b = Math.max(cursorPos, selectionEnd);
+        for (let li = 0; li < data.lines.length; li++) {
+          const lineStart = data.lineStarts[li];
+          const lineEnd = lineStart + data.lines[li].length;
+          const segStart = Math.max(a, lineStart);
+          const segEnd = Math.min(b, lineEnd);
+          if (segEnd <= segStart) continue;
+          const offs = data.lineOffsets[li];
+          const x1 = offs[segStart - lineStart] || 0;
+          const x2 = offs[segEnd - lineStart] || 0;
+          if (x2 <= x1) continue;
+          const lineCenterY = textTop + li * LINE_HEIGHT + LINE_HEIGHT / 2;
+          cursorLayer.add(
+            new Konva.Rect({
+              x: activeNode.x + nodePadding + x1,
+              y: lineCenterY - 10,
+              width: x2 - x1,
+              height: 20,
+              fill: isRoot
+                ? "rgba(255, 255, 255, 0.3)"
+                : "rgba(16, 185, 129, 0.18)",
+              listening: false,
+            })
+          );
         }
       }
 
       // Cursor line
       if (cursorVisible && cursorPos === selectionEnd) {
+        const { line, col } = data
+          ? posToLineCol(data, cursorPos)
+          : { line: 0, col: 0 };
         const cursorX =
-          activeNode.x + nodePadding + (offsets?.[cursorPos] || 0);
-        const line = new Konva.Line({
-          points: [cursorX, activeNode.y - 10, cursorX, activeNode.y + 10],
-          stroke: isRoot ? "#ffffff" : "#0f172a",
-          strokeWidth: 2,
-          listening: false,
-        });
-        cursorLayer.add(line);
+          activeNode.x + nodePadding + (data?.lineOffsets[line]?.[col] || 0);
+        const lineCenterY = textTop + line * LINE_HEIGHT + LINE_HEIGHT / 2;
+        cursorLayer.add(
+          new Konva.Line({
+            points: [cursorX, lineCenterY - 10, cursorX, lineCenterY + 10],
+            stroke: isRoot ? "#ffffff" : "#0f172a",
+            strokeWidth: 2,
+            listening: false,
+          })
+        );
       }
     }
 
@@ -1152,9 +1363,9 @@ export default function MindmapEditor({
         const stage = konvaStageRef.current;
         if (!node || !stage) return null;
         const scale = stage.scaleX();
-        const offsets = cursorOffsetsRef.current.get(id);
-        const textW = offsets ? offsets[offsets.length - 1] : 40;
-        const worldX = node.x + 20 + textW / 2;
+        const data = lineDataRef.current.get(id);
+        const textW = data ? lineDataWidth(data) || 40 : 40;
+        const worldX = node.x + NODE_PADDING + textW / 2;
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
@@ -1272,9 +1483,11 @@ export default function MindmapEditor({
           data-testid="mm-canvas"
           className="absolute inset-0 bg-[radial-gradient(#dbe2ea_1px,transparent_1px)] [background-size:20px_20px]"
         />
-        <input
+        <textarea
           ref={inputRef}
           value={editingText}
+          rows={1}
+          wrap="off"
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onSelect={handleSelect}
@@ -1295,9 +1508,21 @@ export default function MindmapEditor({
             opacity: 0,
             pointerEvents: "none",
             caretColor: "transparent",
+            resize: "none",
             fontSize: "14px",
           }}
         />
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            items={contextMenuItems}
+            onClose={() => {
+              setContextMenu(null);
+              setTimeout(() => inputRef.current?.focus(), 0);
+            }}
+          />
+        )}
       </div>
     </div>
   );

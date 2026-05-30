@@ -85,7 +85,8 @@ describe("MindmapEditor browser performance", () => {
         position: { x: Math.round(point.x), y: Math.round(point.y) },
       });
       await waitFor(
-        () => (document.activeElement as HTMLElement | null)?.tagName === "INPUT"
+        () =>
+          (document.activeElement as HTMLElement | null)?.tagName === "TEXTAREA"
       );
       await flush();
 

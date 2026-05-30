@@ -8,6 +8,8 @@ export interface MindMapModel {
   id: string;
   text: string;
   children: MindMapModel[];
+  /** When true, descendants are hidden in the canvas and skipped in navigation. */
+  collapsed?: boolean;
 }
 
 // --- ID generation ---
@@ -48,11 +50,15 @@ export function findParentAndIndex(
   return null;
 }
 
-/** DFS order of node IDs (navigation order) */
+/**
+ * DFS order of node IDs (navigation order). Descendants of a collapsed node are
+ * skipped so keyboard navigation never lands on a hidden node.
+ */
 export function getFlatOrder(model: MindMapModel): string[] {
   const result: string[] = [];
   function walk(node: MindMapModel) {
     result.push(node.id);
+    if (node.collapsed) return;
     for (const child of node.children) walk(child);
   }
   walk(model);
@@ -96,6 +102,18 @@ export function addSiblingAfter(
   const result = findParentAndIndex(cloned, afterId);
   if (!result) return cloned;
   result.parent.children.splice(result.index + 1, 0, newNode);
+  return cloned;
+}
+
+/** Toggle (or set) a node's collapsed flag. Returns a new model. */
+export function toggleCollapse(
+  model: MindMapModel,
+  nodeId: string,
+  collapsed?: boolean
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) node.collapsed = collapsed ?? !node.collapsed;
   return cloned;
 }
 

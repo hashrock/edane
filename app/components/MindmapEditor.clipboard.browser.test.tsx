@@ -34,9 +34,9 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-function hiddenInput(): HTMLInputElement {
-  return document.querySelector<HTMLInputElement>(
-    'input[style*="caret-color"]'
+function hiddenInput(): HTMLTextAreaElement {
+  return document.querySelector<HTMLTextAreaElement>(
+    'textarea[style*="caret-color"]'
   )!;
 }
 
