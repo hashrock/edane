@@ -13,7 +13,7 @@ const Document = ({ page }: { page: PageObject }) => (
       <Script src="/app/client.tsx" />
       <Link href="/app/styles.css" rel="stylesheet" />
     </head>
-    <body className="bg-gray-50 min-h-screen">
+    <body className="bg-slate-50 min-h-screen">
       <script
         data-page="app"
         type="application/json"

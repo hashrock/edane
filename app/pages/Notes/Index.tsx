@@ -34,27 +34,27 @@ export default function NotesIndex({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-4 md:py-8">
+    <div className="max-w-3xl mx-auto px-6 py-7 md:py-9">
       <Head title="Edane" />
-      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 md:mb-8">
-        <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
-          <img src="/logo.svg" alt="" className="w-7 h-7 md:w-8 md:h-8" />
+      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
+        <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+          <img src="/logo.svg" alt="" className="w-7 h-7" />
           Edane
         </h1>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {user ? (
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-3 text-sm text-slate-700">
               {user.avatarUrl && (
                 <img
                   src={user.avatarUrl}
                   alt=""
-                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full"
+                  className="w-7 h-7 rounded-full"
                 />
               )}
-              <span className="text-sm">{user.name}</span>
+              <span>{user.name}</span>
               <a
                 href="/auth/logout"
-                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900"
+                className="text-slate-500 hover:text-slate-900 transition"
               >
                 ログアウト
               </a>
@@ -63,13 +63,13 @@ export default function NotesIndex({
             <>
               <Link
                 href="/guest"
-                className="px-3 md:px-4 py-2 text-sm border rounded-lg hover:bg-gray-100 transition"
+                className="px-3.5 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-100 transition"
               >
                 ゲストで試す
               </Link>
               <a
                 href="/auth/google"
-                className="px-3 md:px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                className="px-3.5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
               >
                 Googleでログイン
               </a>
@@ -79,62 +79,64 @@ export default function NotesIndex({
       </header>
 
       {user && (
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">マイノート</h2>
+        <section>
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-xl font-bold tracking-tight">マイノート</h2>
             <button
               onClick={createNote}
-              className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
             >
               + 新規作成
             </button>
           </div>
           {notes.length === 0 ? (
-            <p className="text-gray-500">ノートがありません。</p>
+            <p className="text-slate-500">ノートがありません。</p>
           ) : (
-            <div className="grid gap-3">
-              {notes.map((note) => (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              {notes.map((note, index) => (
                 <div
                   key={note.id}
-                  className="flex items-center gap-2 bg-white rounded-lg border hover:border-blue-400 transition"
+                  className={`group flex items-center transition-colors hover:bg-slate-50 ${index !== 0 ? "border-t border-slate-100" : ""}`}
                 >
                   <Link
                     href={`/notes/${note.id}/edit`}
-                    className="flex-1 p-4"
+                    className="flex-1 min-w-0 px-5 py-4"
                   >
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium">{note.title}</h3>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded ${note.isPublic ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}
-                      >
-                        {note.isPublic ? "公開" : "非公開"}
-                      </span>
+                    <div className="text-[15px] font-semibold text-slate-950 truncate">
+                      {note.title}
                     </div>
-                    <div className="text-sm text-gray-500 mt-1">
+                    <div className="mt-1 text-sm text-slate-500">
                       {new Date(note.updatedAt).toLocaleDateString("ja-JP")}
                     </div>
                   </Link>
-                  <button
-                    onClick={() => deleteNote(note.id)}
-                    className="p-2 mr-3 text-gray-400 hover:text-red-500 transition"
-                    title="削除"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                  <div className="flex items-center gap-4 pr-4 pl-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${note.isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
                     >
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                    </svg>
-                  </button>
+                      {note.isPublic ? "公開" : "非公開"}
+                    </span>
+                    <button
+                      onClick={() => deleteNote(note.id)}
+                      className="p-2 text-slate-400 opacity-70 hover:text-red-500 group-hover:opacity-100 transition"
+                      title="削除"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

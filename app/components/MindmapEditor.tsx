@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Link } from "@inertiajs/react";
 import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
 import {
@@ -58,6 +59,7 @@ export default function MindmapEditor({
   );
   const [isPublic, setIsPublic] = useState(initialIsPublic || false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
 
   // Editing state
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
@@ -80,6 +82,7 @@ export default function MindmapEditor({
   const cursorLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const saveTimerRef = useRef<any>(null);
+  const updateGridRef = useRef<() => void>(() => {});
   const saveStatusRef = useRef<HTMLSpanElement>(null);
   const cursorOffsetsRef = useRef<Map<string, number[]>>(new Map());
   const dragStateRef = useRef<{
@@ -620,6 +623,18 @@ export default function MindmapEditor({
       stage.add(cursorLayer);
       cursorLayerRef.current = cursorLayer;
 
+      // Keep the CSS dot grid in sync with stage pan/zoom
+      const GRID = 20;
+      const updateGrid = () => {
+        const scale = stage.scaleX();
+        const size = GRID * scale;
+        container.style.backgroundSize = `${size}px ${size}px`;
+        container.style.backgroundPosition = `${stage.x()}px ${stage.y()}px`;
+      };
+      updateGridRef.current = updateGrid;
+      updateGrid();
+      stage.on("dragmove", updateGrid);
+
       // Zoom
       stage.on("wheel", (e: any) => {
         e.evt.preventDefault();
@@ -640,6 +655,7 @@ export default function MindmapEditor({
           y: pointer.y - mousePointTo.y * limitedScale,
         });
         layer.draw();
+        updateGrid();
       });
 
       // Click on empty space → deselect (skip if just finished dragging)
@@ -795,6 +811,7 @@ export default function MindmapEditor({
       stage.x(targetX);
       stage.y(targetY);
       layerRef.current?.draw();
+      updateGridRef.current();
     }
   }, [activeNodeId, nodes]);
 
@@ -876,8 +893,8 @@ export default function MindmapEditor({
         const controlOffset = Math.abs(endX - startX) * 0.5;
         const path = new Konva.Path({
           data: `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`,
-          stroke: "#808080",
-          strokeWidth: 1,
+          stroke: "#aeb7c2",
+          strokeWidth: 1.5,
           fill: "transparent",
         });
         layer.add(path);
@@ -906,18 +923,26 @@ export default function MindmapEditor({
         y: node.y - rectHeight / 2,
         width: rectWidth,
         height: rectHeight,
-        cornerRadius: 4,
+        cornerRadius: 12,
         fill: isActive
           ? isRoot
-            ? "#333333"
-            : "#f0f0f0"
+            ? "#1e293b"
+            : "#f1f5f9"
           : isRoot
-            ? "#000000"
+            ? "#0f172a"
             : isEmpty
-              ? "#fafafa"
+              ? "#f8fafc"
               : "#ffffff",
-        stroke: isActive ? "#000000" : isRoot ? "#000000" : "#808080",
+        stroke: isActive
+          ? "#10b981"
+          : isRoot
+            ? "#0f172a"
+            : "#e2e8f0",
         strokeWidth: isActive ? 2 : 1,
+        shadowColor: isRoot ? "#0f172a" : "#0f172a",
+        shadowBlur: isRoot ? 16 : 3,
+        shadowOpacity: isRoot ? 0.18 : 0.06,
+        shadowOffsetY: isRoot ? 6 : 1,
       });
       group.add(rect);
 
@@ -927,7 +952,7 @@ export default function MindmapEditor({
         text: displayText,
         fontSize: 14,
         fontFamily: "sans-serif",
-        fill: isRoot ? "#ffffff" : isEmpty ? "#808080" : "#000000",
+        fill: isRoot ? "#ffffff" : isEmpty ? "#94a3b8" : "#0f172a",
         fontStyle: isEmpty ? "italic" : "normal",
         listening: false,
       });
@@ -1068,7 +1093,7 @@ export default function MindmapEditor({
               height: 20,
               fill: isRoot
                 ? "rgba(255, 255, 255, 0.3)"
-                : "rgba(0, 100, 255, 0.2)",
+                : "rgba(16, 185, 129, 0.18)",
               listening: false,
             });
             cursorLayer.add(highlight);
@@ -1097,7 +1122,7 @@ export default function MindmapEditor({
             height: 20,
             fill: isRoot
               ? "rgba(255, 255, 255, 0.3)"
-              : "rgba(0, 100, 255, 0.2)",
+              : "rgba(16, 185, 129, 0.18)",
             listening: false,
           });
           cursorLayer.add(highlight);
@@ -1110,7 +1135,7 @@ export default function MindmapEditor({
           activeNode.x + nodePadding + (offsets?.[cursorPos] || 0);
         const line = new Konva.Line({
           points: [cursorX, activeNode.y - 10, cursorX, activeNode.y + 10],
-          stroke: isRoot ? "#ffffff" : "#000000",
+          stroke: isRoot ? "#ffffff" : "#0f172a",
           strokeWidth: 2,
           listening: false,
         });
@@ -1143,20 +1168,61 @@ export default function MindmapEditor({
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       />
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-gray-50">
-        <input
-          type="text"
-          value={title}
-          onChange={handleTitleChange}
-          onBlur={() => noteId && saveNote(model)}
-          className="flex-1 min-w-0 text-sm px-2 py-1 border rounded font-semibold"
-          placeholder="タイトル（ルートノード）"
-        />
+      <header className="flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link
+            href="/notes"
+            className="text-sm font-medium text-emerald-700 hover:text-emerald-800 whitespace-nowrap"
+          >
+            ← 一覧
+          </Link>
+          <div className="h-6 w-px bg-slate-200" />
+          {editingTitle ? (
+            <input
+              type="text"
+              autoFocus
+              value={title}
+              onChange={handleTitleChange}
+              onBlur={() => {
+                setEditingTitle(false);
+                if (noteId) saveNote(model);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === "Escape") {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="h-9 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-lg font-bold tracking-tight outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              placeholder="タイトル（ルートノード）"
+            />
+          ) : (
+            <button
+              onClick={() => setEditingTitle(true)}
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1 text-left hover:bg-slate-100"
+              title="タイトルを編集"
+            >
+              <span className="truncate text-lg font-bold tracking-tight">
+                {title || "無題"}
+              </span>
+              <span className="text-slate-400">✎</span>
+            </button>
+          )}
+          <span
+            className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+          >
+            {isPublic ? "公開" : "非公開"}
+          </span>
+        </div>
         {noteId && (
-          <>
-            <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+          <div className="flex items-center gap-4 text-sm">
+            <span
+              ref={saveStatusRef}
+              className="whitespace-nowrap text-slate-500"
+            />
+            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">
               <input
                 type="checkbox"
+                className="h-4 w-4 accent-emerald-600"
                 checked={isPublic}
                 onChange={(e) => {
                   const newVal = e.target.checked;
@@ -1164,17 +1230,16 @@ export default function MindmapEditor({
                   saveNote(model, newVal);
                 }}
               />
-              公開
+              公開する
             </label>
-            <span
-              ref={saveStatusRef}
-              className="text-xs text-gray-400 whitespace-nowrap"
-            />
-          </>
+          </div>
         )}
-      </div>
-      <div className="flex-1 relative overflow-hidden">
-        <div ref={canvasRef} className="absolute inset-0" />
+      </header>
+      <div className="flex-1 relative overflow-hidden bg-slate-50">
+        <div
+          ref={canvasRef}
+          className="absolute inset-0 bg-[radial-gradient(#dbe2ea_1px,transparent_1px)] [background-size:20px_20px]"
+        />
         <input
           ref={inputRef}
           value={editingText}
