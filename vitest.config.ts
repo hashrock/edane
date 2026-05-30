@@ -15,6 +15,7 @@ export default defineConfig({
         test: {
           name: "node",
           include: ["app/**/*.test.ts"],
+          benchmark: { include: ["app/**/*.bench.ts"] },
           environment: "node",
         },
       },

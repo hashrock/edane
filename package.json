@@ -11,6 +11,7 @@
     "test": "vitest run --project node",
     "test:e2e": "vitest run --project browser",
     "test:all": "vitest run",
+    "bench": "vitest bench --project node",
     "migrate": "wrangler d1 migrations apply mindmap-lite-db --local",
     "migrate:remote": "wrangler d1 migrations apply mindmap-lite-db --remote",
     "generate": "drizzle-kit generate",
