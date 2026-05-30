@@ -4,9 +4,6 @@
   "main": "./app/server.ts",
   "compatibility_date": "2025-08-03",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": {
-    "DEV_BYPASS_AUTH": "true"
-  },
   "d1_databases": [
     {
       "binding": "DB",
