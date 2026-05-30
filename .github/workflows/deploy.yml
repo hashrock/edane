@@ -26,6 +26,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy
-          workingDirectory: api
           preCommands: |
             wrangler d1 migrations apply mindmap-lite-db --remote
