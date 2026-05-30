@@ -235,24 +235,34 @@ const routes = app
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/guest", (c) => c.render("Guest", { user: c.get("user") }))
+  .get("/notes/new", (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/notes");
+    return c.render("Notes/New", { user });
+  })
   .post("/notes", async (c) => {
     const user = c.get("user");
     if (!user) return c.redirect("/notes");
 
     const body = await c.req
-      .json<{ title?: string }>()
-      .catch(() => ({}) as { title?: string });
+      .json<{ title?: string; isPublic?: boolean }>()
+      .catch(() => ({}) as { title?: string; isPublic?: boolean });
+    const isPublic = body.isPublic ?? false;
     const db = drizzle(c.env.DB);
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const content = await encrypt("トピック1\nトピック2", c.env.ENCRYPTION_KEY);
+    const plain = "トピック1\nトピック2";
+    // Public notes store plaintext; private notes are encrypted at rest
+    const content = isPublic
+      ? plain
+      : await encrypt(plain, c.env.ENCRYPTION_KEY);
 
     await db.insert(notes).values({
       id,
       userId: user.id,
       title: body.title || "Untitled",
       content,
-      isPublic: false,
+      isPublic,
       createdAt: now,
       updatedAt: now,
     });

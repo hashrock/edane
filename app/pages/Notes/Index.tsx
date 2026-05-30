@@ -1,4 +1,6 @@
 import { Head, Link, router } from "@inertiajs/react";
+import { useState } from "react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 type Note = {
   id: string;
@@ -21,16 +23,12 @@ export default function NotesIndex({
   user: User;
   notes: Note[];
 }) {
-  const createNote = () => {
-    const title = prompt("ノートのタイトル");
-    if (!title) return;
-    // サーバ側で作成後 /notes/:id/edit へリダイレクト
-    router.post("/notes", { title });
-  };
+  const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
 
-  const deleteNote = (id: string) => {
-    if (!confirm("このノートを削除しますか？")) return;
-    router.delete(`/notes/${id}`, { preserveScroll: true });
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    router.delete(`/notes/${deleteTarget.id}`, { preserveScroll: true });
+    setDeleteTarget(null);
   };
 
   return (
@@ -82,12 +80,12 @@ export default function NotesIndex({
         <section>
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-xl font-bold tracking-tight">マイノート</h2>
-            <button
-              onClick={createNote}
+            <Link
+              href="/notes/new"
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
             >
               + 新規作成
-            </button>
+            </Link>
           </div>
           {notes.length === 0 ? (
             <p className="text-slate-500">ノートがありません。</p>
@@ -117,7 +115,7 @@ export default function NotesIndex({
                       {note.isPublic ? "公開" : "非公開"}
                     </span>
                     <button
-                      onClick={() => deleteNote(note.id)}
+                      onClick={() => setDeleteTarget(note)}
                       className="p-2 text-slate-400 opacity-70 hover:text-red-500 group-hover:opacity-100 transition"
                       title="削除"
                     >
@@ -144,6 +142,21 @@ export default function NotesIndex({
           )}
         </section>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        variant="danger"
+        title="ノートを削除しますか？"
+        message={
+          deleteTarget
+            ? `「${deleteTarget.title || "無題"}」を削除します。この操作は取り消せません。`
+            : undefined
+        }
+        confirmLabel="削除"
+        cancelLabel="キャンセル"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
