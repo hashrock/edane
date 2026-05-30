@@ -22,10 +22,19 @@ import {
 import { UndoManager } from "../application/undoManager";
 
 /** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
+export interface RedrawStats {
+  redrawCount: number;
+  redrawTotalMs: number;
+  redrawLastMs: number;
+}
+
 export interface MindmapTestApi {
   getModel: () => MindMapModel;
   getActiveNodeId: () => string | null;
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
+  /** Main-canvas-redraw timing counters (the dominant per-keystroke cost). */
+  getRedrawStats: () => RedrawStats;
+  resetRedrawStats: () => void;
 }
 
 declare global {
@@ -101,6 +110,8 @@ export default function MindmapEditor({
   const wasDraggingRef = useRef(false);
   const undoManagerRef = useRef(new UndoManager());
   const isComposingRef = useRef(false);
+  // Non-production perf counters for the (expensive) main canvas redraw.
+  const perfRef = useRef({ redrawCount: 0, redrawTotalMs: 0, redrawLastMs: 0 });
   const modelRef = useRef(model);
   modelRef.current = model;
 
@@ -683,6 +694,8 @@ export default function MindmapEditor({
     const layer = layerRef.current;
     if (!Konva || !layer || nodes.length === 0) return;
 
+    const perfStart = import.meta.env.PROD ? 0 : performance.now();
+
     layer.destroyChildren();
 
     const nodeMap: Record<string, MindMapNode> = {};
@@ -859,6 +872,13 @@ export default function MindmapEditor({
     });
 
     layer.draw();
+
+    if (!import.meta.env.PROD) {
+      const dt = performance.now() - perfStart;
+      perfRef.current.redrawCount += 1;
+      perfRef.current.redrawTotalMs += dt;
+      perfRef.current.redrawLastMs = dt;
+    }
   }, [nodes, activeNodeId, editingText, konvaReady, dispatch]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
@@ -997,6 +1017,14 @@ export default function MindmapEditor({
         const worldX = node.x + 20 + textW / 2;
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
+      },
+      getRedrawStats: () => ({ ...perfRef.current }),
+      resetRedrawStats: () => {
+        perfRef.current = {
+          redrawCount: 0,
+          redrawTotalMs: 0,
+          redrawLastMs: 0,
+        };
       },
     };
     window.__mindmapTest = api;
