@@ -92,8 +92,8 @@ export function assignNodePositions(
     const parent = parentLayout.node;
     if (parent.children.length === 0) return;
 
-    let currentY =
-      parentLayout.y - (parentLayout.subtreeHeight - NODE_HEIGHT) / 2;
+    // Top of the children block, centered vertically on the parent.
+    let currentY = parentLayout.y - parentLayout.subtreeHeight / 2;
 
     parent.children.forEach((childId) => {
       const childLayout = layoutMap.get(childId);
