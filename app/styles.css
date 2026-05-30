@@ -37,9 +37,39 @@
   animation: anim-fade-up 0.4s ease both;
 }
 
+@keyframes anim-overlay {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes anim-modal {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.anim-overlay {
+  animation: anim-overlay 0.15s ease both;
+}
+
+.anim-modal {
+  animation: anim-modal 0.18s ease both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-header,
-  .anim-item {
+  .anim-item,
+  .anim-overlay,
+  .anim-modal {
     animation: none;
   }
 }
