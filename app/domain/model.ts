@@ -59,6 +59,17 @@ export function getFlatOrder(model: MindMapModel): string[] {
   return result;
 }
 
+/** Map of node id → depth (root = 0). */
+export function getNodeDepths(model: MindMapModel): Map<string, number> {
+  const depths = new Map<string, number>();
+  function walk(node: MindMapModel, depth: number) {
+    depths.set(node.id, depth);
+    for (const child of node.children) walk(child, depth + 1);
+  }
+  walk(model, 0);
+  return depths;
+}
+
 // --- Tree mutations (all return new model) ---
 
 export function updateNodeText(

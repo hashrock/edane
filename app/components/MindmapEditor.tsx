@@ -20,6 +20,7 @@ import {
   type EditorAction,
 } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
+import { selectionNodesToText } from "../application/clipboard";
 
 // --- Text measurement (cached) ---
 // The canvas redraw needs each node's width and per-character cursor offsets.
@@ -319,6 +320,95 @@ export default function MindmapEditor({
     });
   }, [dispatch]);
 
+  // --- Clipboard ---
+  // Insert indented plain text as fresh nodes after the active node.
+  const pasteTextAsNodes = useCallback(
+    (clipText: string) => {
+      if (!clipText.trim()) return;
+      const cur = stateRef.current;
+      const targetId = cur.activeNodeId || cur.model.id;
+      const parsed = textToModel("_", clipText);
+      const reId = (n: MindMapModel): MindMapModel => ({
+        id: generateId(),
+        text: n.text,
+        children: n.children.map(reId),
+      });
+      const freshChildren = parsed.children.map(reId);
+      if (freshChildren.length === 0) return;
+      const next = dispatch(
+        { type: "insertNodes", targetId, nodes: freshChildren },
+        "paste"
+      );
+      if (noteId) saveNote(next.model);
+    },
+    [dispatch, noteId, saveNote]
+  );
+
+  const handleCopy = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    const st = stateRef.current;
+    if (isMultiNodeSelection(st)) {
+      // Multi-node selection: copy the selected nodes as indented text.
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", selectionNodesToText(st));
+    } else if (st.activeNodeId && st.cursorPos === st.selectionEnd) {
+      // Collapsed caret: copy the whole current node's text.
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", st.editingText);
+    }
+    // Otherwise (in-node text selection): let the input copy natively.
+  }, []);
+
+  const handleCut = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const st = stateRef.current;
+      if (isMultiNodeSelection(st)) {
+        e.preventDefault();
+        e.clipboardData.setData("text/plain", selectionNodesToText(st));
+        dispatch({ type: "collapseSelection" }, "delete-range");
+      }
+      // Otherwise: native cut of the in-node text selection.
+    },
+    [dispatch]
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const text = e.clipboardData.getData("text");
+      if (!text) return;
+      const st = stateRef.current;
+      const multi = isMultiNodeSelection(st);
+
+      // Plain single-line paste with no multi-node selection: let the input
+      // handle it natively (no clipboard permission needed).
+      if (!text.includes("\n") && !multi) return;
+
+      e.preventDefault();
+      if (multi) dispatch({ type: "collapseSelection" }, "delete-range");
+
+      if (text.includes("\n")) {
+        pasteTextAsNodes(text);
+        return;
+      }
+      // Single line replacing a (now collapsed) multi-node selection.
+      const s2 = stateRef.current;
+      if (!s2.activeNodeId) return;
+      const a = Math.min(s2.cursorPos, s2.selectionEnd);
+      const b = Math.max(s2.cursorPos, s2.selectionEnd);
+      const newText = s2.editingText.slice(0, a) + text + s2.editingText.slice(b);
+      dispatch(
+        {
+          type: "typeText",
+          text: newText,
+          cursorPos: a + text.length,
+          selectionEnd: a + text.length,
+          commitModel: true,
+        },
+        "paste-text"
+      );
+    },
+    [dispatch, pasteTextAsNodes]
+  );
+
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
     const copyAllText = () => {
@@ -349,22 +439,7 @@ export default function MindmapEditor({
     };
     const pasteAsNodes = async () => {
       const clipText = await navigator.clipboard.readText();
-      if (!clipText.trim()) return;
-      const cur = stateRef.current;
-      const targetId = cur.activeNodeId || cur.model.id;
-      const parsed = textToModel("_", clipText);
-      const reId = (n: MindMapModel): MindMapModel => ({
-        id: generateId(),
-        text: n.text,
-        children: n.children.map(reId),
-      });
-      const freshChildren = parsed.children.map(reId);
-      if (freshChildren.length === 0) return;
-      const next = dispatch(
-        { type: "insertNodes", targetId, nodes: freshChildren },
-        "paste"
-      );
-      if (noteId) saveNote(next.model);
+      pasteTextAsNodes(clipText);
     };
     return [
       { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
@@ -372,7 +447,7 @@ export default function MindmapEditor({
       { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
     ];
-  }, [dispatch, noteId, saveNote]);
+  }, [pasteTextAsNodes]);
 
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
@@ -1218,6 +1293,9 @@ export default function MindmapEditor({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onSelect={handleSelect}
+          onCopy={handleCopy}
+          onCut={handleCut}
+          onPaste={handlePaste}
           onCompositionStart={() => {
             setIsComposing(true);
             isComposingRef.current = true;
