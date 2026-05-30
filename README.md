@@ -1,4 +1,4 @@
-# Mindmap Lite
+# edane
 
 テキストのインデントからマインドマップを生成するWebアプリ。
 Hono + Inertia.js + React 構成で、単一の Cloudflare Worker がサーバーとクライアントの両方を配信する。
