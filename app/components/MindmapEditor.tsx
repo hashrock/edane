@@ -21,6 +21,19 @@ import {
 } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
 
+/** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
+export interface MindmapTestApi {
+  getModel: () => MindMapModel;
+  getActiveNodeId: () => string | null;
+  getNodeClickPoint: (id: string) => { x: number; y: number } | null;
+}
+
+declare global {
+  interface Window {
+    __mindmapTest?: MindmapTestApi;
+  }
+}
+
 interface Props {
   noteId?: string;
   initialContent?: string;
@@ -965,6 +978,33 @@ export default function MindmapEditor({
     cursorLayer.draw();
   }, [activeNodeId, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset]);
 
+  // --- Test API (non-production): imperative hooks for browser e2e tests ---
+  // Exposes the live model plus a "node select" helper that returns the screen
+  // point at the middle of a node's text, so tests can issue a real click that
+  // activates the node and exercises the click→focus path.
+  useEffect(() => {
+    if (import.meta.env.PROD) return;
+    const api: MindmapTestApi = {
+      getModel: () => stateRef.current.model,
+      getActiveNodeId: () => stateRef.current.activeNodeId,
+      getNodeClickPoint: (id: string) => {
+        const node = nodesRef.current.find((n) => n.id === id);
+        const stage = konvaStageRef.current;
+        if (!node || !stage) return null;
+        const scale = stage.scaleX();
+        const offsets = cursorOffsetsRef.current.get(id);
+        const textW = offsets ? offsets[offsets.length - 1] : 40;
+        const worldX = node.x + 20 + textW / 2;
+        const worldY = node.y;
+        return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
+      },
+    };
+    window.__mindmapTest = api;
+    return () => {
+      if (window.__mindmapTest === api) delete window.__mindmapTest;
+    };
+  }, []);
+
   // Global Meta+P handler (when hidden input is not focused)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1057,6 +1097,7 @@ export default function MindmapEditor({
       <div className="flex-1 relative overflow-hidden bg-slate-50">
         <div
           ref={canvasRef}
+          data-testid="mm-canvas"
           className="absolute inset-0 bg-[radial-gradient(#dbe2ea_1px,transparent_1px)] [background-size:20px_20px]"
         />
         <input
