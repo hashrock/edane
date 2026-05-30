@@ -3,6 +3,9 @@
  * No framework or rendering dependencies.
  */
 
+/** Node kind. `text` is the default; `image`/`link` store their URL in `text`. */
+export type NodeType = "text" | "image" | "link";
+
 /** Tree node model (stored as JSON) */
 export interface MindMapModel {
   id: string;
@@ -10,6 +13,8 @@ export interface MindMapModel {
   children: MindMapModel[];
   /** When true, descendants are hidden in the canvas and skipped in navigation. */
   collapsed?: boolean;
+  /** Node kind (absent = "text"). For image/link, `text` holds the URL. */
+  type?: NodeType;
 }
 
 // --- ID generation ---
@@ -102,6 +107,18 @@ export function addSiblingAfter(
   const result = findParentAndIndex(cloned, afterId);
   if (!result) return cloned;
   result.parent.children.splice(result.index + 1, 0, newNode);
+  return cloned;
+}
+
+/** Set a node's kind. Returns a new model. `text` is stored as absent. */
+export function setNodeType(
+  model: MindMapModel,
+  nodeId: string,
+  type: NodeType
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) node.type = type === "text" ? undefined : type;
   return cloned;
 }
 

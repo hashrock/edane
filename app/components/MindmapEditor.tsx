@@ -5,6 +5,7 @@ import type { MindMapModel } from "../domain/model";
 import { findNode, getFlatOrder, generateId } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import { LINE_HEIGHT } from "../lib/measureText";
+import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
 import { flattenToNodes } from "../application/nodeUtils";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import {
@@ -284,12 +285,24 @@ export default function MindmapEditor({
     []
   );
 
-  // Derived: flat nodes with layout
+  // Re-render when an image-node's image finishes loading (size becomes known).
+  const [imageVersion, setImageVersion] = useState(0);
+  useEffect(
+    () => subscribeImages(() => setImageVersion((v) => v + 1)),
+    []
+  );
+
+  // Derived: flat nodes with layout. The active node is sized as text from the
+  // live editing buffer, so image/link nodes grow to fit the URL while editing.
   const nodes = useMemo(() => {
-    const flat = flattenToNodes(model);
+    const flat = flattenToNodes(
+      model,
+      activeNodeId ? { id: activeNodeId, text: editingText } : undefined
+    );
     if (flat.length > 0) layoutMindMap(flat);
     return flat;
-  }, [model]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, activeNodeId, editingText, imageVersion]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -543,7 +556,31 @@ export default function MindmapEditor({
     if (!node) return [];
     const isRoot = node.id === modelRef.current.id;
     const hasChildren = node.children.length > 0;
+    const type = node.type ?? "text";
     const items: ContextMenuItem[] = [];
+
+    // Link: jump to the URL (single click edits, so open lives in the menu).
+    if (type === "link" && node.text) {
+      items.push({
+        label: "リンクを開く",
+        onSelect: () => window.open(node.text, "_blank", "noopener"),
+      });
+    }
+
+    // Kind conversion (root excluded — it's the note title).
+    if (!isRoot) {
+      const setType = (nodeType: "text" | "image" | "link") => () => {
+        const next = dispatch(
+          { type: "setNodeType", nodeId, nodeType },
+          "set-type"
+        );
+        if (noteId) saveNote(next.model);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      };
+      if (type !== "text") items.push({ label: "テキストにする", onSelect: setType("text") });
+      if (type !== "image") items.push({ label: "画像にする（URL）", onSelect: setType("image") });
+      if (type !== "link") items.push({ label: "リンクにする（URL）", onSelect: setType("link") });
+    }
 
     if (hasChildren) {
       items.push({
@@ -1062,13 +1099,22 @@ export default function MindmapEditor({
       const displayText = isEmpty ? "empty" : displayRaw;
       const data = lineDataMap.get(node.id)!;
       const lineCount = data.lines.length;
-      const textWidth = textWidths.get(node.id) || 100;
-      const rectWidth = Math.max(
-        textWidth + nodePadding * 2,
-        isRoot ? 100 : 80
-      );
       const blockHeight = lineCount * LINE_HEIGHT;
-      const rectHeight = Math.max(32, blockHeight + 14);
+      // The active node is always edited/rendered as text, whatever its kind.
+      const asImage = !isActive && node.type === "image";
+      const asLink = !isActive && node.type === "link";
+
+      let rectWidth: number;
+      let rectHeight: number;
+      if (asImage) {
+        const d = imageDisplaySize(node.text);
+        rectWidth = d.w + nodePadding * 2;
+        rectHeight = d.h + 14;
+      } else {
+        const textWidth = textWidths.get(node.id) || 100;
+        rectWidth = Math.max(textWidth + nodePadding * 2, isRoot ? 100 : 80);
+        rectHeight = Math.max(32, blockHeight + 14);
+      }
 
       const group = new Konva.Group();
 
@@ -1104,18 +1150,56 @@ export default function MindmapEditor({
       });
       group.add(rect);
 
-      const textNode = new Konva.Text({
-        x: node.x + nodePadding,
-        y: node.y - blockHeight / 2 + 2,
-        text: displayText,
-        fontSize: 14,
-        fontFamily: "sans-serif",
-        lineHeight: KONVA_LINE_HEIGHT,
-        fill: isRoot ? "#ffffff" : isEmpty ? "#94a3b8" : "#0f172a",
-        fontStyle: isEmpty ? "italic" : "normal",
-        listening: false,
-      });
-      group.add(textNode);
+      if (asImage) {
+        const d = imageDisplaySize(node.text);
+        if (d.status === "loaded" && d.img) {
+          group.add(
+            new Konva.Image({
+              image: d.img,
+              x: node.x + nodePadding,
+              y: node.y - d.h / 2,
+              width: d.w,
+              height: d.h,
+              cornerRadius: 8,
+              listening: false,
+            })
+          );
+        } else {
+          group.add(
+            new Konva.Text({
+              x: node.x + nodePadding,
+              y: node.y - 7,
+              width: d.w,
+              align: "center",
+              text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
+              fontSize: 12,
+              fontFamily: "sans-serif",
+              fill: "#94a3b8",
+              listening: false,
+            })
+          );
+        }
+      } else {
+        const textNode = new Konva.Text({
+          x: node.x + nodePadding,
+          y: node.y - blockHeight / 2 + 2,
+          text: displayText,
+          fontSize: 14,
+          fontFamily: "sans-serif",
+          lineHeight: KONVA_LINE_HEIGHT,
+          fill: asLink
+            ? "#2563eb"
+            : isRoot
+              ? "#ffffff"
+              : isEmpty
+                ? "#94a3b8"
+                : "#0f172a",
+          fontStyle: isEmpty ? "italic" : "normal",
+          textDecoration: asLink ? "underline" : "",
+          listening: false,
+        });
+        group.add(textNode);
+      }
 
       // Collapsed indicator: a small pill on the right showing hidden child count.
       if (node.collapsed && node.childCount > 0) {
@@ -1155,18 +1239,24 @@ export default function MindmapEditor({
         const worldX = (pointer.x - stage.x()) / scale;
         const worldY = (pointer.y - stage.y()) / scale;
 
-        // Find the clicked caret position: line by Y, column by X.
-        const relY = worldY - (node.y - blockHeight / 2);
-        const line = Math.max(
-          0,
-          Math.min(lineCount - 1, Math.floor(relY / LINE_HEIGHT))
-        );
-        const relX = worldX - node.x - nodePadding;
-        const charIdx = lineColToPos(
-          data,
-          line,
-          nearestCol(data.lineOffsets[line], relX)
-        );
+        // Find the clicked caret position: line by Y, column by X. Image/link
+        // nodes don't render their text, so caret to the end of the URL/label.
+        let charIdx: number;
+        if (asImage || asLink) {
+          charIdx = node.text.length;
+        } else {
+          const relY = worldY - (node.y - blockHeight / 2);
+          const line = Math.max(
+            0,
+            Math.min(lineCount - 1, Math.floor(relY / LINE_HEIGHT))
+          );
+          const relX = worldX - node.x - nodePadding;
+          charIdx = lineColToPos(
+            data,
+            line,
+            nearestCol(data.lineOffsets[line], relX)
+          );
+        }
 
         // Activate the node at the clicked caret position (no anchor yet —
         // a drag will set the anchor on the first mousemove).

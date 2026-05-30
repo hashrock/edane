@@ -1,3 +1,5 @@
+import type { NodeType } from "../domain/model";
+
 /** Flat node for rendering (computed from domain model via layout) */
 export interface MindMapNode {
   id: string;
@@ -5,6 +7,8 @@ export interface MindMapNode {
   x: number;
   y: number;
   children: string[];
+  /** Node kind (text/image/link). */
+  type: NodeType;
   /** Measured box width (px); filled in by layout. */
   width: number;
   /** Measured box height (px), incl. multi-line text; filled in by layout. */

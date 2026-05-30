@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type { MindMapNode } from "../types/MindMap";
 import { layoutMindMap } from "../lib/treeLayout";
 import { LINE_HEIGHT } from "../lib/measureText";
+import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
 import { parseContent } from "../application/persistence";
 import { flattenToNodes } from "../application/nodeUtils";
 
@@ -17,12 +18,16 @@ export default function MindmapViewer({ initialContent, title }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const konvaStageRef = useRef<any>(null);
 
+  const [imageVersion, setImageVersion] = useState(0);
+  useEffect(() => subscribeImages(() => setImageVersion((v) => v + 1)), []);
+
   const nodes = useMemo(() => {
     const model = parseContent(initialContent, title);
     const flat = flattenToNodes(model);
     if (flat.length > 0) layoutMindMap(flat);
     return flat;
-  }, [initialContent, title]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialContent, title, imageVersion]);
 
   useEffect(() => {
     if (!canvasRef.current || nodes.length === 0) return;
@@ -73,14 +78,18 @@ export default function MindmapViewer({ initialContent, title }: Props) {
         const isRoot = index === 0;
         const isEmpty = node.text === "";
         const displayText = isEmpty ? "empty" : node.text;
-        const textWidth = node.width || 100;
-        const rectWidth = Math.max(
-          textWidth + PADDING * 2,
-          isRoot ? 100 : 80
-        );
-        const rectHeight = node.height;
+        const isImage = node.type === "image";
+        const isLink = node.type === "link";
         const lineCount = isEmpty ? 1 : node.text.split("\n").length;
         const blockHeight = lineCount * LINE_HEIGHT;
+
+        let rectWidth: number;
+        const rectHeight = node.height;
+        if (isImage) {
+          rectWidth = (node.width || 100) + PADDING * 2;
+        } else {
+          rectWidth = Math.max((node.width || 100) + PADDING * 2, isRoot ? 100 : 80);
+        }
 
         const rect = new Konva.Rect({
           x: node.x,
@@ -94,17 +103,53 @@ export default function MindmapViewer({ initialContent, title }: Props) {
         });
         layer.add(rect);
 
-        const textNode = new Konva.Text({
-          x: node.x + PADDING,
-          y: node.y - blockHeight / 2 + 2,
-          text: displayText,
-          fontSize: 14,
-          fontFamily: "sans-serif",
-          lineHeight: KONVA_LINE_HEIGHT,
-          fill: isRoot ? "#ffffff" : isEmpty ? "#808080" : "#000000",
-          fontStyle: isEmpty ? "italic" : "normal",
-        });
-        layer.add(textNode);
+        if (isImage) {
+          const d = imageDisplaySize(node.text);
+          if (d.status === "loaded" && d.img) {
+            layer.add(
+              new Konva.Image({
+                image: d.img,
+                x: node.x + PADDING,
+                y: node.y - d.h / 2,
+                width: d.w,
+                height: d.h,
+                cornerRadius: 8,
+              })
+            );
+          } else {
+            layer.add(
+              new Konva.Text({
+                x: node.x + PADDING,
+                y: node.y - 7,
+                width: d.w,
+                align: "center",
+                text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
+                fontSize: 12,
+                fontFamily: "sans-serif",
+                fill: "#808080",
+              })
+            );
+          }
+        } else {
+          const textNode = new Konva.Text({
+            x: node.x + PADDING,
+            y: node.y - blockHeight / 2 + 2,
+            text: displayText,
+            fontSize: 14,
+            fontFamily: "sans-serif",
+            lineHeight: KONVA_LINE_HEIGHT,
+            fill: isLink
+              ? "#2563eb"
+              : isRoot
+                ? "#ffffff"
+                : isEmpty
+                  ? "#808080"
+                  : "#000000",
+            fontStyle: isEmpty ? "italic" : "normal",
+            textDecoration: isLink ? "underline" : "",
+          });
+          layer.add(textNode);
+        }
 
         // Collapsed indicator: pill showing the hidden child count.
         if (node.collapsed && node.childCount > 0) {

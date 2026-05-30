@@ -7,7 +7,7 @@
  * caller cheaply skip re-rendering / undo bookkeeping.
  */
 
-import type { MindMapModel } from "../domain/model";
+import type { MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   findParentAndIndex,
@@ -22,6 +22,7 @@ import {
   updateNodeText,
   toggleCollapse,
   addChildToNode,
+  setNodeType,
 } from "../domain/model";
 
 export interface EditorState {
@@ -88,6 +89,7 @@ export type EditorAction =
   | { type: "toggleCollapse"; nodeId: string }
   | { type: "addChild"; nodeId: string }
   | { type: "deleteNode"; nodeId: string }
+  | { type: "setNodeType"; nodeId: string; nodeType: NodeType }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -601,6 +603,14 @@ export function editorReducer(
         return focusNodeState(state, newModel, landId);
       }
       return { ...state, model: newModel };
+    }
+
+    case "setNodeType": {
+      const node = findNode(state.model, action.nodeId);
+      if (!node) return state;
+      const newModel = setNodeType(state.model, action.nodeId, action.nodeType);
+      // Activate the node so its URL/label can be edited as text right away.
+      return focusNodeState(state, newModel, action.nodeId);
     }
 
     case "setTitle": {

@@ -16,6 +16,7 @@ function nodes(
     height: 32,
     collapsed: false,
     childCount: children.length,
+    type: "text" as const,
   }));
 }
 
