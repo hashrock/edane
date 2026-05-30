@@ -84,6 +84,14 @@ export interface RedrawStats {
 export interface MindmapTestApi {
   getModel: () => MindMapModel;
   getActiveNodeId: () => string | null;
+  /** Current selection state (focus + multi-node anchor). */
+  getSelection: () => {
+    activeNodeId: string | null;
+    cursorPos: number;
+    selectionEnd: number;
+    selAnchorNodeId: string | null;
+    selAnchorOffset: number;
+  };
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
   /** Main-canvas-redraw timing counters (the dominant per-keystroke cost). */
   getRedrawStats: () => RedrawStats;
@@ -393,6 +401,20 @@ export default function MindmapEditor({
 
       const pos = inputRef.current?.selectionStart || 0;
       const selEnd = inputRef.current?.selectionEnd || 0;
+
+      // Shift+Arrow Up/Down: extend a multi-node selection to the adjacent node.
+      if (
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
+        e.preventDefault();
+        dispatch({
+          type: e.key === "ArrowDown" ? "extendSelectionDown" : "extendSelectionUp",
+        });
+        return;
+      }
 
       // If multi-node selection, collapse it before most actions
       if (isMultiNodeSelection(state)) {
@@ -1055,6 +1077,16 @@ export default function MindmapEditor({
     const api: MindmapTestApi = {
       getModel: () => stateRef.current.model,
       getActiveNodeId: () => stateRef.current.activeNodeId,
+      getSelection: () => {
+        const s = stateRef.current;
+        return {
+          activeNodeId: s.activeNodeId,
+          cursorPos: s.cursorPos,
+          selectionEnd: s.selectionEnd,
+          selAnchorNodeId: s.selAnchorNodeId,
+          selAnchorOffset: s.selAnchorOffset,
+        };
+      },
       getNodeClickPoint: (id: string) => {
         const node = nodesRef.current.find((n) => n.id === id);
         const stage = konvaStageRef.current;

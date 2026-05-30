@@ -49,6 +49,9 @@ export type EditorAction =
   | { type: "cmdShiftRight"; pos: number; selEnd: number }
   | { type: "arrowLeftEdge" }
   | { type: "arrowRightEdge" }
+  // --- keyboard multi-node selection (Shift+Arrow) ---
+  | { type: "extendSelectionDown" }
+  | { type: "extendSelectionUp" }
   // --- text input ---
   | {
       type: "typeText";
@@ -343,6 +346,45 @@ export function editorReducer(
       if (idx < order.length - 1)
         return focusNodeState(state, model, order[idx + 1], 0, 0);
       return state;
+    }
+
+    case "extendSelectionDown":
+    case "extendSelectionUp": {
+      const { model, activeNodeId, cursorPos, selAnchorNodeId, selAnchorOffset } =
+        state;
+      if (!activeNodeId) return state;
+      const order = getFlatOrder(model);
+      const idx = order.indexOf(activeNodeId);
+      const nextIdx =
+        action.type === "extendSelectionDown" ? idx + 1 : idx - 1;
+      if (nextIdx < 0 || nextIdx >= order.length) return state;
+
+      // Anchor the selection at the current caret on the first extension;
+      // keep the existing anchor while the selection is already spanning.
+      const anchorNodeId = selAnchorNodeId ?? activeNodeId;
+      const anchorOffset = selAnchorNodeId === null ? cursorPos : selAnchorOffset;
+      const anchorIdx = order.indexOf(anchorNodeId);
+
+      const newActiveId = order[nextIdx];
+      const newNode = findNode(model, newActiveId);
+      if (!newNode) return state;
+
+      // Focus offset selects whole nodes as the focus passes them, and
+      // collapses back to the caret when it returns to the anchor node.
+      let focusOffset: number;
+      if (newActiveId === anchorNodeId) focusOffset = anchorOffset;
+      else if (nextIdx > anchorIdx) focusOffset = newNode.text.length;
+      else focusOffset = 0;
+
+      return {
+        ...state,
+        activeNodeId: newActiveId,
+        editingText: newNode.text,
+        cursorPos: focusOffset,
+        selectionEnd: focusOffset,
+        selAnchorNodeId: anchorNodeId,
+        selAnchorOffset: anchorOffset,
+      };
     }
 
     case "typeText": {

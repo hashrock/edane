@@ -219,6 +219,61 @@ describe("multi-node selection", () => {
   });
 });
 
+describe("extendSelection (Shift+Arrow)", () => {
+  // DFS order of sampleModel: root, a, a1, b
+  it("starts a multi-node selection downward, anchoring at the caret", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a"); // caret at end of "A" (offset 1)
+    const next = editorReducer(s, { type: "extendSelectionDown" });
+    expect(next.activeNodeId).toBe("a1");
+    expect(next.selAnchorNodeId).toBe("a");
+    expect(next.selAnchorOffset).toBe(1);
+    expect(next.cursorPos).toBe(2); // whole "A1" included
+    expect(isMultiNodeSelection(next)).toBe(true);
+  });
+
+  it("keeps the original anchor while extending further", () => {
+    const model = sampleModel();
+    const one = editorReducer(stateAt(model, "a"), {
+      type: "extendSelectionDown",
+    });
+    const two = editorReducer(one, { type: "extendSelectionDown" });
+    expect(two.activeNodeId).toBe("b");
+    expect(two.selAnchorNodeId).toBe("a");
+    expect(two.selAnchorOffset).toBe(1);
+    expect(two.cursorPos).toBe(1); // whole "B"
+  });
+
+  it("collapses when the focus returns to the anchor node", () => {
+    const model = sampleModel();
+    const down = editorReducer(stateAt(model, "a"), {
+      type: "extendSelectionDown",
+    });
+    const back = editorReducer(down, { type: "extendSelectionUp" });
+    expect(back.activeNodeId).toBe("a");
+    expect(back.cursorPos).toBe(1);
+    expect(isMultiNodeSelection(back)).toBe(false);
+  });
+
+  it("extends upward, focusing the start of nodes above the anchor", () => {
+    const model = sampleModel();
+    const up = editorReducer(stateAt(model, "a1"), {
+      type: "extendSelectionUp",
+    });
+    expect(up.activeNodeId).toBe("a");
+    expect(up.selAnchorNodeId).toBe("a1");
+    expect(up.selAnchorOffset).toBe(2);
+    expect(up.cursorPos).toBe(0);
+    expect(isMultiNodeSelection(up)).toBe(true);
+  });
+
+  it("is a no-op at the top edge", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(editorReducer(s, { type: "extendSelectionUp" })).toBe(s);
+  });
+});
+
 describe("typeText", () => {
   it("commits text to the model when commitModel is true", () => {
     const model = sampleModel();
