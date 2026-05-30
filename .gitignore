@@ -15,8 +15,9 @@ dist/
 
 # deps
 node_modules/
-api/pnpm-lock.yaml
-web/pnpm-lock.yaml
+
+# generated
+app/pages.gen.ts
 
 # env
 .env

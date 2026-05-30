@@ -1,13 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "edane",
-  "main": "./dist/index.js",
-  "compatibility_date": "2026-03-19",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "assets": {
-    "directory": "./dist"
+  "main": "./app/server.ts",
+  "compatibility_date": "2025-08-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "DEV_BYPASS_AUTH": "true"
   },
   "d1_databases": [
     {
