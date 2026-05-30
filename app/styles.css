@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "./";
 
 .konvajs-content {
   touch-action: none;

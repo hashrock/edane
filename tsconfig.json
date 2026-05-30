@@ -4,7 +4,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "@cloudflare/workers-types"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "noEmit": true
   },
-  "include": ["drizzle.config.ts"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", "vite.config.ts", "drizzle.config.ts"]
 }
