@@ -24,8 +24,9 @@ export interface EditingNode {
  * reporting its hidden child count). Each node carries its measured box size so
  * the layout can place variable-height nodes without overlap. Sizing is
  * kind-aware: image nodes use their (scaled) image size, text/link nodes use
- * pretext text measurement. The node currently being edited is always sized as
- * text from the live editing buffer, so it grows to fit the URL/label you type.
+ * pretext text measurement. The node currently being edited is sized as text
+ * from the live editing buffer (honoring its font size / bold), so it grows to
+ * fit the URL/label you type.
  */
 export function flattenToNodes(
   model: MindMapModel,
@@ -40,8 +41,12 @@ export function flattenToNodes(
     let width: number;
     let height: number;
     if (isEditing) {
-      // The edited node is always rendered as plain text at the default font.
-      const box = measureNodeBox(editing.text);
+      // The edited node is rendered as plain text from the live buffer, but it
+      // keeps its own font size / bold so the box matches what's drawn.
+      const box = measureNodeBox(editing.text, {
+        fontSize: m.fontSize,
+        bold: m.bold,
+      });
       width = box.width;
       height = box.height;
     } else if (type === "image") {
