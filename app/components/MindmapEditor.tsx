@@ -32,7 +32,10 @@ import {
   type EditorAction,
 } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
-import { selectionNodesToText } from "../application/clipboard";
+import {
+  selectionNodesToText,
+  nodeSubtreeToText,
+} from "../application/clipboard";
 
 // --- Text measurement (cached) ---
 // The canvas redraw needs each node's width and per-character cursor offsets.
@@ -230,6 +233,7 @@ export default function MindmapEditor({
   const [state, setStateRaw] = useState<EditorState>(() => ({
     model: parseContent(initialContent, initialTitle),
     activeNodeId: null,
+    editing: false,
     editingText: "",
     cursorPos: 0,
     selectionEnd: 0,
@@ -243,6 +247,7 @@ export default function MindmapEditor({
   const {
     model,
     activeNodeId,
+    editing,
     editingText,
     cursorPos,
     selectionEnd,
@@ -318,6 +323,16 @@ export default function MindmapEditor({
     []
   );
 
+  // Run several dispatches as one undo entry (e.g. paste = delete + insert).
+  const transact = useCallback((type: string, fn: () => void) => {
+    undoManagerRef.current.beginTransaction(type, stateRef.current);
+    try {
+      fn();
+    } finally {
+      undoManagerRef.current.endTransaction(stateRef.current);
+    }
+  }, []);
+
   // Briefly highlight a set of nodes (used to show where a paste/insert landed).
   const flashNodes = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
@@ -336,17 +351,19 @@ export default function MindmapEditor({
     []
   );
 
-  // Derived: flat nodes with layout. The active node is sized as text from the
-  // live editing buffer, so image/link nodes grow to fit the URL while editing.
+  // Derived: flat nodes with layout. Only while a caret is active (editing) is
+  // the node sized as text from the live buffer, so image/link nodes grow to fit
+  // the URL you type. When merely selected, they keep their real (image/link)
+  // size so the layout box matches what's drawn.
   const nodes = useMemo(() => {
     const flat = flattenToNodes(
       model,
-      activeNodeId ? { id: activeNodeId, text: editingText } : undefined
+      editing && activeNodeId ? { id: activeNodeId, text: editingText } : undefined
     );
     if (flat.length > 0) layoutMindMap(flat);
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, activeNodeId, editingText, imageVersion]);
+  }, [model, editing, activeNodeId, editingText, imageVersion]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -547,6 +564,13 @@ export default function MindmapEditor({
       // Multi-node selection: copy the selected nodes as indented text.
       e.preventDefault();
       e.clipboardData.setData("text/plain", selectionNodesToText(st));
+    } else if (st.activeNodeId && !st.editing) {
+      // Selection mode: copy the selected node (and its subtree) as nodes.
+      e.preventDefault();
+      e.clipboardData.setData(
+        "text/plain",
+        nodeSubtreeToText(st.model, st.activeNodeId)
+      );
     } else if (st.activeNodeId && st.cursorPos === st.selectionEnd) {
       // Collapsed caret: copy the whole current node's text.
       e.preventDefault();
@@ -562,6 +586,14 @@ export default function MindmapEditor({
         e.preventDefault();
         e.clipboardData.setData("text/plain", selectionNodesToText(st));
         dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
+      } else if (st.activeNodeId && !st.editing) {
+        // Selection mode: cut the selected node (copy its subtree, then delete).
+        e.preventDefault();
+        e.clipboardData.setData(
+          "text/plain",
+          nodeSubtreeToText(st.model, st.activeNodeId)
+        );
+        dispatch({ type: "deleteNode", nodeId: st.activeNodeId }, "delete-nodes");
       }
       // Otherwise: native cut of the in-node text selection.
     },
@@ -589,36 +621,47 @@ export default function MindmapEditor({
       if (!text) return;
       const st = stateRef.current;
       const multi = isMultiNodeSelection(st);
+      // Selection mode (single node selected, not editing): paste as nodes.
+      const selectionMode = !!st.activeNodeId && !st.editing && !multi;
 
-      // Plain single-line paste with no multi-node selection: let the input
+      // Editing mode, plain single-line paste, no node selection: let the input
       // handle it natively (no clipboard permission needed).
-      if (!text.includes("\n") && !multi) return;
+      if (!text.includes("\n") && !multi && !selectionMode) return;
 
       e.preventDefault();
-      if (multi) dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
 
-      if (text.includes("\n")) {
-        pasteTextAsNodes(text);
-        return;
-      }
-      // Single line replacing a (now collapsed) multi-node selection.
-      const s2 = stateRef.current;
-      if (!s2.activeNodeId) return;
-      const a = Math.min(s2.cursorPos, s2.selectionEnd);
-      const b = Math.max(s2.cursorPos, s2.selectionEnd);
-      const newText = s2.editingText.slice(0, a) + text + s2.editingText.slice(b);
-      dispatch(
-        {
-          type: "typeText",
-          text: newText,
-          cursorPos: a + text.length,
-          selectionEnd: a + text.length,
-          commitModel: true,
-        },
-        "paste-text"
-      );
+      // The whole paste is one undo step. For a multi-node selection it deletes
+      // the selected nodes and then inserts — both must undo together.
+      const runPaste = () => {
+        if (multi) dispatch({ type: "deleteSelectedNodes" }, "delete-nodes");
+
+        if (text.includes("\n") || selectionMode) {
+          pasteTextAsNodes(text);
+          return;
+        }
+        // Single line replacing a (now collapsed) multi-node selection.
+        const s2 = stateRef.current;
+        if (!s2.activeNodeId) return;
+        const a = Math.min(s2.cursorPos, s2.selectionEnd);
+        const b = Math.max(s2.cursorPos, s2.selectionEnd);
+        const newText =
+          s2.editingText.slice(0, a) + text + s2.editingText.slice(b);
+        dispatch(
+          {
+            type: "typeText",
+            text: newText,
+            cursorPos: a + text.length,
+            selectionEnd: a + text.length,
+            commitModel: true,
+          },
+          "paste-text"
+        );
+      };
+
+      if (multi) transact("paste", runPaste);
+      else runPaste();
     },
-    [dispatch, pasteTextAsNodes]
+    [dispatch, pasteTextAsNodes, transact]
   );
 
   // --- Link preview: fetch <title> + favicon for a link node's URL ---
@@ -910,8 +953,56 @@ export default function MindmapEditor({
             selectionEnd: state.selectionEnd,
             anchorNodeId: null,
             anchorOffset: 0,
+            editing: state.editing,
           });
         }
+      }
+
+      // Selection mode (node selected but not being edited): keys select /
+      // navigate rather than edit text.
+      if (!state.editing) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          dispatch({ type: "deselect" });
+          inputRef.current?.blur();
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          dispatch({ type: "startEditing" });
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          dispatch({ type: "moveUp" });
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          dispatch({ type: "moveDown" });
+          return;
+        }
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          dispatch({ type: "tab", shift: e.shiftKey }, "indent");
+          return;
+        }
+        if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          dispatch({ type: "deleteNode", nodeId: state.activeNodeId }, "delete");
+          return;
+        }
+        // A printable character: the textarea still holds the whole-text
+        // selection, so letting it through replaces the content and typeText
+        // flips us into edit mode.
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
+          return;
+        }
+        // Other keys (Cmd+C, etc.) fall through to native textarea handling.
       }
 
       // Shift+Enter inserts a line break inside the node; let the textarea's
@@ -1018,8 +1109,9 @@ export default function MindmapEditor({
 
       if (e.key === "Escape") {
         e.preventDefault();
-        dispatch({ type: "deselect" });
-        inputRef.current?.blur();
+        // Editing → back to selection mode (a second Escape, handled above,
+        // then deselects).
+        dispatch({ type: "exitEditing" });
         return;
       }
     },
@@ -1320,14 +1412,18 @@ export default function MindmapEditor({
     // Draw nodes
     nodes.forEach((node, index) => {
       const isRoot = index === 0;
-      const isActive = activeNodeId === node.id;
-      // The active node is edited as raw text (image/link nodes show their URL
-      // while editing) but still honours its stored font size / weight, so the
-      // text doesn't visually jump when entering or leaving edit mode.
-      const asImage = !isActive && node.type === "image";
-      const asLink = !isActive && node.type === "link";
+      // isEditing = caret/text-input active; isSelected = node highlighted but
+      // not being edited (single click). A selected node renders like any other
+      // (link title, stored format) with just an accent outline.
+      const isEditing = editing && activeNodeId === node.id;
+      const isSelected = !editing && activeNodeId === node.id;
+      // The edited node shows raw text (image/link nodes show their URL while
+      // editing) but still honours its stored font size / weight, so the text
+      // doesn't visually jump when entering or leaving edit mode.
+      const asImage = !isEditing && node.type === "image";
+      const asLink = !isEditing && node.type === "link";
       // Links display their fetched title (falling back to the raw URL).
-      const displayRaw = isActive
+      const displayRaw = isEditing
         ? editingText
         : asLink
           ? node.linkTitle || node.text
@@ -1356,7 +1452,7 @@ export default function MindmapEditor({
         const d = imageDisplaySize(node.text);
         rectWidth = d.w + nodePadding * 2;
         rectHeight = d.h + 14;
-      } else if (!isActive) {
+      } else if (!isEditing) {
         // Font-aware box from the pre-measured node size (incl. favicon width).
         rectWidth = Math.max(node.width + nodePadding * 2, isRoot ? 100 : 80);
         rectHeight = Math.max(32, node.height);
@@ -1374,7 +1470,7 @@ export default function MindmapEditor({
         width: rectWidth,
         height: rectHeight,
         cornerRadius: 12,
-        fill: isActive
+        fill: isEditing
           ? isRoot
             ? "#1e293b"
             : "#f1f5f9"
@@ -1383,12 +1479,13 @@ export default function MindmapEditor({
             : isEmpty
               ? "#f8fafc"
               : "#ffffff",
-        stroke: isActive
-          ? "#10b981"
-          : isRoot
-            ? "#0f172a"
-            : "#e2e8f0",
-        strokeWidth: isActive ? 2 : 1,
+        stroke:
+          isEditing || isSelected
+            ? "#10b981"
+            : isRoot
+              ? "#0f172a"
+              : "#e2e8f0",
+        strokeWidth: isEditing || isSelected ? 2 : 1,
         // Shadow blur is the dominant raster cost; keep the soft shadow only on
         // the single root node and drop the near-invisible one on every other.
         shadowColor: "#0f172a",
@@ -1521,18 +1618,35 @@ export default function MindmapEditor({
           );
         }
 
-        // Activate the node at the clicked caret position (no anchor yet —
-        // a drag will set the anchor on the first mousemove).
-        dispatch({
-          type: "activateNode",
-          nodeId: node.id,
-          cursorPos: charIdx,
-          selectionEnd: charIdx,
-          anchorNodeId: null,
-          anchorOffset: 0,
-        });
+        // A single click selects the node; only clicking inside the node that
+        // is already being edited moves the caret. A drag (handled in mousemove
+        // → dragSelect) then enters edit mode with a text range.
+        const cur = stateRef.current;
+        const editingThis = cur.editing && cur.activeNodeId === node.id;
+        if (editingThis) {
+          dispatch({
+            type: "activateNode",
+            nodeId: node.id,
+            cursorPos: charIdx,
+            selectionEnd: charIdx,
+            anchorNodeId: null,
+            anchorOffset: 0,
+            editing: true,
+          });
+        } else {
+          // Select mode: whole text selected so a follow-up keypress replaces it.
+          dispatch({
+            type: "activateNode",
+            nodeId: node.id,
+            cursorPos: 0,
+            selectionEnd: node.text.length,
+            anchorNodeId: null,
+            anchorOffset: 0,
+            editing: false,
+          });
+        }
 
-        // Start drag selection
+        // Start drag selection (anchored at the clicked caret position).
         dragStateRef.current = { nodeId: node.id, anchorCharIdx: charIdx };
         if (stage) stage.draggable(false);
 
@@ -1573,7 +1687,7 @@ export default function MindmapEditor({
       perfRef.current.redrawLastMs = now - perfStart;
       perfRef.current.redrawDrawMs += now - drawStart;
     }
-  }, [nodes, activeNodeId, editingText, konvaReady, dispatch]);
+  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -1659,8 +1773,9 @@ export default function MindmapEditor({
         });
         cursorLayer.add(sel);
       }
-    } else {
-      // Single-node selection or cursor
+    } else if (editing) {
+      // Caret + in-node text selection — only while editing. A merely selected
+      // node is shown with the accent outline drawn on the main layer.
       const activeNode = nodes.find((n) => n.id === activeNodeId);
       if (!activeNode) return;
 
@@ -1730,7 +1845,7 @@ export default function MindmapEditor({
     }
 
     cursorLayer.draw();
-  }, [activeNodeId, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset, highlightIds]);
+  }, [activeNodeId, editing, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset, highlightIds]);
 
   // --- Test API (non-production): imperative hooks for browser e2e tests ---
   // Exposes the live model plus a "node select" helper that returns the screen
