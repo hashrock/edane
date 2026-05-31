@@ -1,11 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
 import { getFlatOrder, findNode } from "../domain/model";
-import {
-  editorReducer,
-  isMultiNodeSelection,
-  type EditorState,
-} from "./editorReducer";
+import { editorReducer, type EditorState } from "./editorReducer";
 
 /** Strip IDs so we can compare tree structure and text only */
 function stripIds(model: MindMapModel): unknown {
@@ -46,8 +42,7 @@ function stateAt(model: MindMapModel, nodeId: string): EditorState {
     editingText: node.text,
     cursorPos: node.text.length,
     selectionEnd: node.text.length,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: null,
   };
 }
 
@@ -174,119 +169,115 @@ describe("navigation", () => {
   });
 });
 
-describe("node selection (whole-node)", () => {
+describe("branch clipboard (cut / copy / paste)", () => {
   // DFS order of sampleModel: root, a, a1, b
-  function nodeSelection(
-    model: MindMapModel,
-    anchorId: string,
-    focusId: string
-  ): EditorState {
-    return {
-      model,
-      activeNodeId: focusId,
-      editing: true,
-      editingText: findNode(model, focusId)?.text ?? "",
-      cursorPos: 0,
-      selectionEnd: 0,
-      selAnchorNodeId: anchorId,
-      selAnchorOffset: 0,
-    };
-  }
-
-  it("deleteSelectedNodes removes the whole selected node range", () => {
+  it("copyBranch stores the subtree and leaves the model untouched", () => {
     const model = sampleModel();
-    const s = nodeSelection(model, "a", "b");
-    expect(isMultiNodeSelection(s)).toBe(true);
-    const next = editorReducer(s, { type: "deleteSelectedNodes" });
-    expect(isMultiNodeSelection(next)).toBe(false);
-    expect(next.selAnchorNodeId).toBeNull();
-    expect(getFlatOrder(next.model)).toEqual(["root"]); // a, a1, b gone
-    expect(next.activeNodeId).toBe("root");
+    const next = editorReducer(stateAt(model, "a"), { type: "copyBranch" });
+    expect(next.model).toBe(model); // model unchanged
+    expect(next.clipboard).not.toBeNull();
+    expect(next.clipboard!.text).toBe("A");
+    expect(next.clipboard!.children[0].text).toBe("A1");
   });
 
-  it("keeps unselected nodes and lands the caret before the range", () => {
+  it("cutBranch removes the node with its descendants and stores them", () => {
     const model = sampleModel();
-    const next = editorReducer(nodeSelection(model, "a1", "b"), {
-      type: "deleteSelectedNodes",
-    });
-    expect(getFlatOrder(next.model)).toEqual(["root", "a"]);
-    expect(next.activeNodeId).toBe("a");
+    const next = editorReducer(stateAt(model, "a"), { type: "cutBranch" });
+    expect(getFlatOrder(next.model)).toEqual(["root", "b"]); // a + a1 gone
+    expect(next.clipboard!.text).toBe("A");
+    expect(next.clipboard!.children[0].text).toBe("A1");
   });
 
-  it("never deletes the root node (promotes its children)", () => {
+  it("cutBranch lands focus on the previous node in flat order", () => {
     const model = sampleModel();
-    const next = editorReducer(nodeSelection(model, "root", "a"), {
-      type: "deleteSelectedNodes",
-    });
-    expect(findNode(next.model, "root")).not.toBeNull();
-    expect(findNode(next.model, "a")).toBeNull();
-    expect(findNode(next.model, "a1")).not.toBeNull(); // promoted to root
-  });
-
-  it("deleteSelectedNodesAndInsert types at the landing caret", () => {
-    const model = sampleModel();
-    const next = editorReducer(nodeSelection(model, "a", "b"), {
-      type: "deleteSelectedNodesAndInsert",
-      char: "X",
-    });
-    expect(next.activeNodeId).toBe("root");
-    expect(findNode(next.model, "root")!.text).toBe("RootX");
-    expect(next.cursorPos).toBe(5);
-  });
-});
-
-describe("extendSelection (Shift+Arrow)", () => {
-  // DFS order of sampleModel: root, a, a1, b
-  it("starts a multi-node selection downward, anchoring at the caret", () => {
-    const model = sampleModel();
-    const s = stateAt(model, "a"); // caret at end of "A" (offset 1)
-    const next = editorReducer(s, { type: "extendSelectionDown" });
+    const next = editorReducer(stateAt(model, "b"), { type: "cutBranch" });
+    // before "b" in DFS (root, a, a1, b) is "a1"
     expect(next.activeNodeId).toBe("a1");
-    expect(next.selAnchorNodeId).toBe("a");
-    expect(next.selAnchorOffset).toBe(1);
-    expect(next.cursorPos).toBe(2); // whole "A1" included
-    expect(isMultiNodeSelection(next)).toBe(true);
   });
 
-  it("keeps the original anchor while extending further", () => {
-    const model = sampleModel();
-    const one = editorReducer(stateAt(model, "a"), {
-      type: "extendSelectionDown",
-    });
-    const two = editorReducer(one, { type: "extendSelectionDown" });
-    expect(two.activeNodeId).toBe("b");
-    expect(two.selAnchorNodeId).toBe("a");
-    expect(two.selAnchorOffset).toBe(1);
-    expect(two.cursorPos).toBe(1); // whole "B"
-  });
-
-  it("collapses when the focus returns to the anchor node", () => {
-    const model = sampleModel();
-    const down = editorReducer(stateAt(model, "a"), {
-      type: "extendSelectionDown",
-    });
-    const back = editorReducer(down, { type: "extendSelectionUp" });
-    expect(back.activeNodeId).toBe("a");
-    expect(back.cursorPos).toBe(1);
-    expect(isMultiNodeSelection(back)).toBe(false);
-  });
-
-  it("extends upward, focusing the start of nodes above the anchor", () => {
-    const model = sampleModel();
-    const up = editorReducer(stateAt(model, "a1"), {
-      type: "extendSelectionUp",
-    });
-    expect(up.activeNodeId).toBe("a");
-    expect(up.selAnchorNodeId).toBe("a1");
-    expect(up.selAnchorOffset).toBe(2);
-    expect(up.cursorPos).toBe(0);
-    expect(isMultiNodeSelection(up)).toBe(true);
-  });
-
-  it("is a no-op at the top edge", () => {
+  it("cutBranch on the root is a no-op", () => {
     const model = sampleModel();
     const s = stateAt(model, "root");
-    expect(editorReducer(s, { type: "extendSelectionUp" })).toBe(s);
+    expect(editorReducer(s, { type: "cutBranch" })).toBe(s);
+  });
+
+  it("pasteBranch inserts the clipboard as a child of the active node", () => {
+    const model = sampleModel();
+    const copied = editorReducer(stateAt(model, "a"), { type: "copyBranch" });
+    // select "b", then paste
+    const onB = { ...copied, activeNodeId: "b", editingText: "B" };
+    const next = editorReducer(onB, { type: "pasteBranch" });
+    const b = findNode(next.model, "b")!;
+    expect(b.children).toHaveLength(1);
+    expect(b.children[0].text).toBe("A");
+    expect(b.children[0].children[0].text).toBe("A1");
+    // focus moves to the pasted subtree root
+    expect(next.activeNodeId).toBe(b.children[0].id);
+  });
+
+  it("pasteBranch assigns fresh ids (no clash with the source)", () => {
+    const model = sampleModel();
+    const copied = editorReducer(stateAt(model, "a"), { type: "copyBranch" });
+    const onB = { ...copied, activeNodeId: "b", editingText: "B" };
+    const next = editorReducer(onB, { type: "pasteBranch" });
+    const pasted = findNode(next.model, "b")!.children[0];
+    expect(pasted.id).not.toBe("a");
+    expect(pasted.children[0].id).not.toBe("a1");
+    // original "a" still present and untouched
+    expect(findNode(next.model, "a")).not.toBeNull();
+  });
+
+  it("cut → select → paste moves a branch under a new parent", () => {
+    const model = sampleModel();
+    const cut = editorReducer(stateAt(model, "a"), { type: "cutBranch" });
+    expect(findNode(cut.model, "a")).toBeNull();
+    const onB = { ...cut, activeNodeId: "b", editingText: "B" };
+    const moved = editorReducer(onB, { type: "pasteBranch" });
+    const b = findNode(moved.model, "b")!;
+    expect(b.children[0].text).toBe("A");
+    expect(b.children[0].children[0].text).toBe("A1");
+  });
+
+  it("copy → paste twice yields two independent subtrees", () => {
+    const model = sampleModel();
+    const copied = editorReducer(stateAt(model, "a"), { type: "copyBranch" });
+    const onB = { ...copied, activeNodeId: "b", editingText: "B" };
+    const once = editorReducer(onB, { type: "pasteBranch" });
+    const twice = editorReducer(
+      { ...once, activeNodeId: "b" },
+      { type: "pasteBranch" }
+    );
+    const b = findNode(twice.model, "b")!;
+    expect(b.children).toHaveLength(2);
+    expect(b.children[0].id).not.toBe(b.children[1].id);
+    expect(b.children[0].text).toBe("A");
+    expect(b.children[1].text).toBe("A");
+  });
+
+  it("pasteBranch is a no-op when the clipboard is empty", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    expect(editorReducer(s, { type: "pasteBranch" })).toBe(s);
+  });
+
+  it("pasteBranch expands a collapsed target so the paste is visible", () => {
+    const model = sampleModel();
+    const copied = editorReducer(stateAt(model, "b"), { type: "copyBranch" });
+    // collapse "a" then paste into it
+    const collapsedA: MindMapModel = {
+      ...model,
+      children: model.children.map((c) =>
+        c.id === "a" ? { ...c, collapsed: true } : c
+      ),
+    };
+    const onA = {
+      ...copied,
+      model: collapsedA,
+      activeNodeId: "a",
+      editingText: "A",
+    };
+    const next = editorReducer(onA, { type: "pasteBranch" });
+    expect(findNode(next.model, "a")!.collapsed).toBeFalsy();
   });
 });
 

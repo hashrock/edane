@@ -35,8 +35,7 @@ function stateForTree(model: MindMapModel, count: number): EditorState {
     editingText: text,
     cursorPos: text.length,
     selectionEnd: text.length,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: null,
   };
 }
 

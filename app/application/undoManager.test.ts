@@ -11,8 +11,7 @@ function st(tag: string): EditorState {
     editingText: "",
     cursorPos: 0,
     selectionEnd: 0,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: null,
   };
 }
 

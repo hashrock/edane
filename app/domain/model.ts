@@ -209,6 +209,36 @@ export function removeNode(
   return cloned;
 }
 
+/**
+ * Detach a node together with its WHOLE subtree (unlike removeNode, children
+ * are NOT promoted). Returns the new model and the removed subtree as an
+ * independent clone. The root cannot be detached → { model, removed: null }.
+ */
+export function detachBranch(
+  model: MindMapModel,
+  nodeId: string
+): { model: MindMapModel; removed: MindMapModel | null } {
+  if (model.id === nodeId) return { model, removed: null };
+  const cloned = cloneModel(model);
+  const result = findParentAndIndex(cloned, nodeId);
+  if (!result) return { model: cloned, removed: null };
+  const [removed] = result.parent.children.splice(result.index, 1);
+  return { model: cloned, removed };
+}
+
+/**
+ * Deep-clone a subtree, assigning a fresh id to every node. Text, kind and
+ * formatting are preserved. Used when pasting a branch so the copy never shares
+ * ids with the source.
+ */
+export function cloneWithNewIds(node: MindMapModel): MindMapModel {
+  return {
+    ...cloneModel(node),
+    id: generateId(),
+    children: node.children.map(cloneWithNewIds),
+  };
+}
+
 /** Indent: make node the last child of its previous sibling */
 export function indentNode(
   model: MindMapModel,

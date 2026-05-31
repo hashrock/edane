@@ -81,34 +81,55 @@ describe("MindmapEditor clipboard", () => {
     expect(root.children.some((c) => c.text === "Z")).toBe(true);
   });
 
-  it("copies a multi-node selection as indented text", async () => {
+  it("cuts a branch and pastes it as a child of the selected node", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    const point = await waitFor(() => api().getNodeClickPoint("root"));
+    await waitFor(() => api().getActiveNodeId() === "root");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
+    const point = await waitFor(() => api().getNodeClickPoint("a"));
     const canvas = document.querySelector<HTMLElement>(
       '[data-testid="mm-canvas"]'
     )!;
+    // Select node "a" (selection mode, not editing).
     await userEvent.click(canvas, {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
+    await waitFor(() => api().getActiveNodeId() === "a");
+    await waitFor(() => api().getSelection().editing === false);
+
+    // Cut the branch → "a" leaves the tree, focus lands on the previous node.
+    hiddenInput().dispatchEvent(
+      new ClipboardEvent("cut", {
+        clipboardData: new DataTransfer(),
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await waitFor(() =>
+      api()
+        .getModel()
+        .children.every((c) => c.text !== "Alpha")
+    );
     await waitFor(() => api().getActiveNodeId() === "root");
 
-    // Select root → a.
-    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
-    await waitFor(() => api().getSelection().selAnchorNodeId === "root");
-
-    const dt = new DataTransfer();
-    const ev = new ClipboardEvent("copy", {
-      clipboardData: dt,
-      bubbles: true,
-      cancelable: true,
-    });
-    hiddenInput().dispatchEvent(ev);
-
-    expect(ev.defaultPrevented).toBe(true);
-    expect(dt.getData("text/plain")).toBe("Root\n  Alpha");
+    // Paste the branch as a child of the (now selected) root.
+    hiddenInput().dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: new DataTransfer(),
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await waitFor(() =>
+      api()
+        .getModel()
+        .children.some((c) => c.text === "Alpha")
+    );
+    const pasted = api()
+      .getModel()
+      .children.find((c) => c.text === "Alpha")!;
+    expect(pasted.id).not.toBe("a"); // fresh id on paste
   });
 });

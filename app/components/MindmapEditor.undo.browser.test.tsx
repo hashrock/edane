@@ -51,6 +51,9 @@ async function activate(nodeId: string) {
     position: { x: Math.round(point.x), y: Math.round(point.y) },
   });
   await waitFor(() => api().getActiveNodeId() === nodeId);
+  // A single click only selects; Enter enters edit mode (caret + text input).
+  await userEvent.keyboard("{Enter}");
+  await waitFor(() => api().getSelection().editing === true);
 }
 
 describe("MindmapEditor undo/redo", () => {

@@ -72,14 +72,15 @@ describe("MindmapEditor (browser e2e)", () => {
         (document.activeElement as HTMLElement | null)?.tagName === "TEXTAREA"
     );
 
-    // Typing must reach the input and update the model.
+    // A single click selects the node with its whole text selected, so typing a
+    // printable character replaces it (select-then-type rename) and flips into
+    // edit mode. The point of this test is that typing reaches the focused input.
     await userEvent.keyboard("X");
     const text = await waitFor(() => {
       const t = api().getModel().children[0].text;
       return t !== "Hello" ? t : null;
     });
 
-    expect(text).toContain("X");
-    expect(text.length).toBe("Hello".length + 1);
+    expect(text).toBe("X");
   });
 });

@@ -5,6 +5,11 @@
  * The reducer is pure (no React/DOM) and always returns a COMPLETE next
  * state. A no-op action returns the SAME state reference, which lets the
  * caller cheaply skip re-rendering / undo bookkeeping.
+ *
+ * Selection model: exactly ONE node is always active (`activeNodeId` is never
+ * null). `editing` distinguishes "editing" (caret + text input) from "selected"
+ * (node highlighted). Text range selection within a node uses cursorPos/
+ * selectionEnd. There is no multi-node selection.
  */
 
 import type { MindMapModel, NodeType } from "../domain/model";
@@ -16,6 +21,8 @@ import {
   cloneModel,
   addSiblingAfter,
   removeNode,
+  detachBranch,
+  cloneWithNewIds,
   indentNode,
   dedentNode,
   splitNode,
@@ -37,9 +44,9 @@ export interface EditorState {
   editingText: string;
   cursorPos: number;
   selectionEnd: number;
-  // Multi-node selection anchor (null = no separate anchor / single caret)
-  selAnchorNodeId: string | null;
-  selAnchorOffset: number;
+  // Internal branch clipboard: the subtree captured by copyBranch / cutBranch,
+  // pasted as a child of the active node by pasteBranch. null = empty.
+  clipboard: MindMapModel | null;
 }
 
 export type EditorAction =
@@ -57,9 +64,6 @@ export type EditorAction =
   | { type: "cmdShiftRight"; pos: number; selEnd: number }
   | { type: "arrowLeftEdge" }
   | { type: "arrowRightEdge" }
-  // --- keyboard multi-node selection (Shift+Arrow) ---
-  | { type: "extendSelectionDown" }
-  | { type: "extendSelectionUp" }
   // --- text input ---
   | {
       type: "typeText";
@@ -70,17 +74,16 @@ export type EditorAction =
       commitModel: boolean;
     }
   | { type: "setSelection"; cursorPos: number; selectionEnd: number }
-  // --- range selection collapse ---
-  | { type: "deleteSelectedNodes" }
-  | { type: "deleteSelectedNodesAndInsert"; char: string }
+  // --- branch clipboard ---
+  | { type: "copyBranch" }
+  | { type: "cutBranch" }
+  | { type: "pasteBranch" }
   // --- pointer ---
   | {
       type: "activateNode";
       nodeId: string;
       cursorPos: number;
       selectionEnd: number;
-      anchorNodeId: string | null;
-      anchorOffset: number;
       // false = just select the node (single click); true = enter edit mode.
       editing: boolean;
     }
@@ -97,7 +100,6 @@ export type EditorAction =
       focusNodeId: string;
       focusOffset: number;
     }
-  | { type: "deselect" }
   // --- context-menu node ops ---
   | { type: "toggleCollapse"; nodeId: string }
   | { type: "addChild"; nodeId: string }
@@ -126,24 +128,11 @@ export type EditorAction =
   | { type: "setTitle"; text: string }
   | { type: "replace"; state: EditorState };
 
-// --- Selection predicates ---
-
-export function isMultiNodeSelection(state: EditorState): boolean {
-  return (
-    state.selAnchorNodeId !== null &&
-    state.selAnchorNodeId !== state.activeNodeId
-  );
-}
-
-export function hasAnySelection(state: EditorState): boolean {
-  return isMultiNodeSelection(state) || state.cursorPos !== state.selectionEnd;
-}
-
 // --- Helpers ---
 
 /**
  * Move focus to a node, resolving its text from the model. Defaults the
- * cursor to the end of the text and clears any multi-node anchor.
+ * cursor to the end of the text. Preserves the current edit mode and clipboard.
  */
 function focusNodeState(
   state: EditorState,
@@ -165,8 +154,7 @@ function focusNodeState(
     editingText: text,
     cursorPos: pos,
     selectionEnd: sel,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: state.clipboard,
   };
 }
 
@@ -194,8 +182,6 @@ export function editorReducer(
           editingText: "",
           cursorPos: 0,
           selectionEnd: 0,
-          selAnchorNodeId: null,
-          selAnchorOffset: 0,
         };
       }
       // Mid-text: split node
@@ -208,8 +194,6 @@ export function editorReducer(
         editingText: textAfter,
         cursorPos: 0,
         selectionEnd: 0,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -232,18 +216,10 @@ export function editorReducer(
       const idx = order.indexOf(activeNodeId);
 
       if (currentNode.text === "" && model.id !== activeNodeId) {
-        // Empty node: delete it, move to previous
+        // Empty node: delete it, move to the previous node (root at worst).
         const newModel = removeNode(model, activeNodeId);
-        if (idx > 0) {
-          return focusNodeState(state, newModel, order[idx - 1]);
-        }
-        return {
-          ...state,
-          model: newModel,
-          activeNodeId: null,
-          selAnchorNodeId: null,
-          selAnchorOffset: 0,
-        };
+        const landId = idx > 0 ? order[idx - 1] : newModel.id;
+        return focusNodeState(state, newModel, landId);
       }
 
       if (idx > 0 && model.id !== activeNodeId) {
@@ -262,8 +238,6 @@ export function editorReducer(
             editingText: mergedText,
             cursorPos: mergePos,
             selectionEnd: mergePos,
-            selAnchorNodeId: null,
-            selAnchorOffset: 0,
           };
         }
       }
@@ -389,45 +363,6 @@ export function editorReducer(
       return state;
     }
 
-    case "extendSelectionDown":
-    case "extendSelectionUp": {
-      const { model, activeNodeId, cursorPos, selAnchorNodeId, selAnchorOffset } =
-        state;
-      if (!activeNodeId) return state;
-      const order = getFlatOrder(model);
-      const idx = order.indexOf(activeNodeId);
-      const nextIdx =
-        action.type === "extendSelectionDown" ? idx + 1 : idx - 1;
-      if (nextIdx < 0 || nextIdx >= order.length) return state;
-
-      // Anchor the selection at the current caret on the first extension;
-      // keep the existing anchor while the selection is already spanning.
-      const anchorNodeId = selAnchorNodeId ?? activeNodeId;
-      const anchorOffset = selAnchorNodeId === null ? cursorPos : selAnchorOffset;
-      const anchorIdx = order.indexOf(anchorNodeId);
-
-      const newActiveId = order[nextIdx];
-      const newNode = findNode(model, newActiveId);
-      if (!newNode) return state;
-
-      // Focus offset selects whole nodes as the focus passes them, and
-      // collapses back to the caret when it returns to the anchor node.
-      let focusOffset: number;
-      if (newActiveId === anchorNodeId) focusOffset = anchorOffset;
-      else if (nextIdx > anchorIdx) focusOffset = newNode.text.length;
-      else focusOffset = 0;
-
-      return {
-        ...state,
-        activeNodeId: newActiveId,
-        editingText: newNode.text,
-        cursorPos: focusOffset,
-        selectionEnd: focusOffset,
-        selAnchorNodeId: anchorNodeId,
-        selAnchorOffset: anchorOffset,
-      };
-    }
-
     case "typeText": {
       const { activeNodeId } = state;
       if (!activeNodeId) return state;
@@ -443,8 +378,6 @@ export function editorReducer(
         editingText: action.text,
         cursorPos: action.cursorPos,
         selectionEnd: action.selectionEnd,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -461,51 +394,39 @@ export function editorReducer(
       };
     }
 
-    case "deleteSelectedNodes": {
-      // Node selection deletes WHOLE nodes (not a partial text range). Each
-      // selected node is removed; any non-selected children are promoted by
-      // removeNode. The caret lands at the end of the node before the range.
-      const { model, activeNodeId, selAnchorNodeId } = state;
-      if (!activeNodeId || !selAnchorNodeId) return state;
-      const order = getFlatOrder(model);
-      const anchorIdx = order.indexOf(selAnchorNodeId);
-      const focusIdx = order.indexOf(activeNodeId);
-      if (anchorIdx < 0 || focusIdx < 0) return state;
-
-      const startIdx = Math.min(anchorIdx, focusIdx);
-      const endIdx = Math.max(anchorIdx, focusIdx);
-      const ids = order
-        .slice(startIdx, endIdx + 1)
-        .filter((id) => id !== model.id); // never delete the root
-      if (ids.length === 0) return state;
-
-      let newModel = model;
-      for (let i = ids.length - 1; i >= 0; i--) {
-        newModel = removeNode(newModel, ids[i]);
-      }
-      const prevId = startIdx > 0 ? order[startIdx - 1] : null;
-      const landId =
-        prevId && findNode(newModel, prevId) ? prevId : newModel.id;
-      return focusNodeState(state, newModel, landId);
+    case "copyBranch": {
+      const { activeNodeId } = state;
+      if (!activeNodeId) return state;
+      const node = findNode(state.model, activeNodeId);
+      if (!node) return state;
+      // Snapshot the subtree (own ids); pasteBranch re-ids on insert.
+      return { ...state, clipboard: cloneModel(node) };
     }
 
-    case "deleteSelectedNodesAndInsert": {
-      // Replace a node selection: delete the nodes, then type the char at the
-      // caret of the landing node.
-      const deleted = editorReducer(state, { type: "deleteSelectedNodes" });
-      if (deleted === state || !deleted.activeNodeId) return deleted;
-      const node = findNode(deleted.model, deleted.activeNodeId);
-      if (!node) return deleted;
-      const cPos = deleted.cursorPos;
-      const newText =
-        node.text.substring(0, cPos) + action.char + node.text.substring(cPos);
-      return {
-        ...deleted,
-        model: updateNodeText(deleted.model, deleted.activeNodeId, newText),
-        editingText: newText,
-        cursorPos: cPos + 1,
-        selectionEnd: cPos + 1,
-      };
+    case "cutBranch": {
+      const { model, activeNodeId } = state;
+      if (!activeNodeId || activeNodeId === model.id) return state; // never cut root
+      const order = getFlatOrder(model);
+      const idx = order.indexOf(activeNodeId);
+      const { model: newModel, removed } = detachBranch(model, activeNodeId);
+      if (!removed) return state;
+      const prevId = idx > 0 ? order[idx - 1] : null;
+      const landId =
+        prevId && findNode(newModel, prevId) ? prevId : newModel.id;
+      return { ...focusNodeState(state, newModel, landId), clipboard: removed };
+    }
+
+    case "pasteBranch": {
+      const { model, activeNodeId, clipboard } = state;
+      if (!activeNodeId || !clipboard) return state;
+      const target = findNode(model, activeNodeId);
+      if (!target) return state;
+      const fresh = cloneWithNewIds(clipboard);
+      // Expand the target so the pasted child is visible, then append it.
+      let newModel = toggleCollapse(model, activeNodeId, false);
+      newModel = addChildToNode(newModel, activeNodeId, fresh);
+      // Keep the clipboard so the branch can be pasted again.
+      return { ...focusNodeState(state, newModel, fresh.id), clipboard };
     }
 
     case "activateNode": {
@@ -518,8 +439,6 @@ export function editorReducer(
         editingText: node.text,
         cursorPos: action.cursorPos,
         selectionEnd: action.selectionEnd,
-        selAnchorNodeId: action.anchorNodeId,
-        selAnchorOffset: action.anchorOffset,
       };
     }
 
@@ -533,8 +452,6 @@ export function editorReducer(
         editingText: node.text,
         cursorPos: action.cursorPos ?? 0,
         selectionEnd: action.selectionEnd ?? node.text.length,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -549,8 +466,6 @@ export function editorReducer(
         // replaces it, matching the just-selected-node behaviour.
         cursorPos: 0,
         selectionEnd: len,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -564,8 +479,6 @@ export function editorReducer(
         editingText: node.text,
         cursorPos: 0,
         selectionEnd: node.text.length,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -573,8 +486,7 @@ export function editorReducer(
       const focusNode = findNode(state.model, action.focusNodeId);
       if (!focusNode) return state;
       if (action.focusNodeId === action.anchorNodeId) {
-        // Single-node selection: dragging selects a text range, which is an
-        // editing gesture.
+        // Same node: dragging selects a text range, which is an editing gesture.
         const start = Math.min(action.anchorOffset, action.focusOffset);
         const end = Math.max(action.anchorOffset, action.focusOffset);
         return {
@@ -584,11 +496,10 @@ export function editorReducer(
           editingText: focusNode.text,
           cursorPos: start,
           selectionEnd: end,
-          selAnchorNodeId: action.anchorNodeId,
-          selAnchorOffset: action.anchorOffset,
         };
       }
-      // Multi-node selection: whole-node selection, not text editing.
+      // Cross-node drag: just move focus to the dragged-over node (no
+      // multi-node selection).
       return {
         ...state,
         activeNodeId: action.focusNodeId,
@@ -596,20 +507,6 @@ export function editorReducer(
         editingText: focusNode.text,
         cursorPos: action.focusOffset,
         selectionEnd: action.focusOffset,
-        selAnchorNodeId: action.anchorNodeId,
-        selAnchorOffset: action.anchorOffset,
-      };
-    }
-
-    case "deselect": {
-      if (state.activeNodeId === null && state.selAnchorNodeId === null)
-        return state;
-      return {
-        ...state,
-        activeNodeId: null,
-        editing: false,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 
@@ -633,8 +530,6 @@ export function editorReducer(
         editingText: last.text,
         cursorPos: last.text.length,
         selectionEnd: last.text.length,
-        selAnchorNodeId: null,
-        selAnchorOffset: 0,
       };
     }
 

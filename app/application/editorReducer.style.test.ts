@@ -24,8 +24,7 @@ function makeState(
     editingText: activeNodeId ? findNode(model, activeNodeId)?.text ?? "" : "",
     cursorPos: 0,
     selectionEnd: 0,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: null,
   };
 }
 

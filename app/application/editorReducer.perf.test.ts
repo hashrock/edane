@@ -34,8 +34,7 @@ function measureInsertMs(count: number, iterations: number): number {
     editingText: text,
     cursorPos: text.length,
     selectionEnd: text.length,
-    selAnchorNodeId: null,
-    selAnchorOffset: 0,
+    clipboard: null,
   };
   const action = {
     type: "typeText" as const,

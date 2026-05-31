@@ -44,44 +44,36 @@ beforeEach(() => {
   document.head.appendChild(style);
 });
 
-describe("MindmapEditor Shift+Arrow multi-node selection", () => {
-  it("extends and shrinks a selection to adjacent nodes", async () => {
+describe("MindmapEditor single-node selection", () => {
+  it("starts with the root selected and moves the single selection with arrows", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
 
-    const point = await waitFor(() => api().getNodeClickPoint("root"));
+    // Exactly one node is always selected; the root starts active.
+    await waitFor(() => api().getActiveNodeId() === "root");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
+    const point = await waitFor(() => api().getNodeClickPoint("a"));
     const canvas = document.querySelector<HTMLElement>(
       '[data-testid="mm-canvas"]'
     )!;
+    // Click selects node "a" (selection mode, not editing).
     await userEvent.click(canvas, {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
-    await waitFor(() => api().getActiveNodeId() === "root");
-
-    // Shift+Down anchors at the current node and moves focus to the next one.
-    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
     await waitFor(() => api().getActiveNodeId() === "a");
-    let sel = api().getSelection();
-    expect(sel.selAnchorNodeId).toBe("root");
+    await waitFor(() => api().getSelection().editing === false);
 
-    // Extending further keeps the original anchor.
-    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
-    await waitFor(() => api().getActiveNodeId() === "b");
-    sel = api().getSelection();
-    expect(sel.selAnchorNodeId).toBe("root");
-
-    // Shift+Up shrinks the selection back toward the anchor.
-    await userEvent.keyboard("{Shift>}{ArrowUp}{/Shift}");
-    await waitFor(() => api().getActiveNodeId() === "a");
-    sel = api().getSelection();
-    expect(sel.selAnchorNodeId).toBe("root");
-
-    // A plain (no-shift) arrow clears the multi-node selection.
+    // Arrow keys move the single selection, never extending it.
     await userEvent.keyboard("{ArrowDown}");
-    await waitFor(() => api().getSelection().selAnchorNodeId === null);
-    expect(api().getSelection().selAnchorNodeId).toBeNull();
+    await waitFor(() => api().getActiveNodeId() === "b");
+
+    await userEvent.keyboard("{ArrowUp}");
+    await waitFor(() => api().getActiveNodeId() === "a");
+
+    // Escape leaves a node selected (no "nothing selected" state).
+    await userEvent.keyboard("{Escape}");
+    expect(api().getActiveNodeId()).toBe("a");
   });
 });
