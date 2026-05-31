@@ -20,6 +20,7 @@ function makeState(
   return {
     model,
     activeNodeId,
+    editing: activeNodeId !== null,
     editingText: activeNodeId ? findNode(model, activeNodeId)?.text ?? "" : "",
     cursorPos: 0,
     selectionEnd: 0,

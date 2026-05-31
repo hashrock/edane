@@ -42,6 +42,7 @@ function stateAt(model: MindMapModel, nodeId: string): EditorState {
   return {
     model,
     activeNodeId: nodeId,
+    editing: true,
     editingText: node.text,
     cursorPos: node.text.length,
     selectionEnd: node.text.length,
@@ -183,6 +184,7 @@ describe("node selection (whole-node)", () => {
     return {
       model,
       activeNodeId: focusId,
+      editing: true,
       editingText: findNode(model, focusId)?.text ?? "",
       cursorPos: 0,
       selectionEnd: 0,

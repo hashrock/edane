@@ -30,6 +30,10 @@ import {
 export interface EditorState {
   model: MindMapModel;
   activeNodeId: string | null;
+  // When a node is active, distinguishes "editing" (caret + text input) from
+  // "selected" (node highlighted, single click). Always false when no node is
+  // active.
+  editing: boolean;
   editingText: string;
   cursorPos: number;
   selectionEnd: number;
@@ -77,8 +81,15 @@ export type EditorAction =
       selectionEnd: number;
       anchorNodeId: string | null;
       anchorOffset: number;
+      // false = just select the node (single click); true = enter edit mode.
+      editing: boolean;
     }
   | { type: "selectAllInNode"; nodeId: string }
+  // Enter edit mode on the currently-selected node (double click / Enter /
+  // typing). `cursorPos`/`selectionEnd` default to selecting the whole text.
+  | { type: "startEditing"; cursorPos?: number; selectionEnd?: number }
+  // Leave edit mode but keep the node selected (Escape from editing).
+  | { type: "exitEditing" }
   | {
       type: "dragSelect";
       anchorNodeId: string;
@@ -148,6 +159,9 @@ function focusNodeState(
   return {
     model,
     activeNodeId: nodeId,
+    // Keep the current mode: structural edits stay in edit mode, while
+    // selection-mode navigation (move up/down) stays in selection mode.
+    editing: state.editing,
     editingText: text,
     cursorPos: pos,
     selectionEnd: sel,
@@ -424,6 +438,8 @@ export function editorReducer(
       return {
         ...state,
         model,
+        // Typing always implies edit mode (covers typing on a selected node).
+        editing: true,
         editingText: action.text,
         cursorPos: action.cursorPos,
         selectionEnd: action.selectionEnd,
@@ -498,11 +514,43 @@ export function editorReducer(
       return {
         ...state,
         activeNodeId: action.nodeId,
+        editing: action.editing,
         editingText: node.text,
         cursorPos: action.cursorPos,
         selectionEnd: action.selectionEnd,
         selAnchorNodeId: action.anchorNodeId,
         selAnchorOffset: action.anchorOffset,
+      };
+    }
+
+    case "startEditing": {
+      if (!state.activeNodeId) return state;
+      const node = findNode(state.model, state.activeNodeId);
+      if (!node) return state;
+      return {
+        ...state,
+        editing: true,
+        editingText: node.text,
+        cursorPos: action.cursorPos ?? 0,
+        selectionEnd: action.selectionEnd ?? node.text.length,
+        selAnchorNodeId: null,
+        selAnchorOffset: 0,
+      };
+    }
+
+    case "exitEditing": {
+      if (!state.activeNodeId || !state.editing) return state;
+      const node = findNode(state.model, state.activeNodeId);
+      const len = node?.text.length ?? 0;
+      return {
+        ...state,
+        editing: false,
+        // Back to selection mode: select the whole text so a follow-up keypress
+        // replaces it, matching the just-selected-node behaviour.
+        cursorPos: 0,
+        selectionEnd: len,
+        selAnchorNodeId: null,
+        selAnchorOffset: 0,
       };
     }
 
@@ -512,6 +560,7 @@ export function editorReducer(
       return {
         ...state,
         activeNodeId: action.nodeId,
+        editing: true,
         editingText: node.text,
         cursorPos: 0,
         selectionEnd: node.text.length,
@@ -524,12 +573,14 @@ export function editorReducer(
       const focusNode = findNode(state.model, action.focusNodeId);
       if (!focusNode) return state;
       if (action.focusNodeId === action.anchorNodeId) {
-        // Single-node selection: highlight char range within the node
+        // Single-node selection: dragging selects a text range, which is an
+        // editing gesture.
         const start = Math.min(action.anchorOffset, action.focusOffset);
         const end = Math.max(action.anchorOffset, action.focusOffset);
         return {
           ...state,
           activeNodeId: action.focusNodeId,
+          editing: true,
           editingText: focusNode.text,
           cursorPos: start,
           selectionEnd: end,
@@ -537,10 +588,11 @@ export function editorReducer(
           selAnchorOffset: action.anchorOffset,
         };
       }
-      // Multi-node selection: focus moves to the dragged-over node
+      // Multi-node selection: whole-node selection, not text editing.
       return {
         ...state,
         activeNodeId: action.focusNodeId,
+        editing: false,
         editingText: focusNode.text,
         cursorPos: action.focusOffset,
         selectionEnd: action.focusOffset,
@@ -555,6 +607,7 @@ export function editorReducer(
       return {
         ...state,
         activeNodeId: null,
+        editing: false,
         selAnchorNodeId: null,
         selAnchorOffset: 0,
       };

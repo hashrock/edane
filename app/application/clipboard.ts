@@ -3,6 +3,7 @@
  */
 
 import { findNode, getFlatOrder, getNodeDepths } from "../domain/model";
+import type { MindMapModel } from "../domain/model";
 import type { EditorState } from "./editorReducer";
 
 /**
@@ -33,4 +34,24 @@ export function selectionNodesToText(state: EditorState): string {
       return indent + (findNode(model, id)?.text ?? "");
     })
     .join("\n");
+}
+
+/**
+ * Indented plain text for a single node and its whole subtree (the node at
+ * column 0, descendants nested under it). Used when copying a node in
+ * selection mode, so it round-trips back into nodes via `textToModel`.
+ */
+export function nodeSubtreeToText(
+  model: MindMapModel,
+  nodeId: string
+): string {
+  const node = findNode(model, nodeId);
+  if (!node) return "";
+  const lines: string[] = [];
+  const walk = (n: MindMapModel, depth: number) => {
+    lines.push("  ".repeat(depth) + n.text);
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  walk(node, 0);
+  return lines.join("\n");
 }

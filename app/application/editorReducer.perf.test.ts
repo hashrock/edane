@@ -30,6 +30,7 @@ function measureInsertMs(count: number, iterations: number): number {
   const state: EditorState = {
     model,
     activeNodeId: targetId,
+    editing: true,
     editingText: text,
     cursorPos: text.length,
     selectionEnd: text.length,

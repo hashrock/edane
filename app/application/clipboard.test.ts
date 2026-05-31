@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
 import { findNode } from "../domain/model";
 import type { EditorState } from "./editorReducer";
-import { selectionNodesToText } from "./clipboard";
+import { selectionNodesToText, nodeSubtreeToText } from "./clipboard";
 
 // Root
 //   A
@@ -27,6 +27,7 @@ function selection(
   return {
     model,
     activeNodeId: focusId,
+    editing: true,
     editingText: findNode(model, focusId)?.text ?? "",
     cursorPos: 0,
     selectionEnd: 0,
@@ -64,5 +65,22 @@ describe("selectionNodesToText", () => {
       selAnchorNodeId: null,
     };
     expect(selectionNodesToText(s)).toBe("");
+  });
+});
+
+describe("nodeSubtreeToText", () => {
+  it("serialises a node and its descendants as indented text", () => {
+    const model = sampleModel();
+    expect(nodeSubtreeToText(model, "a")).toBe("A\n  A1");
+  });
+
+  it("serialises a leaf node as a single line", () => {
+    const model = sampleModel();
+    expect(nodeSubtreeToText(model, "b")).toBe("B");
+  });
+
+  it("returns empty string for an unknown node", () => {
+    const model = sampleModel();
+    expect(nodeSubtreeToText(model, "missing")).toBe("");
   });
 });

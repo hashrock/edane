@@ -31,6 +31,7 @@ function stateForTree(model: MindMapModel, count: number): EditorState {
   return {
     model,
     activeNodeId: targetId,
+    editing: true,
     editingText: text,
     cursorPos: text.length,
     selectionEnd: text.length,
