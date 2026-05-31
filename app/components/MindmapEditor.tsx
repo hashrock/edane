@@ -4,9 +4,13 @@ import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
 import { findNode, getFlatOrder, generateId } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
-import { LINE_HEIGHT } from "../lib/measureText";
-import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
-import { flattenToNodes } from "../application/nodeUtils";
+import { LINE_HEIGHT, lineHeightFor } from "../lib/measureText";
+import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
+import {
+  flattenToNodes,
+  FAVICON_SIZE,
+  FAVICON_GAP,
+} from "../application/nodeUtils";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import {
   parseContent,
@@ -230,6 +234,9 @@ export default function MindmapEditor({
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [konvaReady, setKonvaReady] = useState(false);
+  // Transient highlight of just-inserted nodes (paste / child add) so the
+  // insertion position is obvious. Cleared after a short delay.
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const [inputPos, setInputPos] = useState<{ x: number; y: number }>({
     x: 0,
     y: 0,
@@ -243,6 +250,8 @@ export default function MindmapEditor({
 
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const konvaStageRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -258,6 +267,7 @@ export default function MindmapEditor({
   } | null>(null);
   const wasDraggingRef = useRef(false);
   const undoManagerRef = useRef(new UndoManager());
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isComposingRef = useRef(false);
   // Non-production perf counters for the (expensive) main canvas redraw.
   const perfRef = useRef({
@@ -284,6 +294,17 @@ export default function MindmapEditor({
     },
     []
   );
+
+  // Briefly highlight a set of nodes (used to show where a paste/insert landed).
+  const flashNodes = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setHighlightIds(new Set(ids));
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(
+      () => setHighlightIds(new Set()),
+      1600
+    );
+  }, []);
 
   // Re-render when an image-node's image finishes loading (size becomes known).
   const [imageVersion, setImageVersion] = useState(0);
@@ -419,6 +440,54 @@ export default function MindmapEditor({
     });
   }, [dispatch]);
 
+  // --- Image upload: push a file to R2 and turn the node into an image ---
+  const uploadAndSetImage = useCallback(
+    async (nodeId: string, file: File) => {
+      if (!file.type.startsWith("image/")) return;
+      updateSaveStatus("画像アップロード中...");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/images", {
+          method: "POST",
+          credentials: "include",
+          body: form,
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          updateSaveStatus(
+            err?.error === "Storage limit exceeded"
+              ? "容量超過（上限10MB）"
+              : "アップロード失敗"
+          );
+          return;
+        }
+        const data = (await res.json()) as { url: string };
+        const next = dispatch(
+          {
+            type: "setNodeContent",
+            nodeId,
+            text: data.url,
+            nodeType: "image",
+          },
+          "image-upload"
+        );
+        if (noteId) saveNote(next.model);
+        else updateSaveStatus("");
+      } catch {
+        updateSaveStatus("アップロード失敗");
+      }
+    },
+    [dispatch, noteId, saveNote, updateSaveStatus]
+  );
+
+  const triggerImageUpload = useCallback((nodeId: string) => {
+    uploadTargetRef.current = nodeId;
+    imageFileInputRef.current?.click();
+  }, []);
+
   // --- Clipboard ---
   // Insert indented plain text as fresh nodes after the active node.
   const pasteTextAsNodes = useCallback(
@@ -438,9 +507,15 @@ export default function MindmapEditor({
         { type: "insertNodes", targetId, nodes: freshChildren },
         "paste"
       );
+      // Flash every inserted node so the paste destination is obvious.
+      const collectIds = (n: MindMapModel): string[] => [
+        n.id,
+        ...n.children.flatMap(collectIds),
+      ];
+      flashNodes(freshChildren.flatMap(collectIds));
       if (noteId) saveNote(next.model);
     },
-    [dispatch, noteId, saveNote]
+    [dispatch, noteId, saveNote, flashNodes]
   );
 
   const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -472,6 +547,21 @@ export default function MindmapEditor({
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      // Pasting an image file into an empty node uploads it and turns the node
+      // into an image. (Non-empty nodes fall through to normal text paste.)
+      const files = e.clipboardData.files;
+      if (files && files.length > 0 && files[0].type.startsWith("image/")) {
+        const st = stateRef.current;
+        const node = st.activeNodeId
+          ? findNode(st.model, st.activeNodeId)
+          : null;
+        if (node && node.text === "") {
+          e.preventDefault();
+          uploadAndSetImage(node.id, files[0]);
+          return;
+        }
+      }
+
       const text = e.clipboardData.getData("text");
       if (!text) return;
       const st = stateRef.current;
@@ -507,6 +597,49 @@ export default function MindmapEditor({
     },
     [dispatch, pasteTextAsNodes]
   );
+
+  // --- Link preview: fetch <title> + favicon for a link node's URL ---
+  const fetchLinkMeta = useCallback(
+    async (nodeId: string) => {
+      const node = findNode(stateRef.current.model, nodeId);
+      if (!node || node.type !== "link" || !node.text) return;
+      try {
+        const res = await fetch(
+          `/api/link-preview?url=${encodeURIComponent(node.text)}`,
+          { credentials: "include" }
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { title?: string; favicon?: string };
+        const next = dispatch(
+          {
+            type: "setLinkMeta",
+            nodeId,
+            linkTitle: data.title,
+            favicon: data.favicon ?? null,
+          },
+          "link-meta"
+        );
+        if (noteId) saveNote(next.model);
+      } catch {
+        // network/parse failure: leave the node showing its raw URL
+      }
+    },
+    [dispatch, noteId, saveNote]
+  );
+
+  // Auto-fetch link metadata when focus leaves a link node that has a URL but
+  // no title yet (e.g. right after converting to a link and typing the URL).
+  const prevActiveRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prevId = prevActiveRef.current;
+    prevActiveRef.current = activeNodeId;
+    if (prevId && prevId !== activeNodeId) {
+      const node = findNode(modelRef.current, prevId);
+      if (node?.type === "link" && node.text && !node.linkTitle) {
+        fetchLinkMeta(prevId);
+      }
+    }
+  }, [activeNodeId, fetchLinkMeta]);
 
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
@@ -582,6 +715,56 @@ export default function MindmapEditor({
       if (type !== "link") items.push({ label: "リンクにする（URL）", onSelect: setType("link") });
     }
 
+    // Text formatting (font size / bold).
+    if (type === "text") {
+      const SIZES = [12, 14, 18, 24, 32];
+      const current = node.fontSize ?? 14;
+      const bigger = SIZES.find((s) => s > current);
+      const smaller = [...SIZES].reverse().find((s) => s < current);
+      const applyStyle = (style: { fontSize?: number | null; bold?: boolean }) => {
+        const next = dispatch(
+          { type: "setNodeStyle", nodeId, ...style },
+          "style"
+        );
+        if (noteId) saveNote(next.model);
+      };
+      if (bigger !== undefined)
+        items.push({
+          label: "文字を大きく",
+          onSelect: () => applyStyle({ fontSize: bigger }),
+        });
+      if (smaller !== undefined)
+        items.push({
+          label: "文字を小さく",
+          onSelect: () => applyStyle({ fontSize: smaller }),
+        });
+      if (node.fontSize !== undefined && node.fontSize !== 14)
+        items.push({
+          label: "標準サイズに戻す",
+          onSelect: () => applyStyle({ fontSize: null }),
+        });
+      items.push({
+        label: node.bold ? "太字を解除" : "太字にする",
+        onSelect: () => applyStyle({ bold: !node.bold }),
+      });
+    }
+
+    // Link metadata fetch (title + favicon).
+    if (type === "link" && node.text) {
+      items.push({
+        label: "リンク情報を取得（タイトル/favicon）",
+        onSelect: () => fetchLinkMeta(nodeId),
+      });
+    }
+
+    // Image upload (R2). Replaces the node's content with the uploaded image.
+    if (!isRoot) {
+      items.push({
+        label: "画像をアップロード",
+        onSelect: () => triggerImageUpload(nodeId),
+      });
+    }
+
     if (hasChildren) {
       items.push({
         label: node.collapsed ? "展開する" : "折りたたむ",
@@ -595,6 +778,7 @@ export default function MindmapEditor({
       label: "子ノードを追加",
       onSelect: () => {
         const next = dispatch({ type: "addChild", nodeId }, "add-child");
+        if (next.activeNodeId) flashNodes([next.activeNodeId]);
         if (noteId) saveNote(next.model);
         setTimeout(() => inputRef.current?.focus(), 0);
       },
@@ -616,7 +800,15 @@ export default function MindmapEditor({
       });
     }
     return items;
-  }, [contextMenu, dispatch, noteId, saveNote]);
+  }, [
+    contextMenu,
+    dispatch,
+    noteId,
+    saveNote,
+    fetchLinkMeta,
+    triggerImageUpload,
+    flashNodes,
+  ]);
 
   // --- Keyboard handling ---
   const handleKeyDown = useCallback(
@@ -630,12 +822,19 @@ export default function MindmapEditor({
         return;
       }
 
-      // Undo / Redo
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      // Undo / Redo. Note: with Shift held, e.key is "Z" (uppercase), so compare
+      // case-insensitively or Cmd+Shift+Z (redo) never fires. Cmd+Y also redoes.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         const restored = e.shiftKey
           ? undoManagerRef.current.redo()
           : undoManagerRef.current.undo();
+        if (restored) dispatch({ type: "replace", state: restored });
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        const restored = undoManagerRef.current.redo();
         if (restored) dispatch({ type: "replace", state: restored });
         return;
       }
@@ -1093,16 +1292,34 @@ export default function MindmapEditor({
     // Draw nodes
     nodes.forEach((node, index) => {
       const isRoot = index === 0;
-      const displayRaw = activeNodeId === node.id ? editingText : node.text;
-      const isEmpty = displayRaw === "";
       const isActive = activeNodeId === node.id;
-      const displayText = isEmpty ? "empty" : displayRaw;
-      const data = lineDataMap.get(node.id)!;
-      const lineCount = data.lines.length;
-      const blockHeight = lineCount * LINE_HEIGHT;
-      // The active node is always edited/rendered as text, whatever its kind.
+      // The active node is always edited/rendered as plain text at the default
+      // font, whatever its kind. Non-active nodes honour their stored format.
       const asImage = !isActive && node.type === "image";
       const asLink = !isActive && node.type === "link";
+      // Links display their fetched title (falling back to the raw URL).
+      const displayRaw = isActive
+        ? editingText
+        : asLink
+          ? node.linkTitle || node.text
+          : node.text;
+      const isEmpty = displayRaw === "";
+      const displayText = isEmpty ? "empty" : displayRaw;
+      const fontSize = isActive ? 14 : node.fontSize ?? 14;
+      const bold = !isActive && !!node.bold;
+      const lineHeightPx = isActive ? LINE_HEIGHT : lineHeightFor(fontSize);
+      const konvaLineHeight = lineHeightPx / fontSize;
+      // Line count comes from the (14px) lineData; titles/text are single-line
+      // in practice, multi-line text keeps its hard breaks.
+      const data = lineDataMap.get(node.id)!;
+      const lineCount = data.lines.length;
+      const blockHeight = lineCount * lineHeightPx;
+      // Favicon only when a non-active link node has one.
+      const favEntry =
+        asLink && node.favicon ? getImageEntry(node.favicon) : undefined;
+      const favLoaded =
+        favEntry?.status === "loaded" ? favEntry.img : undefined;
+      const favOffset = asLink && node.favicon ? FAVICON_SIZE + FAVICON_GAP : 0;
 
       let rectWidth: number;
       let rectHeight: number;
@@ -1110,6 +1327,10 @@ export default function MindmapEditor({
         const d = imageDisplaySize(node.text);
         rectWidth = d.w + nodePadding * 2;
         rectHeight = d.h + 14;
+      } else if (!isActive) {
+        // Font-aware box from the pre-measured node size (incl. favicon width).
+        rectWidth = Math.max(node.width + nodePadding * 2, isRoot ? 100 : 80);
+        rectHeight = Math.max(32, node.height);
       } else {
         const textWidth = textWidths.get(node.id) || 100;
         rectWidth = Math.max(textWidth + nodePadding * 2, isRoot ? 100 : 80);
@@ -1180,13 +1401,26 @@ export default function MindmapEditor({
           );
         }
       } else {
+        // Favicon before the link title (when fetched + loaded).
+        if (asLink && favLoaded) {
+          group.add(
+            new Konva.Image({
+              image: favLoaded,
+              x: node.x + nodePadding,
+              y: node.y - FAVICON_SIZE / 2,
+              width: FAVICON_SIZE,
+              height: FAVICON_SIZE,
+              listening: false,
+            })
+          );
+        }
         const textNode = new Konva.Text({
-          x: node.x + nodePadding,
+          x: node.x + nodePadding + favOffset,
           y: node.y - blockHeight / 2 + 2,
           text: displayText,
-          fontSize: 14,
+          fontSize,
           fontFamily: "sans-serif",
-          lineHeight: KONVA_LINE_HEIGHT,
+          lineHeight: konvaLineHeight,
           fill: asLink
             ? "#2563eb"
             : isRoot
@@ -1194,7 +1428,7 @@ export default function MindmapEditor({
               : isEmpty
                 ? "#94a3b8"
                 : "#0f172a",
-          fontStyle: isEmpty ? "italic" : "normal",
+          fontStyle: isEmpty ? "italic" : bold ? "bold" : "normal",
           textDecoration: asLink ? "underline" : "",
           listening: false,
         });
@@ -1327,6 +1561,35 @@ export default function MindmapEditor({
     cursorLayer.destroyChildren();
 
     const nodePadding = NODE_PADDING;
+
+    // Transient insertion highlight: dashed amber outline around just-inserted
+    // nodes (paste / add-child) so the destination is obvious.
+    if (highlightIds.size > 0) {
+      for (const id of highlightIds) {
+        const node = nodes.find((n) => n.id === id);
+        if (!node) continue;
+        const isRoot = nodes.indexOf(node) === 0;
+        const rectWidth = Math.max(
+          node.width + nodePadding * 2,
+          isRoot ? 100 : 80
+        );
+        const rectHeight = node.height;
+        cursorLayer.add(
+          new Konva.Rect({
+            x: node.x - 4,
+            y: node.y - rectHeight / 2 - 4,
+            width: rectWidth + 8,
+            height: rectHeight + 8,
+            cornerRadius: 14,
+            stroke: "#f59e0b",
+            strokeWidth: 2.5,
+            dash: [6, 4],
+            listening: false,
+          })
+        );
+      }
+    }
+
     const isMulti =
       selAnchorNodeId !== null && selAnchorNodeId !== activeNodeId;
 
@@ -1427,7 +1690,7 @@ export default function MindmapEditor({
     }
 
     cursorLayer.draw();
-  }, [activeNodeId, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset]);
+  }, [activeNodeId, cursorPos, selectionEnd, cursorVisible, nodes, selAnchorNodeId, selAnchorOffset, highlightIds]);
 
   // --- Test API (non-production): imperative hooks for browser e2e tests ---
   // Exposes the live model plus a "node select" helper that returns the screen
@@ -1600,6 +1863,19 @@ export default function MindmapEditor({
             caretColor: "transparent",
             resize: "none",
             fontSize: "14px",
+          }}
+        />
+        <input
+          ref={imageFileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            const nodeId = uploadTargetRef.current;
+            uploadTargetRef.current = null;
+            if (file && nodeId) await uploadAndSetImage(nodeId, file);
           }}
         />
         {contextMenu && (

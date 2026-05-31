@@ -4,7 +4,7 @@ import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle } from "drizzle-orm/d1";
 import { desc, eq } from "drizzle-orm";
 import { rootView } from "./root-view";
-import { users, notes, apiTokens } from "./db/schema";
+import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken, hashToken } from "./utils/apiToken";
 import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
@@ -16,6 +16,9 @@ const DEV_USER = {
   name: "Dev User",
   avatarUrl: "",
 };
+
+// Per-user image storage quota (bytes).
+const STORAGE_LIMIT = 10 * 1024 * 1024; // 10MB
 
 const app = new Hono<Env>();
 
@@ -208,6 +211,159 @@ app.delete("/api/tokens/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Images: R2 upload + D1 metadata (JSON; used by the editor & settings) ---
+app.get("/api/images", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(images)
+    .where(eq(images.userId, user.id))
+    .orderBy(desc(images.createdAt));
+  const used = rows.reduce((sum, r) => sum + r.size, 0);
+  return c.json({
+    images: rows.map((r) => ({
+      id: r.id,
+      url: `/api/images/${r.id}/raw`,
+      filename: r.filename,
+      contentType: r.contentType,
+      size: r.size,
+      createdAt: r.createdAt,
+    })),
+    used,
+    limit: STORAGE_LIMIT,
+  });
+});
+
+app.post("/api/images", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const form = await c.req.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) {
+    return c.json({ error: "No file provided" }, 400);
+  }
+  if (!file.type.startsWith("image/")) {
+    return c.json({ error: "Only image files are allowed" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const existing = await db
+    .select({ size: images.size })
+    .from(images)
+    .where(eq(images.userId, user.id));
+  const used = existing.reduce((sum, r) => sum + r.size, 0);
+  if (used + file.size > STORAGE_LIMIT) {
+    return c.json(
+      { error: "Storage limit exceeded", used, limit: STORAGE_LIMIT, fileSize: file.size },
+      413
+    );
+  }
+
+  const id = crypto.randomUUID();
+  const r2Key = `${user.id}/${id}`;
+  await c.env.IMAGES.put(r2Key, await file.arrayBuffer(), {
+    httpMetadata: { contentType: file.type },
+  });
+
+  const createdAt = new Date().toISOString();
+  await db.insert(images).values({
+    id,
+    userId: user.id,
+    r2Key,
+    filename: file.name,
+    contentType: file.type,
+    size: file.size,
+    createdAt,
+  });
+
+  return c.json(
+    {
+      id,
+      url: `/api/images/${id}/raw`,
+      filename: file.name,
+      contentType: file.type,
+      size: file.size,
+      createdAt,
+    },
+    201
+  );
+});
+
+app.delete("/api/images/:id", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const id = c.req.param("id");
+  const db = drizzle(c.env.DB);
+  const meta = await db.select().from(images).where(eq(images.id, id)).get();
+  if (!meta || meta.userId !== user.id) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  await c.env.IMAGES.delete(meta.r2Key);
+  await db.delete(images).where(eq(images.id, id));
+  return c.json({ ok: true });
+});
+
+// Serve the binary. Public (no auth) so it works inside public notes / <img>.
+app.get("/api/images/:id/raw", async (c) => {
+  const id = c.req.param("id");
+  const db = drizzle(c.env.DB);
+  const meta = await db.select().from(images).where(eq(images.id, id)).get();
+  if (!meta) return c.notFound();
+  const obj = await c.env.IMAGES.get(meta.r2Key);
+  if (!obj) return c.notFound();
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": meta.contentType,
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
+});
+
+// --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
+app.get("/api/link-preview", async (c) => {
+  const url = c.req.query("url");
+  if (!url) return c.json({ error: "url is required" }, 400);
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return c.json({ error: "invalid url" }, 400);
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    return c.json({ error: "unsupported protocol" }, 400);
+  }
+  try {
+    const res = await fetch(target.toString(), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; edane-bot/1.0)" },
+      redirect: "follow",
+    });
+    const html = await res.text();
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = titleMatch
+      ? titleMatch[1].replace(/\s+/g, " ").trim().slice(0, 300)
+      : target.hostname;
+
+    let favicon: string | null = null;
+    for (const tag of html.match(/<link[^>]+>/gi) ?? []) {
+      if (/rel=["'][^"']*icon[^"']*["']/i.test(tag)) {
+        const href = tag.match(/href=["']([^"']+)["']/i);
+        if (href) {
+          favicon = new URL(href[1], target).toString();
+          break;
+        }
+      }
+    }
+    if (!favicon) favicon = `${target.protocol}//${target.host}/favicon.ico`;
+
+    return c.json({ title, favicon });
+  } catch (e) {
+    return c.json({ error: "fetch failed", detail: String(e) }, 502);
+  }
+});
+
 // --- Inertia pages ---
 const routes = app
   .get("/", (c) => c.redirect("/notes"))
@@ -233,6 +389,11 @@ const routes = app
         .orderBy(desc(notes.updatedAt));
     }
     return c.render("Notes/Index", { user, notes: myNotes });
+  })
+  .get("/settings", (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/notes");
+    return c.render("Settings", { user });
   })
   .get("/guest", (c) => c.render("Guest", { user: c.get("user") }))
   .get("/notes/new", (c) => {

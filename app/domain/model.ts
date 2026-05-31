@@ -15,6 +15,14 @@ export interface MindMapModel {
   collapsed?: boolean;
   /** Node kind (absent = "text"). For image/link, `text` holds the URL. */
   type?: NodeType;
+  /** Font size in px for text nodes (absent = default 14). */
+  fontSize?: number;
+  /** Bold text (absent/false = normal weight). */
+  bold?: boolean;
+  /** Link nodes: fetched page title (shown instead of the raw URL). */
+  linkTitle?: string;
+  /** Link nodes: favicon URL (rendered before the title). */
+  favicon?: string;
 }
 
 // --- ID generation ---
@@ -119,6 +127,48 @@ export function setNodeType(
   const cloned = cloneModel(model);
   const node = findNode(cloned, nodeId);
   if (node) node.type = type === "text" ? undefined : type;
+  return cloned;
+}
+
+/** Set a text node's formatting (font size / bold). Returns a new model. */
+export function setNodeStyle(
+  model: MindMapModel,
+  nodeId: string,
+  style: { fontSize?: number | null; bold?: boolean }
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) {
+    if (style.fontSize !== undefined) {
+      if (style.fontSize === null) delete node.fontSize;
+      else node.fontSize = style.fontSize;
+    }
+    if (style.bold !== undefined) {
+      if (style.bold) node.bold = true;
+      else delete node.bold;
+    }
+  }
+  return cloned;
+}
+
+/** Set a link node's fetched metadata (title / favicon). Returns a new model. */
+export function setLinkMeta(
+  model: MindMapModel,
+  nodeId: string,
+  meta: { linkTitle?: string; favicon?: string | null }
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) {
+    if (meta.linkTitle !== undefined) {
+      if (meta.linkTitle) node.linkTitle = meta.linkTitle;
+      else delete node.linkTitle;
+    }
+    if (meta.favicon !== undefined) {
+      if (meta.favicon) node.favicon = meta.favicon;
+      else delete node.favicon;
+    }
+  }
   return cloned;
 }
 

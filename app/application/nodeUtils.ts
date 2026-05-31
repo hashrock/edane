@@ -7,6 +7,10 @@ import type { MindMapNode } from "../types/MindMap";
 import { measureNodeBox } from "../lib/measureText";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
 
+/** Rendered favicon size (px) + gap before the link title. */
+export const FAVICON_SIZE = 16;
+export const FAVICON_GAP = 6;
+
 /** The node currently being edited (rendered as text regardless of its kind). */
 export interface EditingNode {
   id: string;
@@ -36,6 +40,7 @@ export function flattenToNodes(
     let width: number;
     let height: number;
     if (isEditing) {
+      // The edited node is always rendered as plain text at the default font.
       const box = measureNodeBox(editing.text);
       width = box.width;
       height = box.height;
@@ -43,8 +48,15 @@ export function flattenToNodes(
       const d = imageDisplaySize(m.text);
       width = d.w;
       height = d.h + IMAGE_V_PAD;
+    } else if (type === "link") {
+      // Links display their fetched title (falling back to the raw URL), with
+      // room for the favicon when present.
+      const display = m.linkTitle || m.text;
+      const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
+      width = box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0);
+      height = box.height;
     } else {
-      const box = measureNodeBox(m.text);
+      const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
       width = box.width;
       height = box.height;
     }
@@ -61,6 +73,10 @@ export function flattenToNodes(
       collapsed,
       childCount: m.children.length,
       type,
+      fontSize: m.fontSize,
+      bold: m.bold,
+      linkTitle: m.linkTitle,
+      favicon: m.favicon,
     });
     if (collapsed) return;
     for (const child of m.children) walk(child);

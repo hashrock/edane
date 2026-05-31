@@ -40,3 +40,6 @@ lerna-debug.log*
 # vitest browser mode artifacts
 .vitest-attachments/
 **/__screenshots__/
+
+# wrangler generated types
+worker-configuration.d.ts

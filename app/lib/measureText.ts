@@ -19,8 +19,27 @@ import {
 
 /** Canvas font shorthand — must match the Konva.Text font used to render. */
 export const NODE_FONT = "14px sans-serif";
+/** Default node font size in px. */
+export const DEFAULT_FONT_SIZE = 14;
 /** CSS line-height in px for the 14px node font. */
 export const LINE_HEIGHT = 18;
+
+/** Per-font-size line height in px, scaled from the 14px → 18px baseline. */
+export function lineHeightFor(fontSize: number): number {
+  return Math.round((fontSize * LINE_HEIGHT) / DEFAULT_FONT_SIZE);
+}
+
+/** Canvas/Konva font shorthand for a node's size + weight. */
+export function nodeFontString(fontSize: number, bold: boolean): string {
+  return `${bold ? "bold " : ""}${fontSize}px sans-serif`;
+}
+
+export interface MeasureOpts {
+  /** Font size in px (default 14). */
+  fontSize?: number;
+  /** Bold weight (default false). */
+  bold?: boolean;
+}
 /** Vertical padding added around the text block to form the node box. */
 const BOX_V_PAD = 14;
 /** Minimum node box height (keeps single-line nodes at their original size). */
@@ -47,44 +66,49 @@ function canMeasure(): boolean {
 }
 
 /** Character-count estimate used when no Canvas 2D context is available. */
-function estimateBox(text: string): NodeBox {
+function estimateBox(text: string, fontSize: number, lineHeight: number): NodeBox {
   const lines = text.split("\n");
   let maxLen = 0;
   for (const line of lines) maxLen = Math.max(maxLen, line.length);
-  const width = maxLen * 8;
+  const width = maxLen * fontSize * 0.6;
   const lineCount = lines.length;
   return {
     width,
-    height: Math.max(MIN_BOX_HEIGHT, lineCount * LINE_HEIGHT + BOX_V_PAD),
+    height: Math.max(MIN_BOX_HEIGHT, lineCount * lineHeight + BOX_V_PAD),
     lineCount,
   };
 }
 
 /**
- * Measure a node's box. Cached per text string — only the actively edited
- * node's text changes between renders, so every other node is an O(1) hit.
+ * Measure a node's box. Cached per text string + font — only the actively
+ * edited node's text changes between renders, so every other node is an O(1)
+ * hit. `opts` defaults to the 14px / normal-weight baseline.
  */
-export function measureNodeBox(text: string): NodeBox {
-  const cached = _boxCache.get(text);
+export function measureNodeBox(text: string, opts?: MeasureOpts): NodeBox {
+  const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
+  const bold = opts?.bold ?? false;
+  const lineHeight = lineHeightFor(fontSize);
+  const key = `${fontSize}|${bold ? 1 : 0}|${text}`;
+  const cached = _boxCache.get(key);
   if (cached) return cached;
 
   let box: NodeBox;
   if (!canMeasure()) {
-    box = estimateBox(text);
+    box = estimateBox(text, fontSize, lineHeight);
   } else {
-    const prepared = prepareWithSegments(text, NODE_FONT, {
+    const prepared = prepareWithSegments(text, nodeFontString(fontSize, bold), {
       whiteSpace: "pre-wrap",
     });
-    const { lineCount } = layout(prepared, NO_WRAP_WIDTH, LINE_HEIGHT);
+    const { lineCount } = layout(prepared, NO_WRAP_WIDTH, lineHeight);
     const lines = Math.max(1, lineCount);
     box = {
       width: measureNaturalWidth(prepared),
-      height: Math.max(MIN_BOX_HEIGHT, lines * LINE_HEIGHT + BOX_V_PAD),
+      height: Math.max(MIN_BOX_HEIGHT, lines * lineHeight + BOX_V_PAD),
       lineCount: lines,
     };
   }
 
   if (_boxCache.size > 4000) _boxCache.clear();
-  _boxCache.set(text, box);
+  _boxCache.set(key, box);
   return box;
 }

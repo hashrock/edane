@@ -23,6 +23,8 @@ import {
   toggleCollapse,
   addChildToNode,
   setNodeType,
+  setNodeStyle,
+  setLinkMeta,
 } from "../domain/model";
 
 export interface EditorState {
@@ -90,6 +92,24 @@ export type EditorAction =
   | { type: "addChild"; nodeId: string }
   | { type: "deleteNode"; nodeId: string }
   | { type: "setNodeType"; nodeId: string; nodeType: NodeType }
+  | {
+      type: "setNodeContent";
+      nodeId: string;
+      text: string;
+      nodeType?: NodeType;
+    }
+  | {
+      type: "setNodeStyle";
+      nodeId: string;
+      fontSize?: number | null;
+      bold?: boolean;
+    }
+  | {
+      type: "setLinkMeta";
+      nodeId: string;
+      linkTitle?: string;
+      favicon?: string | null;
+    }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -611,6 +631,45 @@ export function editorReducer(
       const newModel = setNodeType(state.model, action.nodeId, action.nodeType);
       // Activate the node so its URL/label can be edited as text right away.
       return focusNodeState(state, newModel, action.nodeId);
+    }
+
+    case "setNodeContent": {
+      const node = findNode(state.model, action.nodeId);
+      if (!node) return state;
+      let newModel = updateNodeText(state.model, action.nodeId, action.text);
+      if (action.nodeType) {
+        newModel = setNodeType(newModel, action.nodeId, action.nodeType);
+      }
+      if (state.activeNodeId === action.nodeId) {
+        return {
+          ...state,
+          model: newModel,
+          editingText: action.text,
+          cursorPos: action.text.length,
+          selectionEnd: action.text.length,
+        };
+      }
+      return { ...state, model: newModel };
+    }
+
+    case "setNodeStyle": {
+      const node = findNode(state.model, action.nodeId);
+      if (!node) return state;
+      const newModel = setNodeStyle(state.model, action.nodeId, {
+        fontSize: action.fontSize,
+        bold: action.bold,
+      });
+      return { ...state, model: newModel };
+    }
+
+    case "setLinkMeta": {
+      const node = findNode(state.model, action.nodeId);
+      if (!node) return state;
+      const newModel = setLinkMeta(state.model, action.nodeId, {
+        linkTitle: action.linkTitle,
+        favicon: action.favicon,
+      });
+      return { ...state, model: newModel };
     }
 
     case "setTitle": {

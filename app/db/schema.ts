@@ -35,3 +35,19 @@ export const notes = sqliteTable("notes", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+// Uploaded image metadata. The binary lives in R2 (binding IMAGES); this row
+// tracks ownership, size (for the per-user quota) and the R2 object key.
+export const images = sqliteTable("images", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  r2Key: text("r2_key").notNull(),
+  filename: text("filename").notNull(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

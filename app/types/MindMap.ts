@@ -17,4 +17,12 @@ export interface MindMapNode {
   collapsed: boolean;
   /** Number of direct children in the model (even when collapsed). */
   childCount: number;
+  /** Font size in px (text/link nodes); falls back to the default when absent. */
+  fontSize?: number;
+  /** Bold text. */
+  bold?: boolean;
+  /** Link nodes: fetched page title (display text). */
+  linkTitle?: string;
+  /** Link nodes: favicon URL. */
+  favicon?: string;
 }

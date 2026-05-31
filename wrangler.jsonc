@@ -10,5 +10,11 @@
       "database_name": "mindmap-lite-db",
       "database_id": "aeb23f2c-ead6-4495-854b-dfec9fef53ae"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "edane-images"
+    }
   ]
 }

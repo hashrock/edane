@@ -50,6 +50,12 @@ export default function NotesIndex({
                 />
               )}
               <span>{user.name}</span>
+              <Link
+                href="/settings"
+                className="text-slate-500 hover:text-slate-900 transition"
+              >
+                設定
+              </Link>
               <a
                 href="/auth/logout"
                 className="text-slate-500 hover:text-slate-900 transition"
