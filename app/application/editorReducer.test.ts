@@ -346,6 +346,31 @@ describe("setTitle", () => {
       stripIds(model.children[0])
     );
   });
+
+  it("keeps the root editing buffer in sync when the root is active", () => {
+    const model = sampleModel();
+    const next = editorReducer(stateAt(model, "root"), {
+      type: "setTitle",
+      text: "New Title",
+    });
+    expect(next.model.text).toBe("New Title");
+    expect(next.editingText).toBe("New Title");
+  });
+
+  it("clamps the root caret when the edited title gets shorter", () => {
+    const model = sampleModel();
+    const s = {
+      ...stateAt(model, "root"),
+      cursorPos: 4,
+      selectionEnd: 4,
+    };
+    const next = editorReducer(s, {
+      type: "setTitle",
+      text: "R",
+    });
+    expect(next.cursorPos).toBe(1);
+    expect(next.selectionEnd).toBe(1);
+  });
 });
 
 describe("no-op convention", () => {

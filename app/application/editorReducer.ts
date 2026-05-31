@@ -614,9 +614,20 @@ export function editorReducer(
     }
 
     case "setTitle": {
+      const nextModel = updateNodeText(state.model, state.model.id, action.text);
+      if (state.activeNodeId === state.model.id) {
+        const clamp = (pos: number) => Math.min(pos, action.text.length);
+        return {
+          ...state,
+          model: nextModel,
+          editingText: action.text,
+          cursorPos: clamp(state.cursorPos),
+          selectionEnd: clamp(state.selectionEnd),
+        };
+      }
       return {
         ...state,
-        model: updateNodeText(state.model, state.model.id, action.text),
+        model: nextModel,
       };
     }
 
