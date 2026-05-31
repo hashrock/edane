@@ -18,15 +18,50 @@ export interface EditingNode {
 }
 
 /**
+ * Measure a model node's render box (width × height in px).
+ *
+ * Single source of truth for node sizing: both the layout (flattenToNodes) and
+ * the canvas draw read their box from here (the latter via the measured
+ * width/height carried on each MindMapNode), so the two can never drift apart.
+ *
+ * Sizing is kind-aware and honors each node's font size / bold:
+ *  - `editingText` given → sized as plain text from the live buffer, so an
+ *    image/link node grows to fit the raw URL while a caret is active.
+ *  - image → its (scaled) image display size.
+ *  - link  → its fetched title (falling back to the URL) plus favicon room.
+ *  - text  → its text.
+ */
+export function measureModelNode(
+  m: MindMapModel,
+  editingText?: string
+): { width: number; height: number } {
+  if (editingText != null) {
+    const box = measureNodeBox(editingText, { fontSize: m.fontSize, bold: m.bold });
+    return { width: box.width, height: box.height };
+  }
+  if ((m.type ?? "text") === "image") {
+    const d = imageDisplaySize(m.text);
+    return { width: d.w, height: d.h + IMAGE_V_PAD };
+  }
+  if (m.type === "link") {
+    const display = m.linkTitle || m.text;
+    const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
+    return {
+      width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
+      height: box.height,
+    };
+  }
+  const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
+  return { width: box.width, height: box.height };
+}
+
+/**
  * Flatten model tree to MindMapNode[] for layout/rendering.
  *
  * Descendants of a collapsed node are omitted (the collapsed node itself stays,
- * reporting its hidden child count). Each node carries its measured box size so
- * the layout can place variable-height nodes without overlap. Sizing is
- * kind-aware: image nodes use their (scaled) image size, text/link nodes use
- * pretext text measurement. The node currently being edited is sized as text
- * from the live editing buffer (honoring its font size / bold), so it grows to
- * fit the URL/label you type.
+ * reporting its hidden child count). Each node carries its measured box size
+ * (see {@link measureModelNode}) so the layout can place variable-height nodes
+ * without overlap.
  */
 export function flattenToNodes(
   model: MindMapModel,
@@ -37,34 +72,10 @@ export function flattenToNodes(
     const collapsed = !!m.collapsed;
     const type: NodeType = m.type ?? "text";
     const isEditing = editing != null && editing.id === m.id;
-
-    let width: number;
-    let height: number;
-    if (isEditing) {
-      // The edited node is rendered as plain text from the live buffer, but it
-      // keeps its own font size / bold so the box matches what's drawn.
-      const box = measureNodeBox(editing.text, {
-        fontSize: m.fontSize,
-        bold: m.bold,
-      });
-      width = box.width;
-      height = box.height;
-    } else if (type === "image") {
-      const d = imageDisplaySize(m.text);
-      width = d.w;
-      height = d.h + IMAGE_V_PAD;
-    } else if (type === "link") {
-      // Links display their fetched title (falling back to the raw URL), with
-      // room for the favicon when present.
-      const display = m.linkTitle || m.text;
-      const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
-      width = box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0);
-      height = box.height;
-    } else {
-      const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
-      width = box.width;
-      height = box.height;
-    }
+    const { width, height } = measureModelNode(
+      m,
+      isEditing ? editing.text : undefined
+    );
 
     nodes.push({
       id: m.id,

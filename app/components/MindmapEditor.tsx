@@ -161,6 +161,15 @@ function lineDataWidth(data: LineData): number {
   return w;
 }
 
+/**
+ * Visual box width for a measured text/content width: add horizontal padding,
+ * then floor (roots a little wider). Keeps every node-box width derivation in
+ * one place so the draw never re-implements per-kind sizing.
+ */
+function nodeBoxWidth(measuredWidth: number, isRoot: boolean): number {
+  return Math.max(measuredWidth + NODE_PADDING * 2, isRoot ? 100 : 80);
+}
+
 /** Find the caret column nearest `relX` within a line's offsets. */
 function nearestCol(offsets: number[] | undefined, relX: number): number {
   if (!offsets) return 0;
@@ -1446,20 +1455,19 @@ export default function MindmapEditor({
         favEntry?.status === "loaded" ? favEntry.img : undefined;
       const favOffset = asLink && node.favicon ? FAVICON_SIZE + FAVICON_GAP : 0;
 
+      // Box geometry from a single measured size. While editing it follows the
+      // caret's own line measurement (so the caret can't overflow the box);
+      // otherwise it trusts node.width/height from measureModelNode — image,
+      // link and text are all sized there, so there's no per-kind branch here.
       let rectWidth: number;
       let rectHeight: number;
-      if (asImage) {
-        const d = imageDisplaySize(node.text);
-        rectWidth = d.w + nodePadding * 2;
-        rectHeight = d.h + 14;
-      } else if (!isEditing) {
-        // Font-aware box from the pre-measured node size (incl. favicon width).
-        rectWidth = Math.max(node.width + nodePadding * 2, isRoot ? 100 : 80);
-        rectHeight = Math.max(32, node.height);
-      } else {
+      if (isEditing) {
         const textWidth = textWidths.get(node.id) || 100;
-        rectWidth = Math.max(textWidth + nodePadding * 2, isRoot ? 100 : 80);
+        rectWidth = nodeBoxWidth(textWidth, isRoot);
         rectHeight = Math.max(32, blockHeight + 14);
+      } else {
+        rectWidth = nodeBoxWidth(node.width, isRoot);
+        rectHeight = Math.max(32, node.height);
       }
 
       const group = new Konva.Group();
@@ -1712,10 +1720,7 @@ export default function MindmapEditor({
         const node = nodes.find((n) => n.id === id);
         if (!node) continue;
         const isRoot = nodes.indexOf(node) === 0;
-        const rectWidth = Math.max(
-          node.width + nodePadding * 2,
-          isRoot ? 100 : 80
-        );
+        const rectWidth = nodeBoxWidth(node.width, isRoot);
         const rectHeight = node.height;
         cursorLayer.add(
           new Konva.Rect({
@@ -1751,13 +1756,9 @@ export default function MindmapEditor({
         if (!node) continue;
 
         const isRoot = nodes.indexOf(node) === 0;
-        const data = lineDataRef.current.get(nodeId);
-        const textWidth =
-          data && node.text !== "" ? lineDataWidth(data) : measureEmptyWidth();
-        const rectWidth = Math.max(
-          textWidth + nodePadding * 2,
-          isRoot ? 100 : 80
-        );
+        // Match the drawn box exactly (node.width covers link title / image
+        // size), not the raw-text width — the two differ for link/image nodes.
+        const rectWidth = nodeBoxWidth(node.width, isRoot);
         const rectHeight = node.height;
 
         const sel = new Konva.Rect({
