@@ -4,7 +4,12 @@ import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
 import { findNode, getFlatOrder, generateId } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
-import { LINE_HEIGHT, lineHeightFor } from "../lib/measureText";
+import {
+  LINE_HEIGHT,
+  lineHeightFor,
+  nodeFontString,
+  DEFAULT_FONT_SIZE,
+} from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
   flattenToNodes,
@@ -49,21 +54,28 @@ function getMeasureCtx(): CanvasRenderingContext2D | null {
   return _measureCtx;
 }
 
-/** Cumulative prefix widths for `text`: [0, w(c0), w(c0c1), …, fullWidth]. */
-function measureOffsets(text: string): number[] {
-  const cached = _offsetCache.get(text);
+/**
+ * Cumulative prefix widths for `text`: [0, w(c0), w(c0c1), …, fullWidth].
+ * Measured with `font` (defaults to the 14px node font) so the caret offsets
+ * line up with a node's own font size / weight.
+ */
+function measureOffsets(text: string, font: string = NODE_FONT): number[] {
+  const key = font === NODE_FONT ? text : `${font}|${text}`;
+  const cached = _offsetCache.get(key);
   if (cached) return cached;
   const ctx = getMeasureCtx();
   const offsets: number[] = [0];
   if (ctx) {
+    if (font !== NODE_FONT) ctx.font = font;
     for (let i = 0; i < text.length; i++) {
       offsets.push(ctx.measureText(text.slice(0, i + 1)).width);
     }
+    if (font !== NODE_FONT) ctx.font = NODE_FONT;
   } else {
     for (let i = 0; i < text.length; i++) offsets.push((i + 1) * 8);
   }
   if (_offsetCache.size > 4000) _offsetCache.clear();
-  _offsetCache.set(text, offsets);
+  _offsetCache.set(key, offsets);
   return offsets;
 }
 
@@ -93,19 +105,30 @@ interface LineData {
   lineOffsets: number[][];
   /** Absolute start index of each line in the full string. */
   lineStarts: number[];
+  /** Line box height in px for this node's font size. */
+  lineHeight: number;
 }
 
-/** Split node text into lines and pre-measure each line's caret offsets. */
-function buildLineData(text: string): LineData {
+/**
+ * Split node text into lines and pre-measure each line's caret offsets, using
+ * the node's own `fontSize` / `bold` so offsets and line height match the
+ * rendered text (including the actively edited node).
+ */
+function buildLineData(
+  text: string,
+  fontSize: number = DEFAULT_FONT_SIZE,
+  bold: boolean = false
+): LineData {
+  const font = nodeFontString(fontSize, bold);
   const lines = text.split("\n");
-  const lineOffsets = lines.map((l) => measureOffsets(l));
+  const lineOffsets = lines.map((l) => measureOffsets(l, font));
   const lineStarts: number[] = [];
   let acc = 0;
   for (let i = 0; i < lines.length; i++) {
     lineStarts[i] = acc;
     acc += lines[i].length + 1; // +1 for the consumed "\n"
   }
-  return { lines, lineOffsets, lineStarts };
+  return { lines, lineOffsets, lineStarts, lineHeight: lineHeightFor(fontSize) };
 }
 
 /** Absolute string offset → { line, column-within-line }. */
@@ -1110,11 +1133,11 @@ export default function MindmapEditor({
         const data = lineDataRef.current.get(closestNode.id);
         let charIdx = 0;
         if (data) {
-          const blockHeight = data.lines.length * LINE_HEIGHT;
+          const blockHeight = data.lines.length * data.lineHeight;
           const relY = worldY - (closestNode.y - blockHeight / 2);
           const line = Math.max(
             0,
-            Math.min(data.lines.length - 1, Math.floor(relY / LINE_HEIGHT))
+            Math.min(data.lines.length - 1, Math.floor(relY / data.lineHeight))
           );
           const relX = worldX - closestNode.x - NODE_PADDING;
           charIdx = lineColToPos(
@@ -1229,8 +1252,9 @@ export default function MindmapEditor({
     if (data) {
       const { line, col } = posToLineCol(data, cursorPos);
       cursorX = data.lineOffsets[line]?.[col] || 0;
-      const blockHeight = data.lines.length * LINE_HEIGHT;
-      lineCenterOffset = -blockHeight / 2 + line * LINE_HEIGHT + LINE_HEIGHT / 2;
+      const blockHeight = data.lines.length * data.lineHeight;
+      lineCenterOffset =
+        -blockHeight / 2 + line * data.lineHeight + data.lineHeight / 2;
     }
 
     const screenX = (activeNode.x + NODE_PADDING + cursorX) * scale + stage.x();
@@ -1259,7 +1283,11 @@ export default function MindmapEditor({
     nodes.forEach((node) => {
       // For active node during editing, use editingText
       const displayRaw = activeNodeId === node.id ? editingText : node.text;
-      const data = buildLineData(displayRaw);
+      const data = buildLineData(
+        displayRaw,
+        node.fontSize ?? DEFAULT_FONT_SIZE,
+        !!node.bold
+      );
       lineDataMap.set(node.id, data);
       textWidths.set(
         node.id,
@@ -1293,8 +1321,9 @@ export default function MindmapEditor({
     nodes.forEach((node, index) => {
       const isRoot = index === 0;
       const isActive = activeNodeId === node.id;
-      // The active node is always edited/rendered as plain text at the default
-      // font, whatever its kind. Non-active nodes honour their stored format.
+      // The active node is edited as raw text (image/link nodes show their URL
+      // while editing) but still honours its stored font size / weight, so the
+      // text doesn't visually jump when entering or leaving edit mode.
       const asImage = !isActive && node.type === "image";
       const asLink = !isActive && node.type === "link";
       // Links display their fetched title (falling back to the raw URL).
@@ -1305,9 +1334,9 @@ export default function MindmapEditor({
           : node.text;
       const isEmpty = displayRaw === "";
       const displayText = isEmpty ? "empty" : displayRaw;
-      const fontSize = isActive ? 14 : node.fontSize ?? 14;
-      const bold = !isActive && !!node.bold;
-      const lineHeightPx = isActive ? LINE_HEIGHT : lineHeightFor(fontSize);
+      const fontSize = node.fontSize ?? DEFAULT_FONT_SIZE;
+      const bold = !!node.bold;
+      const lineHeightPx = lineHeightFor(fontSize);
       const konvaLineHeight = lineHeightPx / fontSize;
       // Line count comes from the (14px) lineData; titles/text are single-line
       // in practice, multi-line text keeps its hard breaks.
@@ -1482,7 +1511,7 @@ export default function MindmapEditor({
           const relY = worldY - (node.y - blockHeight / 2);
           const line = Math.max(
             0,
-            Math.min(lineCount - 1, Math.floor(relY / LINE_HEIGHT))
+            Math.min(lineCount - 1, Math.floor(relY / data.lineHeight))
           );
           const relX = worldX - node.x - nodePadding;
           charIdx = lineColToPos(
@@ -1637,8 +1666,14 @@ export default function MindmapEditor({
 
       const isRoot = nodes.indexOf(activeNode) === 0;
       const data = lineDataRef.current.get(activeNodeId);
-      const blockHeight = (data ? data.lines.length : 1) * LINE_HEIGHT;
+      const lineHeight = data ? data.lineHeight : LINE_HEIGHT;
+      const blockHeight = (data ? data.lines.length : 1) * lineHeight;
       const textTop = activeNode.y - blockHeight / 2;
+      // Selection / caret half-height scales with the node's font size
+      // (10px at the 14px baseline).
+      const caretHalf = Math.round(
+        ((activeNode.fontSize ?? DEFAULT_FONT_SIZE) * 10) / DEFAULT_FONT_SIZE
+      );
 
       // Selection highlight (per line, so it spans multi-line ranges).
       if (data && cursorPos !== selectionEnd) {
@@ -1654,13 +1689,13 @@ export default function MindmapEditor({
           const x1 = offs[segStart - lineStart] || 0;
           const x2 = offs[segEnd - lineStart] || 0;
           if (x2 <= x1) continue;
-          const lineCenterY = textTop + li * LINE_HEIGHT + LINE_HEIGHT / 2;
+          const lineCenterY = textTop + li * lineHeight + lineHeight / 2;
           cursorLayer.add(
             new Konva.Rect({
               x: activeNode.x + nodePadding + x1,
-              y: lineCenterY - 10,
+              y: lineCenterY - caretHalf,
               width: x2 - x1,
-              height: 20,
+              height: caretHalf * 2,
               fill: isRoot
                 ? "rgba(255, 255, 255, 0.3)"
                 : "rgba(16, 185, 129, 0.18)",
@@ -1677,10 +1712,15 @@ export default function MindmapEditor({
           : { line: 0, col: 0 };
         const cursorX =
           activeNode.x + nodePadding + (data?.lineOffsets[line]?.[col] || 0);
-        const lineCenterY = textTop + line * LINE_HEIGHT + LINE_HEIGHT / 2;
+        const lineCenterY = textTop + line * lineHeight + lineHeight / 2;
         cursorLayer.add(
           new Konva.Line({
-            points: [cursorX, lineCenterY - 10, cursorX, lineCenterY + 10],
+            points: [
+              cursorX,
+              lineCenterY - caretHalf,
+              cursorX,
+              lineCenterY + caretHalf,
+            ],
             stroke: isRoot ? "#ffffff" : "#0f172a",
             strokeWidth: 2,
             listening: false,
