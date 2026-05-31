@@ -15,6 +15,7 @@ dist/
 
 # deps
 node_modules/
+.pnpm-store/
 
 # generated
 app/pages.gen.ts
