@@ -1,6 +1,23 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "./model";
-import { detachBranch, cloneWithNewIds, findNode, getFlatOrder } from "./model";
+import {
+  detachBranch,
+  cloneWithNewIds,
+  findNode,
+  getFlatOrder,
+  getNodeDepths,
+  addSiblingAfter,
+  splitNode,
+  updateNodeText,
+  setNodeType,
+  setNodeStyle,
+  setLinkMeta,
+  toggleCollapse,
+  addChildToNode,
+  removeNode,
+  indentNode,
+  dedentNode,
+} from "./model";
 
 /** Build a small fixed tree:
  *  Root
@@ -118,5 +135,221 @@ describe("cloneWithNewIds", () => {
     const before = JSON.stringify(node);
     cloneWithNewIds(node);
     expect(JSON.stringify(node)).toBe(before);
+  });
+});
+
+describe("getNodeDepths", () => {
+  it("assigns depth 0 to the root and increments per level", () => {
+    const model = sampleModel();
+    const depths = getNodeDepths(model);
+    expect(depths.get("root")).toBe(0);
+    expect(depths.get("a")).toBe(1);
+    expect(depths.get("a1")).toBe(2);
+    expect(depths.get("a1a")).toBe(3);
+    expect(depths.get("b")).toBe(1);
+  });
+
+  it("covers every node in the tree", () => {
+    const model = sampleModel();
+    const depths = getNodeDepths(model);
+    const order = getFlatOrder(model);
+    for (const id of order) {
+      expect(depths.has(id)).toBe(true);
+    }
+  });
+});
+
+describe("addSiblingAfter with root as target", () => {
+  it("appends the new node as a child of root when root is the afterId", () => {
+    const model = sampleModel();
+    const newNode: MindMapModel = { id: "new", text: "New", children: [] };
+    const result = addSiblingAfter(model, model.id, newNode);
+    expect(result.children[result.children.length - 1].text).toBe("New");
+  });
+});
+
+describe("splitNode at root", () => {
+  it("unshifts a new child onto the root when the root is split", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Hello",
+      children: [{ id: "c1", text: "Child", children: [] }],
+    };
+    const { model: next, newNodeId } = splitNode(model, "root", 2);
+    expect(next.text).toBe("He");
+    const firstChild = next.children[0];
+    expect(firstChild.id).toBe(newNodeId);
+    expect(firstChild.text).toBe("llo");
+  });
+
+  it("is a no-op (returns early) when nodeId is not found", () => {
+    const model = sampleModel();
+    const { model: next } = splitNode(model, "missing", 0);
+    expect(getFlatOrder(next)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("addSiblingAfter edge cases", () => {
+  it("returns model unchanged when afterId is not found", () => {
+    const model = sampleModel();
+    const newNode: MindMapModel = { id: "x", text: "X", children: [] };
+    const result = addSiblingAfter(model, "nonexistent", newNode);
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("updateNodeText edge cases", () => {
+  it("returns model unchanged when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = updateNodeText(model, "nonexistent", "new text");
+    expect(findNode(result, "root")!.text).toBe("Root");
+  });
+});
+
+describe("setNodeType", () => {
+  it("sets type to 'link' on a node", () => {
+    const model = sampleModel();
+    const result = setNodeType(model, "b", "link");
+    expect(findNode(result, "b")!.type).toBe("link");
+  });
+
+  it("stores 'text' type as absent (undefined)", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "n", text: "Node", type: "link", children: [] }],
+    };
+    const result = setNodeType(model, "n", "text");
+    expect(findNode(result, "n")!.type).toBeUndefined();
+  });
+});
+
+describe("setNodeStyle branch conditions", () => {
+  it("removes fontSize when null is passed", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "n", text: "Node", fontSize: 20, children: [] }],
+    };
+    const result = setNodeStyle(model, "n", { fontSize: null });
+    expect(findNode(result, "n")!.fontSize).toBeUndefined();
+  });
+
+  it("removes bold when false is passed", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "n", text: "Node", bold: true, children: [] }],
+    };
+    const result = setNodeStyle(model, "n", { bold: false });
+    expect(findNode(result, "n")!.bold).toBeUndefined();
+  });
+});
+
+describe("setLinkMeta branch conditions", () => {
+  it("removes linkTitle when empty string is passed", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "n", text: "Node", linkTitle: "Old", children: [] }],
+    };
+    const result = setLinkMeta(model, "n", { linkTitle: "" });
+    expect(findNode(result, "n")!.linkTitle).toBeUndefined();
+  });
+
+  it("removes favicon when null is passed", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "n", text: "Node", favicon: "old.ico", children: [] }],
+    };
+    const result = setLinkMeta(model, "n", { favicon: null });
+    expect(findNode(result, "n")!.favicon).toBeUndefined();
+  });
+});
+
+describe("toggleCollapse edge cases", () => {
+  it("is a no-op when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = toggleCollapse(model, "nonexistent");
+    expect(JSON.stringify(result)).toBe(JSON.stringify(model));
+  });
+});
+
+describe("addChildToNode edge cases", () => {
+  it("is a no-op when parentId is not found", () => {
+    const model = sampleModel();
+    const newNode: MindMapModel = { id: "x", text: "X", children: [] };
+    const result = addChildToNode(model, "nonexistent", newNode);
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("removeNode edge cases", () => {
+  it("returns model unchanged when nodeId is the root", () => {
+    const model = sampleModel();
+    const result = removeNode(model, "root");
+    expect(result.id).toBe("root");
+  });
+
+  it("returns model unchanged when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = removeNode(model, "nonexistent");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("indentNode edge cases", () => {
+  it("is a no-op when node is the root", () => {
+    const model = sampleModel();
+    const result = indentNode(model, "root");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+
+  it("is a no-op when the node is the first child (index 0)", () => {
+    const model = sampleModel();
+    // "a" is the first child of root (index 0)
+    const result = indentNode(model, "a");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("dedentNode edge cases", () => {
+  it("is a no-op when node is the root", () => {
+    const model = sampleModel();
+    const result = dedentNode(model, "root");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+
+  it("is a no-op when the node is a direct child of root (no grandparent)", () => {
+    const model = sampleModel();
+    const result = dedentNode(model, "a");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+
+  it("is a no-op when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = dedentNode(model, "nonexistent");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("null-node branch coverage for model mutations", () => {
+  it("setNodeType is a no-op when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = setNodeType(model, "nonexistent", "link");
+    expect(JSON.stringify(result)).toBe(JSON.stringify(model));
+  });
+
+  it("setNodeStyle is a no-op when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = setNodeStyle(model, "nonexistent", { fontSize: 20 });
+    expect(JSON.stringify(result)).toBe(JSON.stringify(model));
+  });
+
+  it("setLinkMeta is a no-op when nodeId is not found", () => {
+    const model = sampleModel();
+    const result = setLinkMeta(model, "nonexistent", { linkTitle: "x" });
+    expect(JSON.stringify(result)).toBe(JSON.stringify(model));
   });
 });
