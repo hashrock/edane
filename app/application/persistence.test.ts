@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
-import { modelToText, textToModel } from "./persistence";
+import {
+  modelToText,
+  textToModel,
+  parseContent,
+  serializeModel,
+  createDefaultModel,
+} from "./persistence";
 
 /** Strip IDs so we can compare tree structure and text only */
 function stripIds(model: MindMapModel): unknown {
@@ -166,5 +172,65 @@ describe("round-trip: textToModel → modelToText", () => {
     const text = modelToText(model);
 
     expect(text).toBe("Root\n  Child1\n    Grandchild\n  Child2");
+  });
+});
+
+describe("parseContent", () => {
+  it("returns a default model when content is undefined", () => {
+    const model = parseContent(undefined, "My Title");
+    expect(model.text).toBe("My Title");
+    expect(model.children.length).toBeGreaterThan(0);
+  });
+
+  it("returns a default model when content is an empty string", () => {
+    const model = parseContent("", "My Title");
+    expect(model.text).toBe("My Title");
+  });
+
+  it("parses valid JSON content", () => {
+    const original: MindMapModel = {
+      id: "r1",
+      text: "From JSON",
+      children: [{ id: "c1", text: "Child", children: [] }],
+    };
+    const model = parseContent(JSON.stringify(original), "ignored");
+    expect(model.id).toBe("r1");
+    expect(model.text).toBe("From JSON");
+    expect(model.children[0].text).toBe("Child");
+  });
+
+  it("falls back to legacy text format when JSON is invalid", () => {
+    const model = parseContent("not-json-content", "Root");
+    expect(model.text).toBe("Root");
+    expect(model.children[0].text).toBe("not-json-content");
+  });
+
+  it("falls back to legacy format when JSON lacks required fields", () => {
+    const model = parseContent(JSON.stringify({ foo: "bar" }), "Root");
+    // No id/text field → falls back to legacy parser
+    expect(model.text).toBe("Root");
+  });
+});
+
+describe("serializeModel", () => {
+  it("serializes a model to a JSON string", () => {
+    const model: MindMapModel = { id: "r", text: "Root", children: [] };
+    const json = serializeModel(model);
+    const parsed = JSON.parse(json);
+    expect(parsed.id).toBe("r");
+    expect(parsed.text).toBe("Root");
+  });
+});
+
+describe("createDefaultModel", () => {
+  it("creates a model with the given title", () => {
+    const model = createDefaultModel("My Map");
+    expect(model.text).toBe("My Map");
+    expect(model.children.length).toBeGreaterThan(0);
+  });
+
+  it("defaults to 'Edane' when no title is provided", () => {
+    const model = createDefaultModel();
+    expect(model.text).toBe("Edane");
   });
 });

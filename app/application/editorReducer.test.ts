@@ -378,4 +378,625 @@ describe("no-op convention", () => {
       })
     ).toBe(s);
   });
+
+  it("returns a new state for setSelection with different values", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, {
+      type: "setSelection",
+      cursorPos: 0,
+      selectionEnd: 1,
+    });
+    expect(next).not.toBe(s);
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(1);
+  });
+
+  it("deleteAtEnd is a no-op when cursor is not at end", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a1"), cursorPos: 1, selectionEnd: 1 };
+    expect(editorReducer(s, { type: "deleteAtEnd", pos: 1 })).toBe(s);
+  });
+
+  it("deleteAtEnd is a no-op at the last node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    expect(editorReducer(s, { type: "deleteAtEnd", pos: 1 })).toBe(s);
+  });
+
+  it("moveDown is a no-op at the last node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    expect(editorReducer(s, { type: "moveDown" })).toBe(s);
+  });
+});
+
+describe("cmdLeft / cmdRight", () => {
+  it("cmdLeft at pos 0 jumps to end of previous node", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "b"), cursorPos: 0, selectionEnd: 0 };
+    const next = editorReducer(s, { type: "cmdLeft", pos: 0 });
+    expect(next.activeNodeId).toBe("a1");
+    expect(next.cursorPos).toBe(2);
+  });
+
+  it("cmdLeft not at start jumps cursor to start of current node", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a"), cursorPos: 1, selectionEnd: 1 };
+    const next = editorReducer(s, { type: "cmdLeft", pos: 1 });
+    expect(next.activeNodeId).toBe("a");
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(0);
+  });
+
+  it("cmdLeft is a no-op when already at start of first node", () => {
+    const model = sampleModel();
+    // root is idx=0, so pos=0 does not jump to a previous node
+    const s = { ...stateAt(model, "root"), cursorPos: 0, selectionEnd: 0 };
+    expect(editorReducer(s, { type: "cmdLeft", pos: 0 })).toBe(s);
+  });
+
+  it("cmdRight at end jumps to start of next node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1"); // cursor at end of "A1"
+    const next = editorReducer(s, { type: "cmdRight", pos: 2 });
+    expect(next.activeNodeId).toBe("b");
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(0);
+  });
+
+  it("cmdRight not at end jumps cursor to end of current node", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a"), cursorPos: 0, selectionEnd: 0 };
+    const next = editorReducer(s, { type: "cmdRight", pos: 0 });
+    expect(next.activeNodeId).toBe("a");
+    expect(next.cursorPos).toBe(1);
+    expect(next.selectionEnd).toBe(1);
+  });
+
+  it("cmdRight is a no-op when already at end of node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b"); // cursor at end of "B"
+    expect(editorReducer(s, { type: "cmdRight", pos: 1 })).toBe(s);
+  });
+});
+
+describe("cmdShiftLeft / cmdShiftRight", () => {
+  it("cmdShiftLeft extends selection to start of node", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a"), cursorPos: 0, selectionEnd: 1 };
+    const next = editorReducer(s, {
+      type: "cmdShiftLeft",
+      pos: 0,
+      selEnd: 1,
+    });
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(1);
+  });
+
+  it("cmdShiftRight extends selection to end of node", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a1"), cursorPos: 0, selectionEnd: 0 };
+    const next = editorReducer(s, {
+      type: "cmdShiftRight",
+      pos: 0,
+      selEnd: 2,
+    });
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(2);
+  });
+});
+
+describe("arrowLeftEdge / arrowRightEdge", () => {
+  it("arrowLeftEdge moves focus to previous node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    const next = editorReducer(s, { type: "arrowLeftEdge" });
+    expect(next.activeNodeId).toBe("a1");
+  });
+
+  it("arrowLeftEdge is a no-op at the first node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(editorReducer(s, { type: "arrowLeftEdge" })).toBe(s);
+  });
+
+  it("arrowRightEdge moves focus to next node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1");
+    const next = editorReducer(s, { type: "arrowRightEdge" });
+    expect(next.activeNodeId).toBe("b");
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(0);
+  });
+
+  it("arrowRightEdge is a no-op at the last node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    expect(editorReducer(s, { type: "arrowRightEdge" })).toBe(s);
+  });
+});
+
+describe("activateNode", () => {
+  it("focuses the given node and enters the specified editing mode", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "activateNode",
+      nodeId: "a",
+      cursorPos: 1,
+      selectionEnd: 1,
+      editing: true,
+    });
+    expect(next.activeNodeId).toBe("a");
+    expect(next.editingText).toBe("A");
+    expect(next.editing).toBe(true);
+    expect(next.cursorPos).toBe(1);
+    expect(next.selectionEnd).toBe(1);
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "activateNode",
+        nodeId: "nonexistent",
+        cursorPos: 0,
+        selectionEnd: 0,
+        editing: false,
+      })
+    ).toBe(s);
+  });
+});
+
+describe("startEditing / exitEditing", () => {
+  it("startEditing enters edit mode with cursor defaults", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a"), editing: false };
+    const next = editorReducer(s, { type: "startEditing" });
+    expect(next.editing).toBe(true);
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(1); // selects whole text ("A".length)
+  });
+
+  it("startEditing accepts explicit cursorPos and selectionEnd", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a1"), editing: false };
+    const next = editorReducer(s, {
+      type: "startEditing",
+      cursorPos: 1,
+      selectionEnd: 2,
+    });
+    expect(next.cursorPos).toBe(1);
+    expect(next.selectionEnd).toBe(2);
+  });
+
+  it("startEditing is a no-op without an active node", () => {
+    const model = sampleModel();
+    const s: EditorState = { ...stateAt(model, "a"), activeNodeId: null };
+    expect(editorReducer(s, { type: "startEditing" })).toBe(s);
+  });
+
+  it("exitEditing leaves edit mode and selects whole text", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1"); // editing=true from stateAt
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(next.editing).toBe(false);
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(2); // "A1".length
+  });
+
+  it("exitEditing is a no-op when not editing", () => {
+    const model = sampleModel();
+    const s = { ...stateAt(model, "a"), editing: false };
+    expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
+  });
+});
+
+describe("selectAllInNode", () => {
+  it("selects all text in the given node and enters edit mode", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, { type: "selectAllInNode", nodeId: "a1" });
+    expect(next.activeNodeId).toBe("a1");
+    expect(next.editing).toBe(true);
+    expect(next.editingText).toBe("A1");
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(2);
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, { type: "selectAllInNode", nodeId: "missing" })
+    ).toBe(s);
+  });
+});
+
+describe("dragSelect", () => {
+  it("same-node drag selects a text range and enters edit mode", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "dragSelect",
+      anchorNodeId: "a1",
+      anchorOffset: 2,
+      focusNodeId: "a1",
+      focusOffset: 0,
+    });
+    expect(next.activeNodeId).toBe("a1");
+    expect(next.editing).toBe(true);
+    expect(next.cursorPos).toBe(0);
+    expect(next.selectionEnd).toBe(2);
+  });
+
+  it("cross-node drag moves focus without entering edit mode", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "dragSelect",
+      anchorNodeId: "a",
+      anchorOffset: 0,
+      focusNodeId: "b",
+      focusOffset: 1,
+    });
+    expect(next.activeNodeId).toBe("b");
+    expect(next.editing).toBe(false);
+    expect(next.cursorPos).toBe(1);
+  });
+
+  it("is a no-op for an unknown focus node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "dragSelect",
+        anchorNodeId: "a",
+        anchorOffset: 0,
+        focusNodeId: "missing",
+        focusOffset: 0,
+      })
+    ).toBe(s);
+  });
+});
+
+describe("insertNodes into root", () => {
+  it("inserts nodes as children of the root when root is the target", () => {
+    const model = sampleModel();
+    const nodes: MindMapModel[] = [
+      { id: "n1", text: "X", children: [] },
+    ];
+    const next = editorReducer(stateAt(model, "root"), {
+      type: "insertNodes",
+      targetId: "root",
+      nodes,
+    });
+    const root = findNode(next.model, "root")!;
+    expect(root.children[root.children.length - 1].text).toBe("X");
+    expect(next.activeNodeId).toBe("n1");
+  });
+
+  it("insertNodes is a no-op when nodes array is empty", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, { type: "insertNodes", targetId: "root", nodes: [] })
+    ).toBe(s);
+  });
+
+  it("insertNodes is a no-op when targetId does not exist in the model", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const nodes: MindMapModel[] = [{ id: "n1", text: "X", children: [] }];
+    expect(
+      editorReducer(s, {
+        type: "insertNodes",
+        targetId: "nonexistent",
+        nodes,
+      })
+    ).toBe(s);
+  });
+});
+
+describe("toggleCollapse", () => {
+  it("collapses a node with children", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, { type: "toggleCollapse", nodeId: "a" });
+    expect(findNode(next.model, "a")!.collapsed).toBe(true);
+  });
+
+  it("moves focus to the collapsed node when active node gets hidden", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1"); // a1 is a descendant of "a"
+    const next = editorReducer(s, { type: "toggleCollapse", nodeId: "a" });
+    expect(findNode(next.model, "a")!.collapsed).toBe(true);
+    expect(next.activeNodeId).toBe("a");
+  });
+
+  it("is a no-op for a leaf node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, { type: "toggleCollapse", nodeId: "b" })
+    ).toBe(s);
+  });
+});
+
+describe("addChild", () => {
+  it("adds a new empty child to a node and focuses it", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, { type: "addChild", nodeId: "b" });
+    const b = findNode(next.model, "b")!;
+    expect(b.children).toHaveLength(1);
+    expect(b.children[0].text).toBe("");
+    expect(next.activeNodeId).toBe(b.children[0].id);
+  });
+
+  it("is a no-op for an unknown nodeId", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, { type: "addChild", nodeId: "missing" })
+    ).toBe(s);
+  });
+});
+
+describe("deleteNode", () => {
+  it("deletes a node and preserves active focus elsewhere", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b"); // active = "b", delete "a1"
+    const next = editorReducer(s, { type: "deleteNode", nodeId: "a1" });
+    expect(findNode(next.model, "a1")).toBeNull();
+    expect(next.activeNodeId).toBe("b"); // active unchanged
+  });
+
+  it("refocuses when the active node is deleted", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1");
+    const next = editorReducer(s, { type: "deleteNode", nodeId: "a1" });
+    expect(findNode(next.model, "a1")).toBeNull();
+    expect(next.activeNodeId).toBe("a");
+  });
+
+  it("is a no-op when trying to delete the root", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, { type: "deleteNode", nodeId: "root" })
+    ).toBe(s);
+  });
+});
+
+describe("setNodeType", () => {
+  it("changes a node's type and focuses it", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "setNodeType",
+      nodeId: "b",
+      nodeType: "link",
+    });
+    expect(findNode(next.model, "b")!.type).toBe("link");
+    expect(next.activeNodeId).toBe("b");
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "setNodeType",
+        nodeId: "missing",
+        nodeType: "link",
+      })
+    ).toBe(s);
+  });
+});
+
+describe("setNodeContent", () => {
+  it("updates text and cursor for the currently active node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, {
+      type: "setNodeContent",
+      nodeId: "a",
+      text: "Alpha",
+    });
+    expect(findNode(next.model, "a")!.text).toBe("Alpha");
+    expect(next.editingText).toBe("Alpha");
+    expect(next.cursorPos).toBe(5);
+  });
+
+  it("updates text without changing cursor for a non-active node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "setNodeContent",
+      nodeId: "b",
+      text: "Beta",
+    });
+    expect(findNode(next.model, "b")!.text).toBe("Beta");
+    expect(next.activeNodeId).toBe("root"); // focus unchanged
+  });
+
+  it("also sets nodeType when provided", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    const next = editorReducer(s, {
+      type: "setNodeContent",
+      nodeId: "b",
+      text: "https://example.com",
+      nodeType: "link",
+    });
+    expect(findNode(next.model, "b")!.type).toBe("link");
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "setNodeContent",
+        nodeId: "missing",
+        text: "x",
+      })
+    ).toBe(s);
+  });
+});
+
+describe("setNodeStyle", () => {
+  it("applies font size and bold to a node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "setNodeStyle",
+      nodeId: "b",
+      fontSize: 20,
+      bold: true,
+    });
+    const b = findNode(next.model, "b")!;
+    expect(b.fontSize).toBe(20);
+    expect(b.bold).toBe(true);
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "setNodeStyle",
+        nodeId: "missing",
+        fontSize: 20,
+      })
+    ).toBe(s);
+  });
+});
+
+describe("setLinkMeta", () => {
+  it("sets linkTitle and favicon on a node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, {
+      type: "setLinkMeta",
+      nodeId: "b",
+      linkTitle: "Example",
+      favicon: "https://example.com/fav.ico",
+    });
+    const b = findNode(next.model, "b")!;
+    expect(b.linkTitle).toBe("Example");
+    expect(b.favicon).toBe("https://example.com/fav.ico");
+  });
+
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(
+      editorReducer(s, {
+        type: "setLinkMeta",
+        nodeId: "missing",
+        linkTitle: "x",
+      })
+    ).toBe(s);
+  });
+});
+
+describe("null activeNodeId no-ops", () => {
+  function nullState(model: MindMapModel): EditorState {
+    return { ...stateAt(model, "root"), activeNodeId: null };
+  }
+
+  it("copyBranch is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "copyBranch" })).toBe(s);
+  });
+
+  it("cutBranch is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "cutBranch" })).toBe(s);
+  });
+
+  it("pasteBranch is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "pasteBranch" })).toBe(s);
+  });
+
+  it("moveUp is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "moveUp" })).toBe(s);
+  });
+
+  it("moveDown is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "moveDown" })).toBe(s);
+  });
+
+  it("tab is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "tab", shift: false })).toBe(s);
+  });
+
+  it("backspaceAtStart is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "backspaceAtStart" })).toBe(s);
+  });
+
+  it("cmdLeft is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "cmdLeft", pos: 0 })).toBe(s);
+  });
+
+  it("cmdRight is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "cmdRight", pos: 0 })).toBe(s);
+  });
+
+  it("cmdShiftLeft is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "cmdShiftLeft", pos: 0, selEnd: 0 })).toBe(s);
+  });
+
+  it("arrowLeftEdge is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "arrowLeftEdge" })).toBe(s);
+  });
+
+  it("arrowRightEdge is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(editorReducer(s, { type: "arrowRightEdge" })).toBe(s);
+  });
+
+  it("typeText is a no-op without an active node", () => {
+    const s = nullState(sampleModel());
+    expect(
+      editorReducer(s, {
+        type: "typeText",
+        text: "x",
+        cursorPos: 1,
+        selectionEnd: 1,
+        commitModel: true,
+      })
+    ).toBe(s);
+  });
+});
+
+describe("replace", () => {
+  it("replaces the entire editor state", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    const replacement: EditorState = {
+      model: { id: "new", text: "New", children: [] },
+      activeNodeId: "new",
+      editing: false,
+      editingText: "New",
+      cursorPos: 0,
+      selectionEnd: 3,
+      clipboard: null,
+    };
+    const next = editorReducer(s, { type: "replace", state: replacement });
+    expect(next).toBe(replacement);
+  });
 });
