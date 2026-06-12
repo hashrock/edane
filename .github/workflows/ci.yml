@@ -1,0 +1,31 @@
+name: CI
+
+# Manually triggered from the Actions tab (or via the GitHub API / gh CLI).
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      # Node (framework-agnostic) tests.
+      - name: Run node tests
+        run: pnpm run test
+
+      # Browser e2e tests run in a real Chromium via Playwright.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: pnpm run test:e2e
