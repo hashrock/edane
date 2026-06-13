@@ -210,6 +210,12 @@ describe("parseContent", () => {
     // No id/text field → falls back to legacy parser
     expect(model.text).toBe("Root");
   });
+
+  it("uses 'Mindmap' as title when title is undefined and content is legacy text", () => {
+    const model = parseContent("Child1\nChild2", undefined);
+    expect(model.text).toBe("Mindmap");
+    expect(model.children[0].text).toBe("Child1");
+  });
 });
 
 describe("serializeModel", () => {

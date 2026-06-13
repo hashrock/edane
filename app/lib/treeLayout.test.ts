@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapNode } from "../types/MindMap";
-import { layoutMindMap } from "./treeLayout";
+import { layoutMindMap, calculateNodeSizes, assignNodePositions } from "./treeLayout";
 
 /** Build flat MindMapNode[] (id + children-ids) from a compact spec. */
 function nodes(
@@ -78,5 +78,23 @@ describe("layoutMindMap vertical centering", () => {
     // the parent sits at the midpoint of the topmost and bottommost leaves
     // (their equal half-heights cancel), not the average of direct-child centers.
     expect((m.A1.y + m.B.y) / 2).toBeCloseTo(m.root.y, 5);
+  });
+});
+
+describe("assignNodePositions edge cases", () => {
+  it("returns early when the root node is absent from the layoutMap", () => {
+    const ns = nodes([
+      ["root", ["c1"]],
+      ["c1", []],
+    ]);
+    const layoutMap = calculateNodeSizes(ns);
+    // Remove the root entry so rootLayout is undefined
+    layoutMap.delete("root");
+    const beforeX = ns[0].x;
+    const beforeY = ns[0].y;
+    assignNodePositions(ns, layoutMap);
+    // Root position must be unchanged (early return triggered)
+    expect(ns[0].x).toBe(beforeX);
+    expect(ns[0].y).toBe(beforeY);
   });
 });
