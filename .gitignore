@@ -19,6 +19,7 @@ node_modules/
 
 # generated
 app/pages.gen.ts
+coverage/
 
 # env
 .env
