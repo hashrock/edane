@@ -9,6 +9,7 @@ import {
   lineHeightFor,
   nodeFontString,
   DEFAULT_FONT_SIZE,
+  NODE_FONT,
 } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
@@ -38,8 +39,7 @@ import { UndoManager } from "../application/undoManager";
 // for every node, on every redraw). Instead we measure with a single shared 2D
 // context and cache offsets per text string — only the actively edited node's
 // text changes per keystroke, so every other node is an O(1) cache hit.
-const NODE_FONT = "14px sans-serif";
-const NODE_FONT_ITALIC = "italic 14px sans-serif";
+const NODE_FONT_ITALIC = `italic ${NODE_FONT}`;
 let _measureCtx: CanvasRenderingContext2D | null | undefined;
 const _offsetCache = new Map<string, number[]>();
 let _emptyWidth = -1;
