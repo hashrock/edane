@@ -16,6 +16,7 @@ dist/
 # deps
 node_modules/
 .pnpm-store/
+package-lock.json
 
 # generated
 app/pages.gen.ts
