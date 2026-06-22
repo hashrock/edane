@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "@inertiajs/react";
 import type { MindMapNode } from "../types/MindMap";
 import type { MindMapModel } from "../domain/model";
-import { findNode, getFlatOrder, generateId } from "../domain/model";
+import { findNode, cloneWithNewIds } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
@@ -530,12 +530,7 @@ export default function MindmapEditor({
       const cur = stateRef.current;
       const targetId = cur.activeNodeId || cur.model.id;
       const parsed = textToModel("_", clipText);
-      const reId = (n: MindMapModel): MindMapModel => ({
-        id: generateId(),
-        text: n.text,
-        children: n.children.map(reId),
-      });
-      const freshChildren = parsed.children.map(reId);
+      const freshChildren = parsed.children.map(cloneWithNewIds);
       if (freshChildren.length === 0) return;
       const next = dispatch(
         { type: "insertNodes", targetId, nodes: freshChildren },
