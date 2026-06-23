@@ -1,26 +1,22 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapNode } from "../types/MindMap";
+import type { LayoutNode } from "./treeLayout";
 import { layoutMindMap, calculateNodeSizes, assignNodePositions } from "./treeLayout";
 
-/** Build flat MindMapNode[] (id + children-ids) from a compact spec. */
+/** Build flat LayoutNode[] (id + children-ids) from a compact spec. */
 function nodes(
   spec: Array<[id: string, children: string[]]>
-): MindMapNode[] {
+): LayoutNode[] {
   return spec.map(([id, children]) => ({
     id,
-    text: id,
     x: 0,
     y: 0,
     children,
     width: 60,
     height: 32,
-    collapsed: false,
-    childCount: children.length,
-    type: "text" as const,
   }));
 }
 
-function byId(ns: MindMapNode[]): Record<string, MindMapNode> {
+function byId(ns: LayoutNode[]): Record<string, LayoutNode> {
   return Object.fromEntries(ns.map((n) => [n.id, n]));
 }
 
