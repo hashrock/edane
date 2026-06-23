@@ -1,7 +1,15 @@
-import type { MindMapNode } from "../types/MindMap";
+/** Minimal node contract required by the layout algorithm. */
+export interface LayoutNode {
+  id: string;
+  width: number;
+  height: number;
+  children: string[];
+  x: number;
+  y: number;
+}
 
 interface NodeLayout {
-  node: MindMapNode;
+  node: LayoutNode;
   width: number;
   height: number;
   subtreeHeight: number;
@@ -17,18 +25,18 @@ const HORIZONTAL_GAP = 120;
 const VERTICAL_GAP = 10;
 
 /** Visual box width (measured text width + horizontal padding), with a floor. */
-function effectiveWidth(node: MindMapNode): number {
+function effectiveWidth(node: LayoutNode): number {
   const textWidth = node.width || 0;
   return Math.max(NODE_MIN_WIDTH, textWidth + NODE_PADDING * 2);
 }
 
 /** Slot height used for vertical packing (measured box height, with a floor). */
-function slotHeight(node: MindMapNode): number {
+function slotHeight(node: LayoutNode): number {
   return Math.max(NODE_MIN_HEIGHT, node.height || 0);
 }
 
 export function calculateNodeSizes(
-  nodes: MindMapNode[]
+  nodes: LayoutNode[]
 ): Map<string, NodeLayout> {
   const layoutMap = new Map<string, NodeLayout>();
 
@@ -70,7 +78,7 @@ export function calculateNodeSizes(
 }
 
 export function assignNodePositions(
-  nodes: MindMapNode[],
+  nodes: LayoutNode[],
   layoutMap: Map<string, NodeLayout>,
   startX: number = 100,
   startY: number = 300
@@ -133,7 +141,7 @@ export function assignNodePositions(
 }
 
 export function layoutMindMap(
-  nodes: MindMapNode[]
+  nodes: LayoutNode[]
 ): Map<string, NodeLayout> {
   const layoutMap = calculateNodeSizes(nodes);
   assignNodePositions(nodes, layoutMap);
