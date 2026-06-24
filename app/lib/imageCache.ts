@@ -71,15 +71,10 @@ export function getImageEntry(url: string): Entry | undefined {
   return entry;
 }
 
-export interface ImageDisplay {
-  /** Display width (px). */
-  w: number;
-  /** Display height (px, capped to IMAGE_MAX_HEIGHT). */
-  h: number;
-  status: "loading" | "loaded" | "error";
-  /** The loaded element (only when status === "loaded"). */
-  img?: HTMLImageElement;
-}
+export type ImageDisplay =
+  | { status: "loading"; w: number; h: number }
+  | { status: "loaded"; w: number; h: number; img: HTMLImageElement }
+  | { status: "error"; w: number; h: number };
 
 /** Display size for an image URL, scaled to respect IMAGE_MAX_HEIGHT. */
 export function imageDisplaySize(url: string): ImageDisplay {
