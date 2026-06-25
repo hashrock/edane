@@ -279,7 +279,9 @@ export function splitNode(
   const newNodeId = generateId();
   const cloned = cloneModel(model);
   const node = findNode(cloned, nodeId);
-  if (!node) return { model: cloned, newNodeId };
+  // Fall back to root id (always exists) so the postcondition holds:
+  // newNodeId must identify a node present in the returned model.
+  if (!node) return { model: cloned, newNodeId: cloned.id };
   const textAfter = node.text.substring(atPos);
   node.text = node.text.substring(0, atPos);
 

@@ -184,8 +184,10 @@ describe("splitNode at root", () => {
 
   it("is a no-op (returns early) when nodeId is not found", () => {
     const model = sampleModel();
-    const { model: next } = splitNode(model, "missing", 0);
+    const { model: next, newNodeId } = splitNode(model, "missing", 0);
     expect(getFlatOrder(next)).toEqual(getFlatOrder(model));
+    // Invariant: newNodeId must always exist in the returned model.
+    expect(findNode(next, newNodeId)).not.toBeNull();
   });
 });
 
