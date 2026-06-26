@@ -24,6 +24,12 @@ export const DEFAULT_FONT_SIZE = 14;
 /** CSS line-height in px for the 14px node font. */
 export const LINE_HEIGHT = 18;
 
+/**
+ * Konva.Text's `lineHeight` is a multiplier of fontSize, not an absolute px
+ * value. This ratio converts our px-based LINE_HEIGHT to that multiplier.
+ */
+export const KONVA_LINE_HEIGHT = LINE_HEIGHT / DEFAULT_FONT_SIZE;
+
 /** Per-font-size line height in px, scaled from the 14px → 18px baseline. */
 export function lineHeightFor(fontSize: number): number {
   return Math.round((fontSize * LINE_HEIGHT) / DEFAULT_FONT_SIZE);
