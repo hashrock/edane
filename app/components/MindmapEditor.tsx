@@ -6,6 +6,7 @@ import { findNode, cloneWithNewIds } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
+  KONVA_LINE_HEIGHT,
   lineHeightFor,
   nodeFontString,
   DEFAULT_FONT_SIZE,
@@ -92,9 +93,6 @@ function measureEmptyWidth(): number {
 }
 
 // --- Multi-line geometry ---
-// Konva's lineHeight is a multiple of fontSize (14px), so LINE_HEIGHT/14 gives
-// us the same px line box pretext used to measure node height.
-const KONVA_LINE_HEIGHT = LINE_HEIGHT / 14;
 const NODE_PADDING = 20;
 
 interface LineData {
