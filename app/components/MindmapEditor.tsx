@@ -10,6 +10,7 @@ import {
   nodeFontString,
   DEFAULT_FONT_SIZE,
   NODE_FONT,
+  KONVA_LINE_HEIGHT,
 } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
@@ -92,9 +93,6 @@ function measureEmptyWidth(): number {
 }
 
 // --- Multi-line geometry ---
-// Konva's lineHeight is a multiple of fontSize (14px), so LINE_HEIGHT/14 gives
-// us the same px line box pretext used to measure node height.
-const KONVA_LINE_HEIGHT = LINE_HEIGHT / 14;
 const NODE_PADDING = 20;
 
 interface LineData {
