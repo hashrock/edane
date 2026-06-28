@@ -23,6 +23,12 @@ export const NODE_FONT = "14px sans-serif";
 export const DEFAULT_FONT_SIZE = 14;
 /** CSS line-height in px for the 14px node font. */
 export const LINE_HEIGHT = 18;
+/**
+ * Konva's lineHeight prop is a multiplier of fontSize, so Konva needs
+ * LINE_HEIGHT / DEFAULT_FONT_SIZE to produce the same px line box that
+ * measureNodeBox uses internally.
+ */
+export const KONVA_LINE_HEIGHT = LINE_HEIGHT / DEFAULT_FONT_SIZE;
 
 /** Per-font-size line height in px, scaled from the 14px → 18px baseline. */
 export function lineHeightFor(fontSize: number): number {

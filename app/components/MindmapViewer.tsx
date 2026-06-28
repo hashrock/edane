@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { MindMapNode } from "../types/MindMap";
 import { layoutMindMap } from "../lib/treeLayout";
-import { LINE_HEIGHT } from "../lib/measureText";
+import { LINE_HEIGHT, KONVA_LINE_HEIGHT } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
 import { parseContent } from "../application/persistence";
 import { flattenToNodes } from "../application/nodeUtils";
 
-const KONVA_LINE_HEIGHT = LINE_HEIGHT / 14;
 const PADDING = 20;
 
 interface Props {
