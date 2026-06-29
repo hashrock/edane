@@ -11,6 +11,7 @@ import {
   nodeFontString,
   DEFAULT_FONT_SIZE,
   NODE_FONT,
+  KONVA_LINE_HEIGHT,
 } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
