@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "@inertiajs/react";
-import type { MindMapNode } from "../types/MindMap";
+import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel } from "../domain/model";
 import { findNode, cloneWithNewIds } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
