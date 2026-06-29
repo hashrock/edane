@@ -73,7 +73,7 @@ export default function Settings({ user }: { user: User }) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         setError(
           err?.error === "Storage limit exceeded"
-            ? "容量上限（10MB）を超えています"
+            ? `容量上限（${formatBytes(limit)}）を超えています`
             : "アップロードに失敗しました"
         );
         return;
