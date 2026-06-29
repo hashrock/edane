@@ -6,6 +6,7 @@ import { findNode, cloneWithNewIds } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
+  KONVA_LINE_HEIGHT,
   lineHeightFor,
   nodeFontString,
   DEFAULT_FONT_SIZE,
