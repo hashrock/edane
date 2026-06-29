@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { MindMapNode } from "../types/MindMap";
+import type { MindMapNode } from "../application/nodeUtils";
 import { layoutMindMap } from "../lib/treeLayout";
 import { LINE_HEIGHT, KONVA_LINE_HEIGHT } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
