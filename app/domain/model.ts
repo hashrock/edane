@@ -6,6 +6,12 @@
 /** Node kind. `text` is the default; `image`/`link` store their URL in `text`. */
 export type NodeType = "text" | "image" | "link";
 
+/**
+ * Node kind as stored in JSON. `"text"` is represented by absence so that
+ * the common case adds no bytes. Use `NodeType` when you need the resolved kind.
+ */
+type StoredNodeType = Exclude<NodeType, "text">;
+
 /** Tree node model (stored as JSON) */
 export interface MindMapModel {
   id: string;
@@ -14,7 +20,7 @@ export interface MindMapModel {
   /** When true, descendants are hidden in the canvas and skipped in navigation. */
   collapsed?: boolean;
   /** Node kind (absent = "text"). For image/link, `text` holds the URL. */
-  type?: NodeType;
+  type?: StoredNodeType;
   /** Font size in px for text nodes (absent = default 14). */
   fontSize?: number;
   /** Bold text (absent/false = normal weight). */
