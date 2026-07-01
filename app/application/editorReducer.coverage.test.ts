@@ -23,13 +23,14 @@ function sampleModel(): MindMapModel {
 /** State where activeNodeId points to a node that does NOT exist in the model. */
 function orphanState(model: MindMapModel): EditorState {
   return {
-    model,
-    activeNodeId: "ghost",
-    editing: true,
-    editingText: "ghost",
-    cursorPos: 5,
-    selectionEnd: 5,
-    clipboard: null,
+    document: { model, clipboard: null },
+    view: {
+      activeNodeId: "ghost",
+      editing: true,
+      editingText: "ghost",
+      cursorPos: 5,
+      selectionEnd: 5,
+    },
   };
 }
 
@@ -55,7 +56,11 @@ describe("orphaned activeNodeId — defensive !currentNode/!node guards", () => 
   });
 
   it("cmdShiftRight returns same state when activeNodeId is null", () => {
-    const s: EditorState = { ...orphanState(sampleModel()), activeNodeId: null };
+    const base = orphanState(sampleModel());
+    const s: EditorState = {
+      ...base,
+      view: { ...base.view, activeNodeId: null },
+    };
     expect(editorReducer(s, { type: "cmdShiftRight", pos: 0, selEnd: 0 })).toBe(s);
   });
 
@@ -71,7 +76,11 @@ describe("orphaned activeNodeId — defensive !currentNode/!node guards", () => 
 
   it("pasteBranch returns same state when target node does not exist (with clipboard set)", () => {
     const clipboard: MindMapModel = { id: "cb", text: "Clip", children: [] };
-    const s: EditorState = { ...orphanState(sampleModel()), clipboard };
+    const base = orphanState(sampleModel());
+    const s: EditorState = {
+      ...base,
+      document: { ...base.document, clipboard },
+    };
     expect(editorReducer(s, { type: "pasteBranch" })).toBe(s);
   });
 
@@ -83,10 +92,10 @@ describe("orphaned activeNodeId — defensive !currentNode/!node guards", () => 
   it("exitEditing with stale activeNodeId exits edit mode with selectionEnd 0", () => {
     const s = orphanState(sampleModel());
     const next = editorReducer(s, { type: "exitEditing" });
-    expect(next.editing).toBe(false);
+    expect(next.view.editing).toBe(false);
     // node not found → text length defaults to 0 → selectionEnd = 0
-    expect(next.cursorPos).toBe(0);
-    expect(next.selectionEnd).toBe(0);
+    expect(next.view.cursorPos).toBe(0);
+    expect(next.view.selectionEnd).toBe(0);
   });
 });
 
@@ -112,17 +121,18 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     const model = collapsedModel();
     // a1 is hidden (a is collapsed), so idx = -1 → landId = newModel.id = "root"
     const s: EditorState = {
-      model,
-      activeNodeId: "a1",
-      editing: true,
-      editingText: "",
-      cursorPos: 0,
-      selectionEnd: 0,
-      clipboard: null,
+      document: { model, clipboard: null },
+      view: {
+        activeNodeId: "a1",
+        editing: true,
+        editingText: "",
+        cursorPos: 0,
+        selectionEnd: 0,
+      },
     };
     const next = editorReducer(s, { type: "backspaceAtStart" });
-    expect(findNode(next.model, "a1")).toBeNull();
-    expect(next.activeNodeId).toBe("root");
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(next.view.activeNodeId).toBe("root");
   });
 
   it("cutBranch on a node hidden inside a collapsed parent lands at root", () => {
@@ -141,18 +151,19 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     };
     // a1 is hidden, so idx = -1 → prevId = null → landId = newModel.id = "root"
     const s: EditorState = {
-      model,
-      activeNodeId: "a1",
-      editing: true,
-      editingText: "A1",
-      cursorPos: 2,
-      selectionEnd: 2,
-      clipboard: null,
+      document: { model, clipboard: null },
+      view: {
+        activeNodeId: "a1",
+        editing: true,
+        editingText: "A1",
+        cursorPos: 2,
+        selectionEnd: 2,
+      },
     };
     const next = editorReducer(s, { type: "cutBranch" });
-    expect(findNode(next.model, "a1")).toBeNull();
-    expect(next.activeNodeId).toBe("root");
-    expect(next.clipboard?.text).toBe("A1");
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(next.view.activeNodeId).toBe("root");
+    expect(next.document.clipboard?.text).toBe("A1");
   });
 
   it("deleteNode of the active node hidden inside collapsed parent refocuses to root", () => {
@@ -171,16 +182,17 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     };
     // Deleting a1 while it is active; a1 is hidden → idx = -1 → landId = newModel.id
     const s: EditorState = {
-      model,
-      activeNodeId: "a1",
-      editing: true,
-      editingText: "A1",
-      cursorPos: 2,
-      selectionEnd: 2,
-      clipboard: null,
+      document: { model, clipboard: null },
+      view: {
+        activeNodeId: "a1",
+        editing: true,
+        editingText: "A1",
+        cursorPos: 2,
+        selectionEnd: 2,
+      },
     };
     const next = editorReducer(s, { type: "deleteNode", nodeId: "a1" });
-    expect(findNode(next.model, "a1")).toBeNull();
-    expect(next.activeNodeId).toBe("root");
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(next.view.activeNodeId).toBe("root");
   });
 });

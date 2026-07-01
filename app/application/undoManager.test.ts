@@ -1,16 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { EditorState } from "./editorReducer";
+import type { DocumentState } from "./editorReducer";
 import { UndoManager } from "./undoManager";
 
-/** Minimal EditorState whose root text doubles as a label for assertions. */
-function st(tag: string): EditorState {
+/** Minimal DocumentState whose root text doubles as a label for assertions. */
+function st(tag: string): DocumentState {
   return {
     model: { id: "r", text: tag, children: [] },
-    activeNodeId: null,
-    editing: false,
-    editingText: "",
-    cursorPos: 0,
-    selectionEnd: 0,
     clipboard: null,
   };
 }

@@ -29,13 +29,14 @@ function stateForTree(model: MindMapModel, count: number): EditorState {
   const targetId = `n${count - 1}`;
   const text = findNode(model, targetId)!.text;
   return {
-    model,
-    activeNodeId: targetId,
-    editing: true,
-    editingText: text,
-    cursorPos: text.length,
-    selectionEnd: text.length,
-    clipboard: null,
+    document: { model, clipboard: null },
+    view: {
+      activeNodeId: targetId,
+      editing: true,
+      editingText: text,
+      cursorPos: text.length,
+      selectionEnd: text.length,
+    },
   };
 }
 
@@ -45,7 +46,7 @@ for (const count of [100, 500, 1000, 5000, 10000]) {
   describe(`insert one character into a ${count}-node tree`, () => {
     const model = buildTree(count);
     const state = stateForTree(model, count);
-    const text = state.editingText;
+    const text = state.view.editingText;
 
     bench("typeText", () => {
       editorReducer(state, {
