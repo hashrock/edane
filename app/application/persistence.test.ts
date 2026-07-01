@@ -211,6 +211,16 @@ describe("parseContent", () => {
     expect(model.text).toBe("Root");
   });
 
+  it("falls back to legacy format when JSON has id/text but no children array", () => {
+    // MindMapModel.children is required; without this guard, `parsed as
+    // MindMapModel` would return an object whose .children is undefined,
+    // crashing every domain traversal (findNode, getFlatOrder, ...) that
+    // iterates `node.children` unconditionally.
+    const model = parseContent(JSON.stringify({ id: "x", text: "y" }), "Root");
+    expect(model.text).toBe("Root");
+    expect(Array.isArray(model.children)).toBe(true);
+  });
+
   it("uses 'Mindmap' as title when title is undefined and content is legacy text", () => {
     const model = parseContent("Child1\nChild2", undefined);
     expect(model.text).toBe("Mindmap");

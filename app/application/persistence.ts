@@ -55,7 +55,8 @@ export function parseContent(
     if (
       parsed &&
       typeof parsed.id === "string" &&
-      typeof parsed.text === "string"
+      typeof parsed.text === "string" &&
+      Array.isArray(parsed.children)
     ) {
       return parsed as MindMapModel;
     }
