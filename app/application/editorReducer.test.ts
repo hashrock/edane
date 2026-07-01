@@ -3,6 +3,7 @@ import type { MindMapModel } from "../domain/model";
 import { getFlatOrder, findNode } from "../domain/model";
 import {
   editorReducer,
+  reconcileView,
   type EditorState,
   type DocumentState,
   type ViewState,
@@ -1021,5 +1022,54 @@ describe("replace", () => {
     };
     const next = editorReducer(s, { type: "replace", state: replacement });
     expect(next).toBe(replacement);
+  });
+});
+
+describe("reconcileView", () => {
+  it("keeps the view unchanged when activeNodeId still exists in the document", () => {
+    const model = sampleModel();
+    const document: DocumentState = { model, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a1",
+      editing: true,
+      editingText: "A1",
+      cursorPos: 2,
+      selectionEnd: 2,
+    };
+    expect(reconcileView(view, document)).toBe(view);
+  });
+
+  it("falls back to the document root when activeNodeId no longer exists", () => {
+    // Simulates undo restoring a document where the previously-active node
+    // (e.g. a pasted branch) has been removed.
+    const model = sampleModel();
+    const document: DocumentState = { model, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "no-longer-exists",
+      editing: true,
+      editingText: "stale",
+      cursorPos: 3,
+      selectionEnd: 3,
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.activeNodeId).toBe(model.id);
+    expect(reconciled.editing).toBe(false);
+    expect(reconciled.editingText).toBe(model.text);
+    expect(reconciled.cursorPos).toBe(0);
+    expect(reconciled.selectionEnd).toBe(0);
+  });
+
+  it("falls back to the document root when activeNodeId is null", () => {
+    const model = sampleModel();
+    const document: DocumentState = { model, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: null,
+      editing: false,
+      editingText: "",
+      cursorPos: 0,
+      selectionEnd: 0,
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.activeNodeId).toBe(model.id);
   });
 });

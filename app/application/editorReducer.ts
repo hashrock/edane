@@ -719,6 +719,31 @@ function viewReducer(
   }
 }
 
+/**
+ * Reconciles a ViewState against a DocumentState it wasn't derived from —
+ * needed after undo/redo, which restores only the document (see
+ * UndoManager). If the active node no longer exists in the restored
+ * document (it was created/removed by the undone/redone edit), falls back
+ * to the document root instead of leaving activeNodeId dangling, which
+ * would silently no-op every subsequent keyboard action.
+ */
+export function reconcileView(
+  view: ViewState,
+  document: DocumentState
+): ViewState {
+  if (view.activeNodeId && findNode(document.model, view.activeNodeId)) {
+    return view;
+  }
+  const root = document.model;
+  return {
+    activeNodeId: root.id,
+    editing: false,
+    editingText: root.text,
+    cursorPos: 0,
+    selectionEnd: 0,
+  };
+}
+
 // --- Reducer ---
 
 export function editorReducer(

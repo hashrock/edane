@@ -28,6 +28,7 @@ import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import {
   editorReducer,
+  reconcileView,
   type EditorState,
   type EditorAction,
 } from "../application/editorReducer";
@@ -853,11 +854,15 @@ export default function MindmapEditor({
           ? undoManagerRef.current.redo()
           : undoManagerRef.current.undo();
         // Undo/redo only restores the document; the current selection/caret
-        // (view state) is left untouched.
+        // (view state) is left untouched, unless the active node no longer
+        // exists in the restored document (reconcileView falls back to root).
         if (restored)
           dispatch({
             type: "replace",
-            state: { ...stateRef.current, document: restored },
+            state: {
+              document: restored,
+              view: reconcileView(stateRef.current.view, restored),
+            },
           });
         return;
       }
@@ -867,7 +872,10 @@ export default function MindmapEditor({
         if (restored)
           dispatch({
             type: "replace",
-            state: { ...stateRef.current, document: restored },
+            state: {
+              document: restored,
+              view: reconcileView(stateRef.current.view, restored),
+            },
           });
         return;
       }
