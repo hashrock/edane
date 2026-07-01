@@ -1887,8 +1887,12 @@ export default function MindmapEditor({
             position: "absolute",
             left: `${inputPos.x}px`,
             top: `${inputPos.y}px`,
-            width: "1px",
-            height: "1px",
+            // Must stay large enough for the browser to compute real caret
+            // geometry internally — a near-zero size (e.g. 1px) breaks native
+            // keyboard navigation (Home/End/Arrow) in some browsers even
+            // though the element is invisible (opacity 0) either way.
+            width: "40px",
+            height: "24px",
             opacity: 0,
             pointerEvents: "none",
             caretColor: "transparent",
