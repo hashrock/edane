@@ -1,15 +1,17 @@
 /**
  * Application layer: command-based undo/redo manager.
- * Stores before/after EditorState pairs for each undoable operation.
+ * Stores before/after DocumentState pairs for each undoable operation.
+ * ViewState (selection/caret) is intentionally out of scope: undoing an
+ * operation restores the document without moving focus.
  * Text typing is batched via a debounce timer.
  */
 
-import type { EditorState } from "./editorReducer";
+import type { DocumentState } from "./editorReducer";
 
 export interface UndoableCommand {
   type: string;
-  stateBefore: EditorState;
-  stateAfter: EditorState;
+  stateBefore: DocumentState;
+  stateAfter: DocumentState;
 }
 
 const MAX_STACK_SIZE = 200;
@@ -20,7 +22,7 @@ export class UndoManager {
   private redoStack: UndoableCommand[] = [];
 
   // Text batching
-  private pendingTextBefore: EditorState | null = null;
+  private pendingTextBefore: DocumentState | null = null;
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   private onCommitPending: (() => void) | null = null;
 
@@ -28,11 +30,11 @@ export class UndoManager {
   // single logical operation (e.g. paste = delete-then-insert) undoes/redoes
   // atomically. Supports nesting via a depth counter.
   private txDepth = 0;
-  private txBefore: EditorState | null = null;
+  private txBefore: DocumentState | null = null;
   private txType = "";
 
   /** Set a callback to get the current state when committing pending text */
-  setCommitCallback(fn: () => EditorState) {
+  setCommitCallback(fn: () => DocumentState) {
     this.onCommitPending = () => {
       if (this.pendingTextBefore) {
         const stateAfter = fn();
@@ -47,7 +49,7 @@ export class UndoManager {
   }
 
   /** Call on each text keystroke. Batches into a single undo entry. */
-  handleTextChange(currentState: EditorState) {
+  handleTextChange(currentState: DocumentState) {
     if (!this.pendingTextBefore) {
       this.pendingTextBefore = currentState;
     }
@@ -84,7 +86,7 @@ export class UndoManager {
   }
 
   /** Push a structural command with before/after states */
-  push(type: string, stateBefore: EditorState, stateAfter: EditorState) {
+  push(type: string, stateBefore: DocumentState, stateAfter: DocumentState) {
     // Inside a transaction, individual pushes are absorbed by the enclosing
     // transaction's single before/after pair.
     if (this.txDepth > 0) return;
@@ -96,7 +98,7 @@ export class UndoManager {
    * Begin grouping subsequent dispatches into one undo entry. Must be paired
    * with endTransaction(). `before` is the state captured before the group.
    */
-  beginTransaction(type: string, before: EditorState) {
+  beginTransaction(type: string, before: DocumentState) {
     if (this.txDepth === 0) {
       this.commitPendingText();
       this.txBefore = before;
@@ -106,7 +108,7 @@ export class UndoManager {
   }
 
   /** Close the current transaction, pushing one command if the state changed. */
-  endTransaction(after: EditorState) {
+  endTransaction(after: DocumentState) {
     if (this.txDepth === 0) return;
     this.txDepth--;
     if (this.txDepth === 0 && this.txBefore) {
@@ -126,7 +128,7 @@ export class UndoManager {
     return this.txDepth > 0;
   }
 
-  undo(): EditorState | null {
+  undo(): DocumentState | null {
     this.commitPendingText();
     const cmd = this.undoStack.pop();
     if (!cmd) return null;
@@ -134,7 +136,7 @@ export class UndoManager {
     return cmd.stateBefore;
   }
 
-  redo(): EditorState | null {
+  redo(): DocumentState | null {
     const cmd = this.redoStack.pop();
     if (!cmd) return null;
     this.undoStack.push(cmd);

@@ -18,13 +18,14 @@ function makeState(
   activeNodeId: string | null = null
 ): EditorState {
   return {
-    model,
-    activeNodeId,
-    editing: activeNodeId !== null,
-    editingText: activeNodeId ? findNode(model, activeNodeId)?.text ?? "" : "",
-    cursorPos: 0,
-    selectionEnd: 0,
-    clipboard: null,
+    document: { model, clipboard: null },
+    view: {
+      activeNodeId,
+      editing: activeNodeId !== null,
+      editingText: activeNodeId ? findNode(model, activeNodeId)?.text ?? "" : "",
+      cursorPos: 0,
+      selectionEnd: 0,
+    },
   };
 }
 
@@ -32,18 +33,18 @@ describe("editorReducer formatting actions", () => {
   it("setNodeStyle sets and clears font size", () => {
     const s0 = makeState(makeModel());
     const s1 = editorReducer(s0, { type: "setNodeStyle", nodeId: "a", fontSize: 24 });
-    expect(findNode(s1.model, "a")?.fontSize).toBe(24);
+    expect(findNode(s1.document.model, "a")?.fontSize).toBe(24);
     // null clears it back to the default (absent).
     const s2 = editorReducer(s1, { type: "setNodeStyle", nodeId: "a", fontSize: null });
-    expect(findNode(s2.model, "a")?.fontSize).toBeUndefined();
+    expect(findNode(s2.document.model, "a")?.fontSize).toBeUndefined();
   });
 
   it("setNodeStyle toggles bold", () => {
     const s0 = makeState(makeModel());
     const s1 = editorReducer(s0, { type: "setNodeStyle", nodeId: "a", bold: true });
-    expect(findNode(s1.model, "a")?.bold).toBe(true);
+    expect(findNode(s1.document.model, "a")?.bold).toBe(true);
     const s2 = editorReducer(s1, { type: "setNodeStyle", nodeId: "a", bold: false });
-    expect(findNode(s2.model, "a")?.bold).toBeUndefined();
+    expect(findNode(s2.document.model, "a")?.bold).toBeUndefined();
   });
 
   it("setLinkMeta stores title + favicon and clears on empty", () => {
@@ -54,16 +55,18 @@ describe("editorReducer formatting actions", () => {
       linkTitle: "Example Domain",
       favicon: "https://example.com/favicon.ico",
     });
-    expect(findNode(s1.model, "b")?.linkTitle).toBe("Example Domain");
-    expect(findNode(s1.model, "b")?.favicon).toBe("https://example.com/favicon.ico");
+    expect(findNode(s1.document.model, "b")?.linkTitle).toBe("Example Domain");
+    expect(findNode(s1.document.model, "b")?.favicon).toBe(
+      "https://example.com/favicon.ico"
+    );
     const s2 = editorReducer(s1, {
       type: "setLinkMeta",
       nodeId: "b",
       linkTitle: "",
       favicon: null,
     });
-    expect(findNode(s2.model, "b")?.linkTitle).toBeUndefined();
-    expect(findNode(s2.model, "b")?.favicon).toBeUndefined();
+    expect(findNode(s2.document.model, "b")?.linkTitle).toBeUndefined();
+    expect(findNode(s2.document.model, "b")?.favicon).toBeUndefined();
   });
 
   it("setNodeContent sets text + type and syncs the editing buffer when active", () => {
@@ -74,12 +77,12 @@ describe("editorReducer formatting actions", () => {
       text: "/api/images/x/raw",
       nodeType: "image",
     });
-    const node = findNode(s1.model, "a");
+    const node = findNode(s1.document.model, "a");
     expect(node?.text).toBe("/api/images/x/raw");
     expect(node?.type).toBe("image");
     // Active node: editing buffer + caret follow the new text.
-    expect(s1.editingText).toBe("/api/images/x/raw");
-    expect(s1.cursorPos).toBe("/api/images/x/raw".length);
+    expect(s1.view.editingText).toBe("/api/images/x/raw");
+    expect(s1.view.cursorPos).toBe("/api/images/x/raw".length);
   });
 
   it("formatting an unknown node is a no-op (same reference)", () => {

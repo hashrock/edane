@@ -6,12 +6,10 @@ import { findNode, cloneWithNewIds } from "../domain/model";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
-  KONVA_LINE_HEIGHT,
   lineHeightFor,
   nodeFontString,
   DEFAULT_FONT_SIZE,
   NODE_FONT,
-  KONVA_LINE_HEIGHT,
 } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
@@ -236,13 +234,14 @@ export default function MindmapEditor({
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
     return {
-      model,
-      activeNodeId: model.id,
-      editing: false,
-      editingText: model.text,
-      cursorPos: 0,
-      selectionEnd: 0,
-      clipboard: null,
+      document: { model, clipboard: null },
+      view: {
+        activeNodeId: model.id,
+        editing: false,
+        editingText: model.text,
+        cursorPos: 0,
+        selectionEnd: 0,
+      },
     };
   });
   const stateRef = useRef(state);
@@ -250,12 +249,8 @@ export default function MindmapEditor({
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
-    model,
-    activeNodeId,
-    editing,
-    editingText,
-    cursorPos,
-    selectionEnd,
+    document: { model },
+    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
   } = state;
 
   // --- UI-only state (not part of the editing document) ---
@@ -318,7 +313,9 @@ export default function MindmapEditor({
       const prev = stateRef.current;
       const next = editorReducer(prev, action);
       if (next === prev) return prev;
-      if (undoType) undoManagerRef.current.push(undoType, prev, next);
+      if (undoType && next.document !== prev.document) {
+        undoManagerRef.current.push(undoType, prev.document, next.document);
+      }
       stateRef.current = next;
       setStateRaw(next);
       return next;
@@ -411,7 +408,7 @@ export default function MindmapEditor({
 
   // --- Undo manager: commit pending text using the latest state ---
   useEffect(() => {
-    undoManagerRef.current.setCommitCallback(() => stateRef.current);
+    undoManagerRef.current.setCommitCallback(() => stateRef.current.document);
   }, []);
 
   // --- Sync the hidden input to the editor state (single place) ---
@@ -432,7 +429,7 @@ export default function MindmapEditor({
       const pos = el.selectionStart ?? 0;
       const end = el.selectionEnd ?? 0;
       // Snapshot the pre-typing state once per debounce batch
-      undoManagerRef.current.handleTextChange(stateRef.current);
+      undoManagerRef.current.handleTextChange(stateRef.current.document);
       dispatch({
         type: "typeText",
         text: newText,
@@ -449,11 +446,11 @@ export default function MindmapEditor({
     setIsComposing(false);
     isComposingRef.current = false;
     const el = inputRef.current;
-    if (!el || !stateRef.current.activeNodeId) return;
+    if (!el || !stateRef.current.view.activeNodeId) return;
     const finalText = el.value;
     const pos = el.selectionStart ?? finalText.length;
     const end = el.selectionEnd ?? pos;
-    undoManagerRef.current.handleTextChange(stateRef.current);
+    undoManagerRef.current.handleTextChange(stateRef.current.document);
     dispatch({
       type: "typeText",
       text: finalText,
@@ -507,7 +504,7 @@ export default function MindmapEditor({
           },
           "image-upload"
         );
-        if (noteId) saveNote(next.model);
+        if (noteId) saveNote(next.document.model);
         else updateSaveStatus("");
       } catch {
         updateSaveStatus("アップロード失敗");
@@ -527,7 +524,7 @@ export default function MindmapEditor({
     (clipText: string) => {
       if (!clipText.trim()) return;
       const cur = stateRef.current;
-      const targetId = cur.activeNodeId || cur.model.id;
+      const targetId = cur.view.activeNodeId || cur.document.model.id;
       const parsed = textToModel("_", clipText);
       const freshChildren = parsed.children.map(cloneWithNewIds);
       if (freshChildren.length === 0) return;
@@ -541,7 +538,7 @@ export default function MindmapEditor({
         ...n.children.flatMap(collectIds),
       ];
       flashNodes(freshChildren.flatMap(collectIds));
-      if (noteId) saveNote(next.model);
+      if (noteId) saveNote(next.document.model);
     },
     [dispatch, noteId, saveNote, flashNodes]
   );
@@ -550,11 +547,12 @@ export default function MindmapEditor({
   // node is merely selected; inside text editing they fall back to the native
   // textarea behaviour (and, for paste, to turning external indented text into
   // nodes).
-  const hasTextRange = (st: EditorState) => st.cursorPos !== st.selectionEnd;
+  const hasTextRange = (st: EditorState) =>
+    st.view.cursorPos !== st.view.selectionEnd;
 
   const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const st = stateRef.current;
-    if (st.editing && hasTextRange(st)) return; // native text copy
+    if (st.view.editing && hasTextRange(st)) return; // native text copy
     e.preventDefault();
     dispatch({ type: "copyBranch" });
   }, [dispatch]);
@@ -562,10 +560,11 @@ export default function MindmapEditor({
   const handleCut = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
-      if (st.editing && hasTextRange(st)) return; // native text cut
+      if (st.view.editing && hasTextRange(st)) return; // native text cut
       e.preventDefault();
       const next = dispatch({ type: "cutBranch" }, "cut-branch");
-      if (noteId && next.model !== st.model) saveNote(next.model);
+      if (noteId && next.document.model !== st.document.model)
+        saveNote(next.document.model);
     },
     [dispatch, noteId, saveNote]
   );
@@ -577,8 +576,8 @@ export default function MindmapEditor({
       const files = e.clipboardData.files;
       if (files && files.length > 0 && files[0].type.startsWith("image/")) {
         const st = stateRef.current;
-        const node = st.activeNodeId
-          ? findNode(st.model, st.activeNodeId)
+        const node = st.view.activeNodeId
+          ? findNode(st.document.model, st.view.activeNodeId)
           : null;
         if (node && node.text === "") {
           e.preventDefault();
@@ -588,14 +587,15 @@ export default function MindmapEditor({
       }
 
       const st = stateRef.current;
-      if (!st.editing) {
+      if (!st.view.editing) {
         // Selection mode: paste the internal branch clipboard as a child, or
         // fall back to external indented text → nodes.
-        if (st.clipboard) {
+        if (st.document.clipboard) {
           e.preventDefault();
           const next = dispatch({ type: "pasteBranch" }, "paste-branch");
-          flashNodes(next.activeNodeId ? [next.activeNodeId] : []);
-          if (noteId && next.model !== st.model) saveNote(next.model);
+          flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
+          if (noteId && next.document.model !== st.document.model)
+            saveNote(next.document.model);
           return;
         }
         const text = e.clipboardData.getData("text");
@@ -618,7 +618,7 @@ export default function MindmapEditor({
   // --- Link preview: fetch <title> + favicon for a link node's URL ---
   const fetchLinkMeta = useCallback(
     async (nodeId: string) => {
-      const node = findNode(stateRef.current.model, nodeId);
+      const node = findNode(stateRef.current.document.model, nodeId);
       if (!node || node.type !== "link" || !node.text) return;
       try {
         const res = await fetch(
@@ -636,7 +636,7 @@ export default function MindmapEditor({
           },
           "link-meta"
         );
-        if (noteId) saveNote(next.model);
+        if (noteId) saveNote(next.document.model);
       } catch {
         // network/parse failure: leave the node showing its raw URL
       }
@@ -661,11 +661,14 @@ export default function MindmapEditor({
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
     const copyAllText = () => {
-      const text = modelToText(stateRef.current.model);
+      const text = modelToText(stateRef.current.document.model);
       navigator.clipboard.writeText(text);
     };
     const copyBranch = () => {
-      const { model, activeNodeId } = stateRef.current;
+      const {
+        document: { model },
+        view: { activeNodeId },
+      } = stateRef.current;
       if (!activeNodeId) {
         copyAllText();
         return;
@@ -676,7 +679,10 @@ export default function MindmapEditor({
       }
     };
     const sendToChatGPT = () => {
-      const { model, activeNodeId } = stateRef.current;
+      const {
+        document: { model },
+        view: { activeNodeId },
+      } = stateRef.current;
       const text = activeNodeId
         ? modelToText(findNode(model, activeNodeId) || model)
         : modelToText(model);
@@ -724,7 +730,7 @@ export default function MindmapEditor({
           { type: "setNodeType", nodeId, nodeType },
           "set-type"
         );
-        if (noteId) saveNote(next.model);
+        if (noteId) saveNote(next.document.model);
         setTimeout(() => inputRef.current?.focus(), 0);
       };
       if (type !== "text") items.push({ label: "テキストにする", onSelect: setType("text") });
@@ -743,7 +749,7 @@ export default function MindmapEditor({
           { type: "setNodeStyle", nodeId, ...style },
           "style"
         );
-        if (noteId) saveNote(next.model);
+        if (noteId) saveNote(next.document.model);
       };
       if (bigger !== undefined)
         items.push({
@@ -787,7 +793,7 @@ export default function MindmapEditor({
         label: node.collapsed ? "展開する" : "折りたたむ",
         onSelect: () => {
           const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
-          if (noteId) saveNote(next.model);
+          if (noteId) saveNote(next.document.model);
         },
       });
     }
@@ -795,8 +801,8 @@ export default function MindmapEditor({
       label: "子ノードを追加",
       onSelect: () => {
         const next = dispatch({ type: "addChild", nodeId }, "add-child");
-        if (next.activeNodeId) flashNodes([next.activeNodeId]);
-        if (noteId) saveNote(next.model);
+        if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+        if (noteId) saveNote(next.document.model);
         setTimeout(() => inputRef.current?.focus(), 0);
       },
     });
@@ -812,7 +818,7 @@ export default function MindmapEditor({
         danger: true,
         onSelect: () => {
           const next = dispatch({ type: "deleteNode", nodeId }, "delete-node");
-          if (noteId) saveNote(next.model);
+          if (noteId) saveNote(next.document.model);
         },
       });
     }
@@ -846,25 +852,35 @@ export default function MindmapEditor({
         const restored = e.shiftKey
           ? undoManagerRef.current.redo()
           : undoManagerRef.current.undo();
-        if (restored) dispatch({ type: "replace", state: restored });
+        // Undo/redo only restores the document; the current selection/caret
+        // (view state) is left untouched.
+        if (restored)
+          dispatch({
+            type: "replace",
+            state: { ...stateRef.current, document: restored },
+          });
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         const restored = undoManagerRef.current.redo();
-        if (restored) dispatch({ type: "replace", state: restored });
+        if (restored)
+          dispatch({
+            type: "replace",
+            state: { ...stateRef.current, document: restored },
+          });
         return;
       }
 
       const state = stateRef.current;
-      if (!state.activeNodeId) return;
+      if (!state.view.activeNodeId) return;
 
       const pos = inputRef.current?.selectionStart || 0;
       const selEnd = inputRef.current?.selectionEnd || 0;
 
       // Selection mode (node selected but not being edited): keys select /
       // navigate rather than edit text.
-      if (!state.editing) {
+      if (!state.view.editing) {
         if (e.key === "Escape") {
           // Exactly one node is always selected; Escape just drops focus.
           e.preventDefault();
@@ -897,7 +913,10 @@ export default function MindmapEditor({
         }
         if (e.key === "Backspace" || e.key === "Delete") {
           e.preventDefault();
-          dispatch({ type: "deleteNode", nodeId: state.activeNodeId }, "delete");
+          dispatch(
+            { type: "deleteNode", nodeId: state.view.activeNodeId },
+            "delete"
+          );
           return;
         }
         // A printable character: the textarea still holds the whole-text
@@ -946,7 +965,7 @@ export default function MindmapEditor({
         e.preventDefault();
         // Move between lines inside a multi-line node; cross to the previous
         // node only from the first line.
-        const newPos = verticalMove(state.editingText, pos, -1);
+        const newPos = verticalMove(state.view.editingText, pos, -1);
         if (newPos !== null) {
           dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
         } else {
@@ -957,7 +976,7 @@ export default function MindmapEditor({
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        const newPos = verticalMove(state.editingText, pos, 1);
+        const newPos = verticalMove(state.view.editingText, pos, 1);
         if (newPos !== null) {
           dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
           return;
@@ -1003,7 +1022,7 @@ export default function MindmapEditor({
           // Shift+Right: let native input handle selection extension
           return;
         }
-        const currentNode = findNode(modelRef.current, state.activeNodeId);
+        const currentNode = findNode(modelRef.current, state.view.activeNodeId);
         if (currentNode && pos >= currentNode.text.length && pos === selEnd) {
           e.preventDefault();
           dispatch({ type: "arrowRightEdge" });
@@ -1526,7 +1545,8 @@ export default function MindmapEditor({
         // is already being edited moves the caret. A drag (handled in mousemove
         // → dragSelect) then enters edit mode with a text range.
         const cur = stateRef.current;
-        const editingThis = cur.editing && cur.activeNodeId === node.id;
+        const editingThis =
+          cur.view.editing && cur.view.activeNodeId === node.id;
         if (editingThis) {
           dispatch({
             type: "activateNode",
@@ -1711,10 +1731,10 @@ export default function MindmapEditor({
   useEffect(() => {
     if (import.meta.env.PROD) return;
     const api: MindmapTestApi = {
-      getModel: () => stateRef.current.model,
-      getActiveNodeId: () => stateRef.current.activeNodeId,
+      getModel: () => stateRef.current.document.model,
+      getActiveNodeId: () => stateRef.current.view.activeNodeId,
       getSelection: () => {
-        const s = stateRef.current;
+        const s = stateRef.current.view;
         return {
           activeNodeId: s.activeNodeId,
           cursorPos: s.cursorPos,

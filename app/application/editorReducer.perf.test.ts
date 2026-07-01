@@ -28,13 +28,14 @@ function measureInsertMs(count: number, iterations: number): number {
   const targetId = `n${count - 1}`;
   const text = findNode(model, targetId)!.text;
   const state: EditorState = {
-    model,
-    activeNodeId: targetId,
-    editing: true,
-    editingText: text,
-    cursorPos: text.length,
-    selectionEnd: text.length,
-    clipboard: null,
+    document: { model, clipboard: null },
+    view: {
+      activeNodeId: targetId,
+      editing: true,
+      editingText: text,
+      cursorPos: text.length,
+      selectionEnd: text.length,
+    },
   };
   const action = {
     type: "typeText" as const,
