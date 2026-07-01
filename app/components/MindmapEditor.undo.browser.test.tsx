@@ -98,4 +98,91 @@ describe("MindmapEditor undo/redo", () => {
     await userEvent.keyboard("{Meta>}{Shift>}z{/Shift}{/Meta}");
     await waitFor(() => api().getModel().children[0].text.includes("X"));
   });
+
+  it("undoing a pasted branch falls the active node back to root (regression)", async () => {
+    // Undo only restores the document (see UndoManager); if the active node
+    // was part of what got undone, activeNodeId used to keep pointing at a
+    // node that no longer exists — silently swallowing every subsequent
+    // keyboard action until the user undid again.
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "Alpha",
+          children: [{ id: "a1", text: "A-child", children: [] }],
+        },
+        { id: "b", text: "Bravo", children: [] },
+      ],
+    };
+    render(
+      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+    );
+    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="mm-canvas"]'
+    )!;
+
+    // Select "a" (a branch with a child) and copy it.
+    const pointA = await waitFor(() => api().getNodeClickPoint("a"));
+    await userEvent.click(canvas, {
+      position: { x: Math.round(pointA.x), y: Math.round(pointA.y) },
+    });
+    await waitFor(() => api().getActiveNodeId() === "a");
+    await waitFor(() => api().getSelection().editing === false);
+    document.querySelector("textarea")!.dispatchEvent(
+      new ClipboardEvent("copy", {
+        clipboardData: new DataTransfer(),
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+
+    // Select "b" and paste the branch as its child.
+    const pointB = await waitFor(() => api().getNodeClickPoint("b"));
+    await userEvent.click(canvas, {
+      position: { x: Math.round(pointB.x), y: Math.round(pointB.y) },
+    });
+    await waitFor(() => api().getActiveNodeId() === "b");
+    await waitFor(() => api().getSelection().editing === false);
+    document.querySelector("textarea")!.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: new DataTransfer(),
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await waitFor(() => {
+      const b = api().getModel().children.find((c) => c.id === "b");
+      return b != null && b.children.length > 0;
+    });
+
+    // One undo removes the whole pasted branch...
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    await waitFor(() => {
+      const b = api().getModel().children.find((c) => c.id === "b");
+      return b != null && b.children.length === 0;
+    });
+
+    // ...and activeNodeId must not still point at the now-deleted node.
+    await waitFor(() => api().getActiveNodeId() === "root");
+
+    // A follow-up keyboard action must actually take effect (previously it
+    // silently no-op'd because activeNodeId pointed nowhere).
+    const before = api().getModel().children.length;
+    document
+      .querySelector("textarea")!
+      .dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: new DataTransfer(),
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    // pasteBranch keeps the clipboard, so pasting again onto root (still
+    // holding "Alpha" with its child) should add a child to root.
+    await waitFor(() => api().getModel().children.length > before);
+  });
 });
