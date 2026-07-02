@@ -1,6 +1,7 @@
 import { Head, Link, router } from "@inertiajs/react";
 import { useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import type { SessionUser } from "../../utils/session";
 
 type Note = {
   id: string;
@@ -9,12 +10,7 @@ type Note = {
   updatedAt: string;
 };
 
-type User = {
-  id: string;
-  email: string;
-  name: string;
-  avatarUrl: string;
-} | null;
+type User = SessionUser | null;
 
 export default function NotesIndex({
   user,

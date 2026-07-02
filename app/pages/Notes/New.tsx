@@ -1,11 +1,7 @@
 import { Head, Link, useForm } from "@inertiajs/react";
+import type { SessionUser } from "../../utils/session";
 
-type User = {
-  id: string;
-  email: string;
-  name: string;
-  avatarUrl: string;
-} | null;
+type User = SessionUser | null;
 
 export default function NotesNew({ user }: { user: User }) {
   const { data, setData, post, processing } = useForm({
