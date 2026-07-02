@@ -1,7 +1,8 @@
 import { Head, Link } from "@inertiajs/react";
 import { useEffect, useState, useCallback } from "react";
+import type { SessionUser } from "../utils/session";
 
-type User = { id: string; email: string; name?: string } | null;
+type User = SessionUser | null;
 
 interface ImageMeta {
   id: string;
