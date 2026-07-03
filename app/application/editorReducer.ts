@@ -42,6 +42,8 @@ import {
   setNodeType,
   setNodeStyle,
   setLinkMeta,
+  moveNodeUp,
+  moveNodeDown,
 } from "../domain/model";
 
 export interface DocumentState {
@@ -73,9 +75,16 @@ export type EditorAction =
   | { type: "tab"; shift: boolean }
   | { type: "backspaceAtStart" }
   | { type: "deleteAtEnd"; pos: number }
+  // Reorder the active node among its siblings (depth unchanged). Structural
+  // and undoable, unlike the pure navigation actions below.
+  | { type: "moveNodeUp" }
+  | { type: "moveNodeDown" }
   // --- navigation ---
   | { type: "moveUp" }
   | { type: "moveDown" }
+  // Move focus to the active node's parent (Left in selection mode on a leaf /
+  // collapsed node).
+  | { type: "moveToParent" }
   | { type: "cmdLeft"; pos: number }
   | { type: "cmdRight"; pos: number }
   | { type: "cmdShiftLeft"; pos: number; selEnd: number }
@@ -203,6 +212,19 @@ function documentReducer(
         ? dedentNode(document.model, activeNodeId)
         : indentNode(document.model, activeNodeId);
       return { document: { ...document, model: newModel } };
+    }
+
+    case "moveNodeUp":
+    case "moveNodeDown": {
+      if (!activeNodeId) return { document };
+      const newModel =
+        action.type === "moveNodeUp"
+          ? moveNodeUp(document.model, activeNodeId)
+          : moveNodeDown(document.model, activeNodeId);
+      // moveNode* returns the same reference when the move is impossible; keep
+      // the document identity so the reducer skips undo/save for a no-op.
+      if (newModel === document.model) return { document };
+      return { document: { ...document, model: newModel }, focusId: activeNodeId };
     }
 
     case "backspaceAtStart": {
@@ -428,6 +450,7 @@ function documentReducer(
     // Pure view actions: the document never changes.
     case "moveUp":
     case "moveDown":
+    case "moveToParent":
     case "cmdLeft":
     case "cmdRight":
     case "cmdShiftLeft":
@@ -498,6 +521,8 @@ function viewReducer(
     case "deleteNode":
     case "setNodeType":
     case "insertNodes":
+    case "moveNodeUp":
+    case "moveNodeDown":
       return focusId === undefined
         ? view
         : focusView(view, model, focusId, focusCursorPos, focusSelectionEnd);
@@ -530,6 +555,13 @@ function viewReducer(
       const idx = order.indexOf(view.activeNodeId);
       if (idx < order.length - 1) return focusView(view, model, order[idx + 1]);
       return view;
+    }
+
+    case "moveToParent": {
+      if (!view.activeNodeId) return view;
+      const info = findParentAndIndex(model, view.activeNodeId);
+      if (!info) return view; // root has no parent
+      return focusView(view, model, info.parent.id);
     }
 
     case "arrowRightEdge": {

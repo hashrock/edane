@@ -276,6 +276,39 @@ export function dedentNode(
   return cloned;
 }
 
+/**
+ * Reorder: swap a node with its previous sibling (moves it up among siblings).
+ * Depth is unchanged — only sibling order changes. Returns the SAME model
+ * reference when the move is impossible (root, or already the first child), so
+ * callers can treat identity as "no-op" and skip undo/save bookkeeping.
+ */
+export function moveNodeUp(model: MindMapModel, nodeId: string): MindMapModel {
+  if (model.id === nodeId) return model;
+  const result = findParentAndIndex(model, nodeId);
+  if (!result || result.index === 0) return model;
+  const cloned = cloneModel(model);
+  const { parent, index } = findParentAndIndex(cloned, nodeId)!;
+  const arr = parent.children;
+  [arr[index - 1], arr[index]] = [arr[index], arr[index - 1]];
+  return cloned;
+}
+
+/**
+ * Reorder: swap a node with its next sibling (moves it down among siblings).
+ * Mirror of moveNodeUp; returns the SAME reference when it's the last child or
+ * the root.
+ */
+export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel {
+  if (model.id === nodeId) return model;
+  const result = findParentAndIndex(model, nodeId);
+  if (!result || result.index >= result.parent.children.length - 1) return model;
+  const cloned = cloneModel(model);
+  const { parent, index } = findParentAndIndex(cloned, nodeId)!;
+  const arr = parent.children;
+  [arr[index + 1], arr[index]] = [arr[index], arr[index + 1]];
+  return cloned;
+}
+
 /** Split a node at cursor position */
 export function splitNode(
   model: MindMapModel,
