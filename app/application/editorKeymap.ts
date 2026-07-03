@@ -44,8 +44,6 @@ export interface KeymapDeps {
   saveNote: (model: MindMapModel) => void;
   openPalette: () => void;
   openHelp: () => void;
-  /** Drop focus (Escape from selection mode). */
-  blurInput: () => void;
   undo: () => void;
   redo: () => void;
   /** Line-wise caret move inside a multi-line node; null = past the edge. */
@@ -160,17 +158,10 @@ export function buildKeymap(deps: KeymapDeps): KeyBinding[] {
     },
 
     // ---- Selection mode ----
-    {
-      id: "sel-escape",
-      label: "選択を解除（フォーカスを外す）",
-      keys: "Esc",
-      when: "selection",
-      match: (e) => e.key === "Escape",
-      run: () => {
-        deps.blurInput();
-        return "handled";
-      },
-    },
+    // No Escape binding here: the editor keeps exactly one node selected at all
+    // times (see the empty-space click handler), so leaving selection mode would
+    // strand the keyboard on an unfocused textarea. Escape only acts in editing
+    // mode (edit-escape), returning to selection.
     {
       id: "sel-insert-sibling",
       label: "兄弟ノードを追加",

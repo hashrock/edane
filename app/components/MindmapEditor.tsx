@@ -891,7 +891,6 @@ export default function MindmapEditor({
         saveNote: (m) => saveNote(m),
         openPalette: () => setCmdPaletteOpen(true),
         openHelp: () => setHelpOpen(true),
-        blurInput: () => inputRef.current?.blur(),
         undo: () => restoreDocument(undoManagerRef.current.undo()),
         redo: () => restoreDocument(undoManagerRef.current.redo()),
         verticalMove,

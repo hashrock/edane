@@ -80,9 +80,14 @@ describe("MindmapEditor single-node selection", () => {
     await userEvent.keyboard("{ArrowUp}");
     await waitFor(() => api().getActiveNodeId() === "a");
 
-    // Escape leaves a node selected (no "nothing selected" state).
+    // Escape is a no-op in selection mode: the node stays selected AND the
+    // keyboard stays live (a following arrow key must still move the selection).
+    // Regression guard — Escape used to blur the input, leaving the node visibly
+    // selected but keyboard-dead.
     await userEvent.keyboard("{Escape}");
     expect(api().getActiveNodeId()).toBe("a");
+    await userEvent.keyboard("{ArrowDown}");
+    await waitFor(() => api().getActiveNodeId() === "b");
   });
 
   it("keeps the clicked node selected when the pointer jitters a few pixels", async () => {

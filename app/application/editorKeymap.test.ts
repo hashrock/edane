@@ -68,7 +68,6 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}) {
     saveNote: vi.fn(),
     openPalette: vi.fn(),
     openHelp: vi.fn(),
-    blurInput: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     verticalMove: vi.fn(() => null),
