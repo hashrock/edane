@@ -78,20 +78,12 @@ export default function NotesIndex({
               </a>
             </div>
           ) : (
-            <>
-              <Link
-                href="/guest"
-                className="px-3.5 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-100 transition"
-              >
-                ゲストで試す
-              </Link>
-              <a
-                href="/auth/google"
-                className="px-3.5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                Googleでログイン
-              </a>
-            </>
+            <a
+              href="/auth/google"
+              className="px-3.5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Googleでログイン
+            </a>
           )}
         </div>
       </header>
