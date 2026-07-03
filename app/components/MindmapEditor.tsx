@@ -228,6 +228,14 @@ interface Props {
   initialContent?: string;
   initialTitle?: string;
   initialIsPublic?: boolean;
+  /** Embedded (iframe) mode: hide the navigation header. */
+  embed?: boolean;
+  /**
+   * Guest mode "save to account" action. When provided (and there is no
+   * noteId), the header shows a save button that hands the current document
+   * off to the page, which carries it through login into a real note.
+   */
+  onSaveToAccount?: (note: { title: string; content: string }) => void;
 }
 
 export default function MindmapEditor({
@@ -235,6 +243,8 @@ export default function MindmapEditor({
   initialContent,
   initialTitle,
   initialIsPublic,
+  embed,
+  onSaveToAccount,
 }: Props) {
   // --- Single source of truth: the full editor state ---
   // Exactly one node is always selected; the root starts active.
@@ -894,6 +904,12 @@ export default function MindmapEditor({
     },
     [isComposing, keymap, helpOpen]
   );
+
+  // --- Guest mode: hand the current document off to be saved to an account ---
+  const handleSaveToAccount = useCallback(() => {
+    const m = stateRef.current.document.model;
+    onSaveToAccount?.({ title: m.text, content: serializeModel(m) });
+  }, [onSaveToAccount]);
 
   // --- Title editing ---
   const handleTitleChange = useCallback(
@@ -1656,13 +1672,17 @@ export default function MindmapEditor({
       />
       <header className="anim-header flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
         <div className="flex items-center gap-3 min-w-0">
-          <Link
-            href="/notes"
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-800 whitespace-nowrap"
-          >
-            ← 一覧
-          </Link>
-          <div className="h-6 w-px bg-slate-200" />
+          {!embed && (
+            <>
+              <Link
+                href="/notes"
+                className="text-sm font-medium text-emerald-700 hover:text-emerald-800 whitespace-nowrap"
+              >
+                ← 一覧
+              </Link>
+              <div className="h-6 w-px bg-slate-200" />
+            </>
+          )}
           {editingTitle ? (
             <input
               type="text"
@@ -1721,6 +1741,19 @@ export default function MindmapEditor({
               />
               公開する
             </label>
+          </div>
+        )}
+        {!noteId && onSaveToAccount && (
+          <div className="flex items-center gap-3 text-sm">
+            <span className="hidden whitespace-nowrap text-xs text-slate-400 sm:inline">
+              保存されません（お試し）
+            </span>
+            <button
+              onClick={handleSaveToAccount}
+              className="whitespace-nowrap rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              アカウントに保存
+            </button>
           </div>
         )}
       </header>

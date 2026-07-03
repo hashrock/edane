@@ -395,7 +395,14 @@ const routes = app
     if (!user) return c.redirect("/notes");
     return c.render("Settings", { user });
   })
-  .get("/guest", (c) => c.render("Guest", { user: c.get("user") }))
+  .get("/guest", (c) =>
+    c.render("Guest", {
+      user: c.get("user"),
+      // Embedded (iframe) guest editor: hides the nav header so it drops
+      // cleanly into the landing page.
+      embed: c.req.query("embed") === "1",
+    })
+  )
   .get("/notes/new", (c) => {
     const user = c.get("user");
     if (!user) return c.redirect("/notes");
@@ -406,13 +413,15 @@ const routes = app
     if (!user) return c.redirect("/notes");
 
     const body = await c.req
-      .json<{ title?: string; isPublic?: boolean }>()
-      .catch(() => ({}) as { title?: string; isPublic?: boolean });
+      .json<{ title?: string; isPublic?: boolean; content?: string }>()
+      .catch(() => ({}) as { title?: string; isPublic?: boolean; content?: string });
     const isPublic = body.isPublic ?? false;
     const db = drizzle(c.env.DB);
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const plain = "トピック1\nトピック2";
+    // Guest-mode imports arrive with their own serialized content; a plain
+    // "new note" falls back to the starter topics.
+    const plain = body.content ?? "トピック1\nトピック2";
     // Public notes store plaintext; private notes are encrypted at rest
     const content = isPublic
       ? plain

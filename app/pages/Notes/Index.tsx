@@ -1,6 +1,7 @@
 import { Head, Link, router } from "@inertiajs/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import { takePendingNote } from "../../lib/guestNote";
 import type { SessionUser } from "../../utils/session";
 
 type Note = {
@@ -20,6 +21,21 @@ export default function NotesIndex({
   notes: Note[];
 }) {
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Just signed in with a stashed guest note? Import it into a real note and
+  // jump straight to its editor. Consume-once, so a reload won't re-import.
+  useEffect(() => {
+    if (!user) return;
+    const pending = takePendingNote();
+    if (!pending) return;
+    setImporting(true);
+    router.post(
+      "/notes",
+      { title: pending.title, content: pending.content },
+      { onError: () => setImporting(false) }
+    );
+  }, [user]);
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -28,7 +44,9 @@ export default function NotesIndex({
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-7 md:py-9">
+    <div
+      className={`mx-auto px-6 py-7 md:py-9 ${user ? "max-w-3xl" : "max-w-5xl"}`}
+    >
       <Head title="Edane" />
       <header className="anim-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
         <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
@@ -77,6 +95,30 @@ export default function NotesIndex({
           )}
         </div>
       </header>
+
+      {!user && (
+        <section className="anim-item">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold tracking-tight">
+              ログイン不要で試す
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              下のエディタでそのまま書けます。「アカウントに保存」を押すと
+              Google ログイン後にマイノートへ保存されます。
+            </p>
+          </div>
+          <div
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            style={{ height: "70vh" }}
+          >
+            <iframe
+              src="/guest?embed=1"
+              title="ゲストエディタ"
+              className="h-full w-full border-0"
+            />
+          </div>
+        </section>
+      )}
 
       {user && (
         <section>
@@ -143,6 +185,14 @@ export default function NotesIndex({
             </div>
           )}
         </section>
+      )}
+
+      {importing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <p className="text-sm font-medium text-slate-600">
+            ノートを保存しています...
+          </p>
+        </div>
       )}
 
       <ConfirmDialog
