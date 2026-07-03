@@ -117,9 +117,11 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     };
   }
 
-  it("backspaceAtStart on an empty collapsed node falls back to root", () => {
+  it("backspaceAtStart on an empty collapsed node merges it into its parent", () => {
     const model = collapsedModel();
-    // a1 is hidden (a is collapsed), so idx = -1 → landId = newModel.id = "root"
+    // a1 is the (hidden) first child of collapsed "a"; its structural
+    // predecessor is the parent "a", so the merge lands there — independent of
+    // the flat navigation order / collapse state.
     const s: EditorState = {
       document: { model, clipboard: null },
       view: {
@@ -132,7 +134,8 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     };
     const next = editorReducer(s, { type: "backspaceAtStart" });
     expect(findNode(next.document.model, "a1")).toBeNull();
-    expect(next.view.activeNodeId).toBe("root");
+    expect(next.view.activeNodeId).toBe("a");
+    expect(findNode(next.document.model, "a")!.text).toBe("A");
   });
 
   it("cutBranch on a node hidden inside a collapsed parent lands at root", () => {

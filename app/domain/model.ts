@@ -309,6 +309,90 @@ export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel 
   return cloned;
 }
 
+/**
+ * Line-join for outline editing (Backspace at the start of a line): merge a
+ * node into its *structural* predecessor, NOT the flat DFS-previous node (which
+ * is often the deepest leaf of an unrelated sibling subtree, so the text would
+ * splice into a foreign branch and the node's children would be orphaned up to
+ * the grandparent). The predecessor is:
+ *   - the node's previous sibling if it has one — the node's text is appended
+ *     to that sibling and the node's children become the sibling's trailing
+ *     children; or
+ *   - otherwise the node's parent — the text is appended to the parent and the
+ *     node's children take the node's former slot (as `removeNode` would).
+ * The root has no predecessor → returns null (caller treats as no-op).
+ *
+ * Returns the new model, the id the caret should land on (the merge target) and
+ * the caret offset (the target's text length *before* the merge).
+ */
+export function mergeIntoPredecessor(
+  model: MindMapModel,
+  nodeId: string
+): { model: MindMapModel; targetId: string; caretPos: number } | null {
+  if (model.id === nodeId) return null;
+  const cloned = cloneModel(model);
+  const info = findParentAndIndex(cloned, nodeId);
+  if (!info) return null;
+  const node = info.parent.children[info.index];
+
+  if (info.index > 0) {
+    // Merge into the previous sibling; children trail the sibling's own.
+    const target = info.parent.children[info.index - 1];
+    const caretPos = target.text.length;
+    target.text += node.text;
+    target.children.push(...node.children);
+    info.parent.children.splice(info.index, 1);
+    return { model: cloned, targetId: target.id, caretPos };
+  }
+
+  // First child: merge into the parent; the node's children take its slot.
+  const target = info.parent;
+  const caretPos = target.text.length;
+  target.text += node.text;
+  info.parent.children.splice(info.index, 1, ...node.children);
+  return { model: cloned, targetId: target.id, caretPos };
+}
+
+/**
+ * Forward line-join (Delete at the end of a line): pull the node's structural
+ * successor up into it. Mirror of {@link mergeIntoPredecessor}. The successor
+ * is the node's first *visible* child if it has one (its grandchildren then
+ * take that child's slot), otherwise the node's next sibling (whose children
+ * are appended to the node). When the node has neither — its DFS-successor
+ * would live in an unrelated, shallower subtree — the SAME model reference is
+ * returned so callers can treat identity as "no-op".
+ */
+export function mergeSuccessorInto(
+  model: MindMapModel,
+  nodeId: string
+): MindMapModel {
+  const node = findNode(model, nodeId);
+  if (!node) return model;
+
+  if (!node.collapsed && node.children.length > 0) {
+    const cloned = cloneModel(model);
+    const target = findNode(cloned, nodeId)!;
+    const child = target.children[0];
+    target.text += child.text;
+    target.children.splice(0, 1, ...child.children);
+    return cloned;
+  }
+
+  const info = findParentAndIndex(model, nodeId);
+  if (info && info.index < info.parent.children.length - 1) {
+    const cloned = cloneModel(model);
+    const ci = findParentAndIndex(cloned, nodeId)!;
+    const target = ci.parent.children[ci.index];
+    const sibling = ci.parent.children[ci.index + 1];
+    target.text += sibling.text;
+    target.children.push(...sibling.children);
+    ci.parent.children.splice(ci.index + 1, 1);
+    return cloned;
+  }
+
+  return model;
+}
+
 /** Split a node at cursor position */
 export function splitNode(
   model: MindMapModel,
@@ -321,18 +405,27 @@ export function splitNode(
   // Fall back to root id (always exists) so the postcondition holds:
   // newNodeId must identify a node present in the returned model.
   if (!node) return { model: cloned, newNodeId: cloned.id };
+
+  if (atPos <= 0) {
+    // Splitting at the very start inserts an empty sibling *before* the node
+    // and keeps the node's id, full text and children intact — a node's
+    // identity (referenced by image/link/publish URLs) must never migrate to a
+    // new id just because a blank line was inserted above it.
+    const newNode: MindMapModel = { id: newNodeId, text: "", children: [] };
+    if (cloned.id === nodeId) {
+      // Root has no sibling; fall back to prepending an empty child.
+      cloned.children.unshift(newNode);
+    } else {
+      const result = findParentAndIndex(cloned, nodeId);
+      if (result) result.parent.children.splice(result.index, 0, newNode);
+    }
+    return { model: cloned, newNodeId };
+  }
+
   const textAfter = node.text.substring(atPos);
   node.text = node.text.substring(0, atPos);
-
-  // When splitting at the start, children belong to the text portion (newNode)
-  const newNode: MindMapModel = {
-    id: newNodeId,
-    text: textAfter,
-    children: atPos === 0 ? node.children : [],
-  };
-  if (atPos === 0) {
-    node.children = [];
-  }
+  // The suffix becomes a following sibling; the node keeps its id and children.
+  const newNode: MindMapModel = { id: newNodeId, text: textAfter, children: [] };
 
   if (cloned.id === nodeId) {
     cloned.children.unshift(newNode);

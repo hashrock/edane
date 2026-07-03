@@ -29,7 +29,6 @@ import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
 import {
   editorReducer,
-  reconcileView,
   type EditorState,
   type EditorAction,
 } from "../application/editorReducer";
@@ -845,17 +844,16 @@ export default function MindmapEditor({
 
   // --- Keyboard handling ---
   // Undo/redo restore only the document; the current selection/caret (view
-  // state) is left untouched, unless the active node no longer exists in the
-  // restored document (reconcileView falls back to root).
+  // state) is carried over as-is. The `replace` reducer reconciles it against
+  // the restored document, so if the active node no longer exists there it
+  // falls back to the root instead of dangling (which would silently no-op
+  // every subsequent keyboard action).
   const restoreDocument = useCallback(
     (restored: EditorState["document"] | null) => {
       if (!restored) return;
       dispatch({
         type: "replace",
-        state: {
-          document: restored,
-          view: reconcileView(stateRef.current.view, restored),
-        },
+        state: { document: restored, view: stateRef.current.view },
       });
     },
     [dispatch]

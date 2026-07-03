@@ -41,6 +41,53 @@ export function textToModel(title: string, content: string): MindMapModel {
   return root;
 }
 
+/**
+ * Validate and normalize an arbitrary parsed value into a well-formed
+ * MindMapModel *tree with unique ids*.
+ *
+ * Note content is external data (it comes from the DB / `PUT /api/notes/:id`),
+ * but the whole domain layer assumes IDs uniquely identify a node —
+ * `findNode` / `findParentAndIndex` / `removeNode` all act on the *first*
+ * match, so a duplicated id silently makes edits, deletes and publish/upload
+ * targeting hit (or leave behind) the wrong node. JSON already guarantees a
+ * tree (no shared references → no shared child, no cycles), so the one hazard
+ * it can carry is a duplicated — or missing / malformed — id.
+ *
+ * This walks the value depth-first, dropping malformed children (anything that
+ * is not a `{text, children[]}` shape) and reassigning any id that is missing,
+ * non-string or already seen, so the returned model is a genuine unique-id
+ * tree. Returns null when the value isn't a usable node at all (caller then
+ * falls back to the legacy text parser).
+ */
+function normalizeTree(
+  value: unknown,
+  seen: Set<string>
+): MindMapModel | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.text !== "string" || !Array.isArray(v.children)) return null;
+
+  let id = typeof v.id === "string" ? v.id : "";
+  if (id === "" || seen.has(id)) id = generateId();
+  seen.add(id);
+
+  const node: MindMapModel = { id, text: v.text, children: [] };
+
+  // Preserve the known optional fields, guarding each by type.
+  if (v.collapsed === true) node.collapsed = true;
+  if (v.type === "image" || v.type === "link") node.type = v.type;
+  if (typeof v.fontSize === "number") node.fontSize = v.fontSize;
+  if (v.bold === true) node.bold = true;
+  if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
+  if (typeof v.favicon === "string") node.favicon = v.favicon;
+
+  for (const child of v.children) {
+    const normalized = normalizeTree(child, seen);
+    if (normalized) node.children.push(normalized);
+  }
+  return node;
+}
+
 /** Parse content string: try JSON first, fall back to legacy text */
 export function parseContent(
   content: string | undefined,
@@ -52,14 +99,10 @@ export function parseContent(
 
   try {
     const parsed = JSON.parse(content);
-    if (
-      parsed &&
-      typeof parsed.id === "string" &&
-      typeof parsed.text === "string" &&
-      Array.isArray(parsed.children)
-    ) {
-      return parsed as MindMapModel;
-    }
+    // Validate the *whole* tree and repair duplicate/malformed ids, rather than
+    // trusting a shallow shape check on the root alone.
+    const normalized = normalizeTree(parsed, new Set());
+    if (normalized) return normalized;
   } catch {
     // Not JSON, try legacy format
   }
