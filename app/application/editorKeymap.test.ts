@@ -68,7 +68,6 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}) {
     saveNote: vi.fn(),
     openPalette: vi.fn(),
     openHelp: vi.fn(),
-    blurInput: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     verticalMove: vi.fn(() => null),
@@ -162,6 +161,24 @@ describe("selection-mode collapse / navigate", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a1", false), { key: "ArrowLeft" });
     expect(dispatched).toEqual([{ type: "moveToParent" }]);
+  });
+
+  it("Enter inserts a sibling after the selected node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "Enter",
+    });
+    expect(dispatched).toEqual([{ type: "insertSiblingAfter" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Space starts editing the selected node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: " ",
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+    expect(preventDefault).toHaveBeenCalled();
   });
 });
 
