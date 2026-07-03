@@ -56,7 +56,7 @@ app.get(
   googleAuth({ scope: ["openid", "email", "profile"], prompt: "select_account" }),
   async (c) => {
     const googleUser = c.get("user-google");
-    if (!googleUser?.email) return c.redirect("/notes?error=auth");
+    if (!googleUser?.email) return c.redirect("/?error=auth");
 
     const db = drizzle(c.env.DB);
     const existing = await db
@@ -99,7 +99,7 @@ app.get(
 
 app.get("/auth/logout", (c) => {
   clearSession(c);
-  return c.redirect("/notes");
+  return c.redirect("/");
 });
 
 // --- JSON API used by the editor for debounced autosave (not Inertia) ---
@@ -366,33 +366,32 @@ app.get("/api/link-preview", async (c) => {
 
 // --- Inertia pages ---
 const routes = app
-  .get("/", (c) => c.redirect("/notes"))
+  // Root is the signed-out landing page (with the embedded guest editor).
+  // Signed-in visitors belong in their note list at /notes.
+  .get("/", (c) => {
+    const user = c.get("user");
+    if (user) return c.redirect("/notes");
+    return c.render("Notes/Index", { user: null, notes: [] });
+  })
   .get("/notes", async (c) => {
     const user = c.get("user");
-    let myNotes: {
-      id: string;
-      title: string;
-      isPublic: boolean;
-      updatedAt: string;
-    }[] = [];
-    if (user) {
-      const db = drizzle(c.env.DB);
-      myNotes = await db
-        .select({
-          id: notes.id,
-          title: notes.title,
-          isPublic: notes.isPublic,
-          updatedAt: notes.updatedAt,
-        })
-        .from(notes)
-        .where(eq(notes.userId, user.id))
-        .orderBy(desc(notes.updatedAt));
-    }
+    if (!user) return c.redirect("/");
+    const db = drizzle(c.env.DB);
+    const myNotes = await db
+      .select({
+        id: notes.id,
+        title: notes.title,
+        isPublic: notes.isPublic,
+        updatedAt: notes.updatedAt,
+      })
+      .from(notes)
+      .where(eq(notes.userId, user.id))
+      .orderBy(desc(notes.updatedAt));
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/settings", (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/notes");
+    if (!user) return c.redirect("/");
     return c.render("Settings", { user });
   })
   .get("/guest", (c) =>
@@ -405,12 +404,12 @@ const routes = app
   )
   .get("/notes/new", (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/notes");
+    if (!user) return c.redirect("/");
     return c.render("Notes/New", { user });
   })
   .post("/notes", async (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/notes");
+    if (!user) return c.redirect("/");
 
     const body = await c.req
       .json<{ title?: string; isPublic?: boolean; content?: string }>()
@@ -441,7 +440,7 @@ const routes = app
   })
   .delete("/notes/:id", async (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/notes");
+    if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
     const note = await db
       .select()
@@ -455,7 +454,7 @@ const routes = app
   })
   .get("/notes/:id/edit", async (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/notes");
+    if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
     const note = await db
       .select()
