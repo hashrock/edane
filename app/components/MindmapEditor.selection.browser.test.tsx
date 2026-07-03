@@ -116,8 +116,8 @@ describe("MindmapEditor single-node selection", () => {
       );
 
     // Press on the child, move a handful of pixels (crossing the drag
-    // threshold), then release. The child shares its parent's Y, so the old
-    // "closest node by Y" drag-select would have handed selection to the root.
+    // threshold), then release. Drag-select stays on the node the press
+    // started on, so selection never leaks to the same-Y parent.
     fire("mousedown", point.x, point.y);
     fire("mousemove", point.x + 6, point.y + 5);
     fire("mouseup", point.x + 6, point.y + 5);
