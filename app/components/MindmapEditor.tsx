@@ -1286,7 +1286,7 @@ export default function MindmapEditor({
               : "#ffffff",
         stroke:
           isEditing || isSelected
-            ? "#10b981"
+            ? "#000000"
             : isRoot
               ? "#0f172a"
               : "#e2e8f0",
@@ -1374,7 +1374,7 @@ export default function MindmapEditor({
           x: badgeX,
           y: node.y,
           radius: badgeR,
-          fill: "#10b981",
+          fill: "#000000",
           listening: false,
         });
         group.add(badge);

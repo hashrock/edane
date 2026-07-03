@@ -159,7 +159,7 @@ export default function MindmapViewer({ initialContent, title }: Props) {
               x: badgeX,
               y: node.y,
               radius: badgeR,
-              fill: "#10b981",
+              fill: "#000000",
             })
           );
           layer.add(
