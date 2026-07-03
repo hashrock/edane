@@ -1,5 +1,5 @@
 import { Head } from "@inertiajs/react";
-import MindmapEditor from "../../components/MindmapEditor";
+import NoteEditor from "../../components/NoteEditor";
 
 type Note = {
   id: string;
@@ -12,7 +12,7 @@ export default function NotesEdit({ note }: { note: Note }) {
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-950">
       <Head title={note.title} />
-      <MindmapEditor
+      <NoteEditor
         noteId={note.id}
         initialContent={note.content}
         initialTitle={note.title}
