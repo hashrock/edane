@@ -172,11 +172,22 @@ export function buildKeymap(deps: KeymapDeps): KeyBinding[] {
       },
     },
     {
-      id: "sel-edit",
-      label: "編集を開始",
+      id: "sel-insert-sibling",
+      label: "兄弟ノードを追加",
       keys: "Enter",
       when: "selection",
       match: (e) => e.key === "Enter",
+      run: () => {
+        deps.dispatch({ type: "insertSiblingAfter" }, "insert-sibling");
+        return "handled";
+      },
+    },
+    {
+      id: "sel-edit",
+      label: "編集を開始",
+      keys: "Space",
+      when: "selection",
+      match: (e) => e.key === " ",
       run: () => {
         deps.dispatch({ type: "startEditing" });
         return "handled";

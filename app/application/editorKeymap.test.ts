@@ -163,6 +163,24 @@ describe("selection-mode collapse / navigate", () => {
     run(deps, state(model(), "a1", false), { key: "ArrowLeft" });
     expect(dispatched).toEqual([{ type: "moveToParent" }]);
   });
+
+  it("Enter inserts a sibling after the selected node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "Enter",
+    });
+    expect(dispatched).toEqual([{ type: "insertSiblingAfter" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Space starts editing the selected node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: " ",
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
 });
 
 describe("reorder and bold (cross-mode)", () => {

@@ -56,7 +56,7 @@ beforeEach(() => {
   document.head.appendChild(style);
 });
 
-/** Click a node to select it, then Enter to drop into edit mode (caret + input). */
+/** Click a node to select it, then Space to drop into edit mode (caret + input). */
 async function edit(nodeId: string) {
   const point = await waitFor(() => api().getNodeClickPoint(nodeId));
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -65,7 +65,7 @@ async function edit(nodeId: string) {
     position: { x: Math.round(point.x), y: Math.round(point.y) },
   });
   await waitFor(() => api().getActiveNodeId() === nodeId);
-  await userEvent.keyboard("{Enter}");
+  await userEvent.keyboard("[Space]");
   await waitFor(() => api().getSelection().editing === true);
 }
 

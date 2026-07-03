@@ -130,6 +130,9 @@ export type EditorAction =
       anchorOffset: number;
       focusOffset: number;
     }
+  // Insert an empty sibling right after the active node and edit it (Enter in
+  // selection mode). Falls back to a child when the root is active.
+  | { type: "insertSiblingAfter" }
   // --- context-menu node ops ---
   | { type: "toggleCollapse"; nodeId: string }
   | { type: "addChild"; nodeId: string }
@@ -360,6 +363,19 @@ function documentReducer(
       return { document: newDocument };
     }
 
+    case "insertSiblingAfter": {
+      if (!activeNodeId) return { document };
+      const newId = generateId();
+      const newNode: MindMapModel = { id: newId, text: "", children: [] };
+      return {
+        document: {
+          ...document,
+          model: addSiblingAfter(document.model, activeNodeId, newNode),
+        },
+        focusId: newId,
+      };
+    }
+
     case "addChild": {
       const parent = findNode(document.model, action.nodeId);
       if (!parent) return { document };
@@ -520,6 +536,16 @@ function viewReducer(
       return focusId === undefined
         ? view
         : focusView(view, model, focusId, focusCursorPos, focusSelectionEnd);
+
+    // Like the focus-handoff group above, but the newly created sibling is
+    // handed straight into edit mode so its text can be typed immediately.
+    case "insertSiblingAfter":
+      return focusId === undefined
+        ? view
+        : {
+            ...focusView(view, model, focusId, focusCursorPos, focusSelectionEnd),
+            editing: true,
+          };
 
     case "tab":
     case "setNodeStyle":
