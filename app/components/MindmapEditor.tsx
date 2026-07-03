@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Link } from "@inertiajs/react";
+import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel } from "../domain/model";
 import { findNode, cloneWithNewIds } from "../domain/model";
@@ -27,6 +27,7 @@ import {
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
+import ConfirmDialog from "./ConfirmDialog";
 import {
   editorReducer,
   type EditorState,
@@ -296,6 +297,12 @@ export default function MindmapEditor({
     y: number;
     nodeId: string;
   } | null>(null);
+  // A navigation was attempted while a save was failing; ask before leaving so
+  // an unsaved edit isn't dropped. Holds the pending Inertia visit to resume.
+  const [leaveConfirm, setLeaveConfirm] = useState<{
+    url: string | URL;
+    method: "get" | "post" | "put" | "patch" | "delete";
+  } | null>(null);
 
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -307,6 +314,13 @@ export default function MindmapEditor({
   const cursorLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const saveTimerRef = useRef<any>(null);
+  // Serialized content last confirmed persisted. The server just handed us the
+  // initial model, so that's our clean baseline; every successful save advances
+  // it. `isDirty()` compares the live model against this.
+  const lastSavedContentRef = useRef<string>(serializeModel(model));
+  // Set true just before re-issuing a visit we already flushed, so the
+  // navigation guard lets that one visit pass through instead of re-flushing.
+  const bypassNavGuardRef = useRef(false);
   const updateGridRef = useRef<() => void>(() => {});
   const saveStatusRef = useRef<HTMLSpanElement>(null);
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
@@ -396,8 +410,9 @@ export default function MindmapEditor({
   }, []);
 
   const saveNote = useCallback(
-    async (currentModel: MindMapModel, pub?: boolean) => {
-      if (!noteId) return;
+    async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
+      if (!noteId) return true;
+      const content = serializeModel(currentModel);
       updateSaveStatus("保存中...");
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
@@ -405,28 +420,110 @@ export default function MindmapEditor({
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            content: serializeModel(currentModel),
+            content,
             title: currentModel.text,
             isPublic: pub ?? isPublic,
           }),
         });
-        updateSaveStatus(res.ok ? "保存済み" : "保存失敗");
+        if (res.ok) {
+          // Remember exactly what we persisted so isDirty() goes clean until
+          // the next edit (avoids false "unsaved" prompts on navigation).
+          lastSavedContentRef.current = content;
+          updateSaveStatus("保存済み");
+          return true;
+        }
+        updateSaveStatus("保存失敗");
+        return false;
       } catch {
         updateSaveStatus("保存失敗");
+        return false;
       }
     },
     [noteId, isPublic, updateSaveStatus]
   );
 
+  // Are there edits not yet confirmed persisted? Only meaningful with a noteId
+  // (guest/embed mode has no autosave and nothing to guard).
+  const isDirty = useCallback(
+    () =>
+      !!noteId &&
+      serializeModel(modelRef.current) !== lastSavedContentRef.current,
+    [noteId]
+  );
+
   // Debounced auto-save
   useEffect(() => {
     if (!noteId) return;
+    // Reflect the pending edit immediately so the header shows the note isn't
+    // persisted yet (the save itself flips this to 保存中... → 保存済み).
+    if (isDirty()) updateSaveStatus("未保存");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => saveNote(model), 1500);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [model, noteId, saveNote]);
+  }, [model, noteId, saveNote, isDirty, updateSaveStatus]);
+
+  // --- Guard against leaving with unsaved edits ---
+  // Tab close / reload / hard navigation: fire a best-effort keepalive save so
+  // the last edit survives, and raise the browser's native confirm as a
+  // backstop in case that request doesn't land.
+  useEffect(() => {
+    if (!noteId) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isDirty()) return;
+      const current = modelRef.current;
+      fetch(`/api/notes/${noteId}`, {
+        method: "PUT",
+        credentials: "include",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: serializeModel(current),
+          title: current.text,
+          isPublic,
+        }),
+      }).catch(() => {});
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [noteId, isDirty, isPublic]);
+
+  // Client-side (Inertia) navigation — e.g. the "← 一覧" link or the browser
+  // back button. When there are unsaved edits, hold the visit, flush the save,
+  // then let it proceed; only interrupt the user with a dialog if that save
+  // fails (otherwise navigation stays invisible, matching the autosave UX).
+  useEffect(() => {
+    if (!noteId) return;
+    return router.on("before", (event) => {
+      // The visit we re-issue after a successful flush must pass through.
+      if (bypassNavGuardRef.current) {
+        bypassNavGuardRef.current = false;
+        return;
+      }
+      if (!isDirty()) return;
+      event.preventDefault();
+      const visit = event.detail.visit;
+      void (async () => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        const ok = await saveNote(modelRef.current);
+        if (ok) {
+          bypassNavGuardRef.current = true;
+          router.visit(visit.url, {
+            method: visit.method,
+            data: visit.data,
+            replace: visit.replace,
+            preserveScroll: visit.preserveScroll,
+            preserveState: visit.preserveState,
+          });
+        } else {
+          setLeaveConfirm({ url: visit.url, method: visit.method });
+        }
+      })();
+    });
+  }, [noteId, isDirty, saveNote]);
 
   // --- Cursor blink ---
   useEffect(() => {
@@ -1689,6 +1786,22 @@ export default function MindmapEditor({
           setHelpOpen(false);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
+      />
+      <ConfirmDialog
+        open={leaveConfirm !== null}
+        variant="danger"
+        title="保存に失敗しました"
+        message="未保存の変更があります。このまま移動すると変更が失われる可能性があります。移動しますか？"
+        confirmLabel="移動する"
+        cancelLabel="とどまる"
+        onConfirm={() => {
+          const target = leaveConfirm;
+          setLeaveConfirm(null);
+          if (!target) return;
+          bypassNavGuardRef.current = true;
+          router.visit(target.url, { method: target.method });
+        }}
+        onCancel={() => setLeaveConfirm(null)}
       />
       <header className="anim-header flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
         <div className="flex items-center gap-3 min-w-0">
