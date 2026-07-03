@@ -17,6 +17,8 @@ import {
   removeNode,
   indentNode,
   dedentNode,
+  moveNodeUp,
+  moveNodeDown,
 } from "./model";
 
 /** Build a small fixed tree:
@@ -333,6 +335,51 @@ describe("dedentNode edge cases", () => {
     const model = sampleModel();
     const result = dedentNode(model, "nonexistent");
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+});
+
+describe("moveNodeUp / moveNodeDown", () => {
+  it("swaps a node with its next sibling (down)", () => {
+    const model = sampleModel();
+    const result = moveNodeDown(model, "a");
+    expect(result.children.map((c) => c.id)).toEqual(["b", "a"]);
+    // Subtree stays attached to the moved node.
+    const a = findNode(result, "a")!;
+    expect(a.children.map((c) => c.id)).toEqual(["a1"]);
+  });
+
+  it("swaps a node with its previous sibling (up)", () => {
+    const model = sampleModel();
+    const result = moveNodeUp(model, "b");
+    expect(result.children.map((c) => c.id)).toEqual(["b", "a"]);
+  });
+
+  it("does not mutate the original model", () => {
+    const model = sampleModel();
+    moveNodeDown(model, "a");
+    expect(model.children.map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("returns the SAME reference when the node is already first (up)", () => {
+    const model = sampleModel();
+    expect(moveNodeUp(model, "a")).toBe(model);
+  });
+
+  it("returns the SAME reference when the node is already last (down)", () => {
+    const model = sampleModel();
+    expect(moveNodeDown(model, "b")).toBe(model);
+  });
+
+  it("returns the SAME reference for the root", () => {
+    const model = sampleModel();
+    expect(moveNodeUp(model, "root")).toBe(model);
+    expect(moveNodeDown(model, "root")).toBe(model);
+  });
+
+  it("returns the SAME reference for an unknown node", () => {
+    const model = sampleModel();
+    expect(moveNodeUp(model, "nope")).toBe(model);
+    expect(moveNodeDown(model, "nope")).toBe(model);
   });
 });
 

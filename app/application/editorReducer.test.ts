@@ -747,6 +747,60 @@ describe("toggleCollapse", () => {
   });
 });
 
+describe("moveNodeUp / moveNodeDown", () => {
+  it("moves the active node down among its siblings, keeping focus", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, { type: "moveNodeDown" });
+    const root = findNode(next.document.model, "root")!;
+    expect(root.children.map((c) => c.id)).toEqual(["b", "a"]);
+    expect(next.view.activeNodeId).toBe("a"); // focus follows the moved node
+    expect(next.view.editing).toBe(true); // mode preserved
+  });
+
+  it("moves the active node up among its siblings", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    const next = editorReducer(s, { type: "moveNodeUp" });
+    const root = findNode(next.document.model, "root")!;
+    expect(root.children.map((c) => c.id)).toEqual(["b", "a"]);
+    expect(next.view.activeNodeId).toBe("b");
+  });
+
+  it("is a no-op (same state) when already the first child", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    expect(editorReducer(s, { type: "moveNodeUp" })).toBe(s);
+  });
+
+  it("is a no-op (same state) when already the last child", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "b");
+    expect(editorReducer(s, { type: "moveNodeDown" })).toBe(s);
+  });
+
+  it("is a no-op without an active node", () => {
+    const model = sampleModel();
+    const s = withView(stateAt(model, "a"), { activeNodeId: null });
+    expect(editorReducer(s, { type: "moveNodeUp" })).toBe(s);
+  });
+});
+
+describe("moveToParent", () => {
+  it("moves focus to the active node's parent", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1");
+    const next = editorReducer(s, { type: "moveToParent" });
+    expect(next.view.activeNodeId).toBe("a");
+  });
+
+  it("is a no-op (same state) on the root", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "root");
+    expect(editorReducer(s, { type: "moveToParent" })).toBe(s);
+  });
+});
+
 describe("addChild", () => {
   it("adds a new empty child to a node and focuses it", () => {
     const model = sampleModel();

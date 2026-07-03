@@ -26,12 +26,19 @@ import {
 } from "../application/persistence";
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
+import ShortcutHelp from "./ShortcutHelp";
 import {
   editorReducer,
   reconcileView,
   type EditorState,
   type EditorAction,
 } from "../application/editorReducer";
+import {
+  buildKeymap,
+  runKeymap,
+  activeNode,
+  type KeyBinding,
+} from "../application/editorKeymap";
 import { UndoManager } from "../application/undoManager";
 
 // --- Text measurement (cached) ---
@@ -257,6 +264,7 @@ export default function MindmapEditor({
   // --- UI-only state (not part of the editing document) ---
   const [isPublic, setIsPublic] = useState(initialIsPublic || false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -702,6 +710,7 @@ export default function MindmapEditor({
       { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
       { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
+      { id: "shortcuts", label: "キーボードショートカット一覧", action: () => setHelpOpen(true) },
     ];
   }, [pasteTextAsNodes]);
 
@@ -835,218 +844,57 @@ export default function MindmapEditor({
   ]);
 
   // --- Keyboard handling ---
+  // Undo/redo restore only the document; the current selection/caret (view
+  // state) is left untouched, unless the active node no longer exists in the
+  // restored document (reconcileView falls back to root).
+  const restoreDocument = useCallback(
+    (restored: EditorState["document"] | null) => {
+      if (!restored) return;
+      dispatch({
+        type: "replace",
+        state: {
+          document: restored,
+          view: reconcileView(stateRef.current.view, restored),
+        },
+      });
+    },
+    [dispatch]
+  );
+
+  // Central keymap: a single declarative table (see editorKeymap.ts) drives all
+  // shortcuts, so bindings stay auditable and the help overlay is generated
+  // from the same source.
+  const keymap = useMemo<KeyBinding[]>(
+    () =>
+      buildKeymap({
+        dispatch,
+        saveNote: (m) => saveNote(m),
+        openPalette: () => setCmdPaletteOpen(true),
+        openHelp: () => setHelpOpen(true),
+        blurInput: () => inputRef.current?.blur(),
+        undo: () => restoreDocument(undoManagerRef.current.undo()),
+        redo: () => restoreDocument(undoManagerRef.current.redo()),
+        verticalMove,
+      }),
+    [dispatch, saveNote, restoreDocument]
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isComposing) return;
-
-      // Command palette
-      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
-        e.preventDefault();
-        setCmdPaletteOpen(true);
-        return;
-      }
-
-      // Undo / Redo. Note: with Shift held, e.key is "Z" (uppercase), so compare
-      // case-insensitively or Cmd+Shift+Z (redo) never fires. Cmd+Y also redoes.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        const restored = e.shiftKey
-          ? undoManagerRef.current.redo()
-          : undoManagerRef.current.undo();
-        // Undo/redo only restores the document; the current selection/caret
-        // (view state) is left untouched, unless the active node no longer
-        // exists in the restored document (reconcileView falls back to root).
-        if (restored)
-          dispatch({
-            type: "replace",
-            state: {
-              document: restored,
-              view: reconcileView(stateRef.current.view, restored),
-            },
-          });
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        const restored = undoManagerRef.current.redo();
-        if (restored)
-          dispatch({
-            type: "replace",
-            state: {
-              document: restored,
-              view: reconcileView(stateRef.current.view, restored),
-            },
-          });
-        return;
-      }
-
+      // The help overlay doesn't grab focus, so the textarea still receives
+      // keys while it's open; let ShortcutHelp handle Escape and ignore the rest.
+      if (helpOpen) return;
       const state = stateRef.current;
-      if (!state.view.activeNodeId) return;
-
-      const pos = inputRef.current?.selectionStart || 0;
-      const selEnd = inputRef.current?.selectionEnd || 0;
-
-      // Selection mode (node selected but not being edited): keys select /
-      // navigate rather than edit text.
-      if (!state.view.editing) {
-        if (e.key === "Escape") {
-          // Exactly one node is always selected; Escape just drops focus.
-          e.preventDefault();
-          inputRef.current?.blur();
-          return;
-        }
-        if (e.key === "Enter") {
-          e.preventDefault();
-          dispatch({ type: "startEditing" });
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          dispatch({ type: "moveUp" });
-          return;
-        }
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          dispatch({ type: "moveDown" });
-          return;
-        }
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          e.preventDefault();
-          return;
-        }
-        if (e.key === "Tab") {
-          e.preventDefault();
-          dispatch({ type: "tab", shift: e.shiftKey }, "indent");
-          return;
-        }
-        if (e.key === "Backspace" || e.key === "Delete") {
-          e.preventDefault();
-          dispatch(
-            { type: "deleteNode", nodeId: state.view.activeNodeId },
-            "delete"
-          );
-          return;
-        }
-        // A printable character: the textarea still holds the whole-text
-        // selection, so letting it through replaces the content and typeText
-        // flips us into edit mode.
-        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
-          return;
-        }
-        // Other keys (Cmd+C, etc.) fall through to native textarea handling.
-      }
-
-      // Shift+Enter inserts a line break inside the node; let the textarea's
-      // native handling add the "\n" (onChange then commits it to the model).
-      if (e.key === "Enter" && e.shiftKey) {
-        return;
-      }
-
-      if (e.key === "Enter") {
-        e.preventDefault();
-        dispatch({ type: "enter", pos }, "enter");
-        return;
-      }
-
-      if (e.key === "Tab") {
-        e.preventDefault();
-        dispatch({ type: "tab", shift: e.shiftKey }, "indent");
-        return;
-      }
-
-      if (e.key === "Backspace" && pos === 0 && pos === selEnd) {
-        e.preventDefault();
-        dispatch({ type: "backspaceAtStart" }, "backspace");
-        return;
-      }
-
-      if (e.key === "Delete" && pos === selEnd) {
-        const prev = stateRef.current;
-        const next = dispatch({ type: "deleteAtEnd", pos }, "delete");
-        if (next !== prev) {
-          e.preventDefault();
-          return;
-        }
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        // Move between lines inside a multi-line node; cross to the previous
-        // node only from the first line.
-        const newPos = verticalMove(state.view.editingText, pos, -1);
-        if (newPos !== null) {
-          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
-        } else {
-          dispatch({ type: "moveUp" });
-        }
-        return;
-      }
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const newPos = verticalMove(state.view.editingText, pos, 1);
-        if (newPos !== null) {
-          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos });
-          return;
-        }
-        dispatch({ type: "moveDown" });
-        return;
-      }
-
-      if (e.key === "ArrowLeft") {
-        if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
-          e.preventDefault();
-          dispatch({ type: "cmdShiftLeft", pos, selEnd });
-          return;
-        }
-        if (e.metaKey || e.ctrlKey) {
-          e.preventDefault();
-          dispatch({ type: "cmdLeft", pos });
-          return;
-        }
-        if (e.shiftKey) {
-          // Shift+Left: let native input handle selection extension
-          return;
-        }
-        if (pos === 0 && pos === selEnd) {
-          e.preventDefault();
-          dispatch({ type: "arrowLeftEdge" });
-          return;
-        }
-      }
-
-      if (e.key === "ArrowRight") {
-        if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
-          e.preventDefault();
-          dispatch({ type: "cmdShiftRight", pos, selEnd });
-          return;
-        }
-        if (e.metaKey || e.ctrlKey) {
-          e.preventDefault();
-          dispatch({ type: "cmdRight", pos });
-          return;
-        }
-        if (e.shiftKey) {
-          // Shift+Right: let native input handle selection extension
-          return;
-        }
-        const currentNode = findNode(modelRef.current, state.view.activeNodeId);
-        if (currentNode && pos >= currentNode.text.length && pos === selEnd) {
-          e.preventDefault();
-          dispatch({ type: "arrowRightEdge" });
-          return;
-        }
-      }
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        // Editing → back to selection mode (a second Escape, handled above,
-        // just drops focus; the node stays selected).
-        dispatch({ type: "exitEditing" });
-        return;
-      }
+      runKeymap(keymap, {
+        e,
+        state,
+        node: activeNode(state),
+        pos: inputRef.current?.selectionStart || 0,
+        selEnd: inputRef.current?.selectionEnd || 0,
+      });
     },
-    [isComposing, dispatch]
+    [isComposing, keymap, helpOpen]
   );
 
   // --- Title editing ---
@@ -1777,10 +1625,11 @@ export default function MindmapEditor({
     };
   }, []);
 
-  // Global Meta+P handler (when hidden input is not focused)
+  // Global command-palette handler (when the hidden input is not focused).
+  // Cmd/Ctrl+K avoids clobbering the browser's native Cmd/Ctrl+P (print).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCmdPaletteOpen(true);
       }
@@ -1796,6 +1645,14 @@ export default function MindmapEditor({
         open={cmdPaletteOpen}
         onClose={() => {
           setCmdPaletteOpen(false);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+      />
+      <ShortcutHelp
+        bindings={keymap}
+        open={helpOpen}
+        onClose={() => {
+          setHelpOpen(false);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       />
