@@ -101,6 +101,11 @@ function measureEmptyWidth(): number {
 // --- Multi-line geometry ---
 const NODE_PADDING = 20;
 
+// Screen-space distance (px) the pointer must travel after mousedown before a
+// press turns into a drag-select. Below this a small jitter stays a plain click
+// so selection doesn't jump to a neighbouring (e.g. same-Y parent) node.
+const DRAG_THRESHOLD = 4;
+
 interface LineData {
   lines: string[];
   /** Per-line cumulative char x-offsets (from measureOffsets). */
@@ -308,6 +313,13 @@ export default function MindmapEditor({
   const dragStateRef = useRef<{
     nodeId: string;
     anchorCharIdx: number;
+    // Screen-space pointer position at mousedown, used to distinguish a click
+    // (with minor jitter) from an intentional drag-select.
+    startX: number;
+    startY: number;
+    // Flips true once the pointer moves past DRAG_THRESHOLD; from then on every
+    // move is treated as a drag even if it dips back under the threshold.
+    moved: boolean;
   } | null>(null);
   const wasDraggingRef = useRef(false);
   const undoManagerRef = useRef(new UndoManager());
@@ -997,15 +1009,30 @@ export default function MindmapEditor({
         if (!drag) return;
         const pointer = stage.getPointerPosition();
         if (!pointer) return;
+
+        // Ignore sub-threshold jitter: a click that barely moves must not turn
+        // into a drag-select (which would re-target the closest-by-Y node and,
+        // for a same-Y parent, steal selection from the clicked node).
+        if (!drag.moved) {
+          const dx = pointer.x - drag.startX;
+          const dy = pointer.y - drag.startY;
+          if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+          drag.moved = true;
+        }
+
         const scale = stage.scaleX();
         const worldX = (pointer.x - stage.x()) / scale;
         const worldY = (pointer.y - stage.y()) / scale;
 
         const currentNodes = nodesRef.current;
 
-        // Find closest node by Y
+        // Find closest node by Y. Seed the search with the anchor node's own
+        // distance so an exactly-tied node (e.g. a single child shares its
+        // parent's Y) can't displace the node the drag started on.
         let closestNode = currentNodes.find((n) => n.id === drag.nodeId);
-        let closestDist = Infinity;
+        let closestDist = closestNode
+          ? Math.abs(closestNode.y - worldY)
+          : Infinity;
         for (const n of currentNodes) {
           const dist = Math.abs(n.y - worldY);
           if (dist < closestDist) {
@@ -1436,8 +1463,16 @@ export default function MindmapEditor({
           });
         }
 
-        // Start drag selection (anchored at the clicked caret position).
-        dragStateRef.current = { nodeId: node.id, anchorCharIdx: charIdx };
+        // Start drag selection (anchored at the clicked caret position). The
+        // drag only becomes "real" once the pointer moves past DRAG_THRESHOLD;
+        // until then it's a plain click and selection stays on this node.
+        dragStateRef.current = {
+          nodeId: node.id,
+          anchorCharIdx: charIdx,
+          startX: pointer.x,
+          startY: pointer.y,
+          moved: false,
+        };
         if (stage) stage.draggable(false);
 
         // Focus the hidden input in a macrotask so it survives the click
