@@ -314,8 +314,8 @@ describe("createDefaultModel", () => {
     expect(model.children.length).toBeGreaterThan(0);
   });
 
-  it("defaults to 'Edane' when no title is provided", () => {
+  it("defaults to 'New Note' plus the date when no title is provided", () => {
     const model = createDefaultModel();
-    expect(model.text).toBe("Edane");
+    expect(model.text).toMatch(/^New Note \d{4}-\d{2}-\d{2}$/);
   });
 });

@@ -1737,11 +1737,13 @@ export default function MindmapEditor({
               <span className="text-slate-400">✎</span>
             </button>
           )}
-          <span
-            className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-          >
-            {isPublic ? "公開" : "非公開"}
-          </span>
+          {noteId && (
+            <span
+              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+            >
+              {isPublic ? "公開" : "非公開"}
+            </span>
+          )}
         </div>
         {noteId && (
           <div className="flex items-center gap-4 text-sm">
@@ -1766,9 +1768,6 @@ export default function MindmapEditor({
         )}
         {!noteId && onSaveToAccount && (
           <div className="flex items-center gap-3 text-sm">
-            <span className="hidden whitespace-nowrap text-xs text-slate-400 sm:inline">
-              保存されません（お試し）
-            </span>
             <button
               onClick={handleSaveToAccount}
               className="whitespace-nowrap rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-700"

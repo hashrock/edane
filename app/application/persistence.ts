@@ -125,10 +125,18 @@ export function serializeModel(model: MindMapModel): string {
   return JSON.stringify(model);
 }
 
+/** Default note title: "New Note" plus the current date (YYYY-MM-DD) */
+export function defaultNoteTitle(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `New Note ${y}-${m}-${d}`;
+}
+
 export function createDefaultModel(title?: string): MindMapModel {
   return {
     id: generateId(),
-    text: title || "Edane",
+    text: title || defaultNoteTitle(),
     children: [
       {
         id: generateId(),
