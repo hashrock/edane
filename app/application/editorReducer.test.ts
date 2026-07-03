@@ -707,14 +707,13 @@ describe("selectAllInNode", () => {
 });
 
 describe("dragSelect", () => {
-  it("same-node drag selects a text range and enters edit mode", () => {
+  it("selects a text range within the node and enters edit mode", () => {
     const model = sampleModel();
     const s = stateAt(model, "root");
     const next = editorReducer(s, {
       type: "dragSelect",
-      anchorNodeId: "a1",
+      nodeId: "a1",
       anchorOffset: 2,
-      focusNodeId: "a1",
       focusOffset: 0,
     });
     expect(next.view.activeNodeId).toBe("a1");
@@ -723,30 +722,14 @@ describe("dragSelect", () => {
     expect(next.view.selectionEnd).toBe(2);
   });
 
-  it("cross-node drag moves focus without entering edit mode", () => {
-    const model = sampleModel();
-    const s = stateAt(model, "root");
-    const next = editorReducer(s, {
-      type: "dragSelect",
-      anchorNodeId: "a",
-      anchorOffset: 0,
-      focusNodeId: "b",
-      focusOffset: 1,
-    });
-    expect(next.view.activeNodeId).toBe("b");
-    expect(next.view.editing).toBe(false);
-    expect(next.view.cursorPos).toBe(1);
-  });
-
-  it("is a no-op for an unknown focus node", () => {
+  it("is a no-op for an unknown node", () => {
     const model = sampleModel();
     const s = stateAt(model, "root");
     expect(
       editorReducer(s, {
         type: "dragSelect",
-        anchorNodeId: "a",
+        nodeId: "missing",
         anchorOffset: 0,
-        focusNodeId: "missing",
         focusOffset: 0,
       })
     ).toBe(s);

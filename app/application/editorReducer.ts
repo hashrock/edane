@@ -122,11 +122,12 @@ export type EditorAction =
   | { type: "startEditing"; cursorPos?: number; selectionEnd?: number }
   // Leave edit mode but keep the node selected (Escape from editing).
   | { type: "exitEditing" }
+  // Drag within a node selects a text range (an editing gesture). Selection
+  // never crosses node boundaries — there is no multi-node selection.
   | {
       type: "dragSelect";
-      anchorNodeId: string;
+      nodeId: string;
       anchorOffset: number;
-      focusNodeId: string;
       focusOffset: number;
     }
   // --- context-menu node ops ---
@@ -691,28 +692,17 @@ function viewReducer(
     }
 
     case "dragSelect": {
-      const focusNode = findNode(model, action.focusNodeId);
-      if (!focusNode) return view;
-      if (action.focusNodeId === action.anchorNodeId) {
-        // Same node: dragging selects a text range, which is an editing gesture.
-        const start = Math.min(action.anchorOffset, action.focusOffset);
-        const end = Math.max(action.anchorOffset, action.focusOffset);
-        return {
-          activeNodeId: action.focusNodeId,
-          editing: true,
-          editingText: focusNode.text,
-          cursorPos: start,
-          selectionEnd: end,
-        };
-      }
-      // Cross-node drag: just move focus to the dragged-over node (no
-      // multi-node selection).
+      const node = findNode(model, action.nodeId);
+      if (!node) return view;
+      // Dragging within a node selects a text range, which is an editing gesture.
+      const start = Math.min(action.anchorOffset, action.focusOffset);
+      const end = Math.max(action.anchorOffset, action.focusOffset);
       return {
-        activeNodeId: action.focusNodeId,
-        editing: false,
-        editingText: focusNode.text,
-        cursorPos: action.focusOffset,
-        selectionEnd: action.focusOffset,
+        activeNodeId: action.nodeId,
+        editing: true,
+        editingText: node.text,
+        cursorPos: start,
+        selectionEnd: end,
       };
     }
 

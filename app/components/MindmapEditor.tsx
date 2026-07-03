@@ -1003,7 +1003,8 @@ export default function MindmapEditor({
         }
       });
 
-      // Drag selection on stage (supports multi-node)
+      // Drag within a node selects a text range. Selection stays on the node
+      // the drag started on — it never crosses to another node.
       stage.on("mousemove", () => {
         const drag = dragStateRef.current;
         if (!drag) return;
@@ -1011,8 +1012,7 @@ export default function MindmapEditor({
         if (!pointer) return;
 
         // Ignore sub-threshold jitter: a click that barely moves must not turn
-        // into a drag-select (which would re-target the closest-by-Y node and,
-        // for a same-Y parent, steal selection from the clicked node).
+        // into a drag-select (which would enter edit mode on a plain click).
         if (!drag.moved) {
           const dx = pointer.x - drag.startX;
           const dy = pointer.y - drag.startY;
@@ -1024,35 +1024,22 @@ export default function MindmapEditor({
         const worldX = (pointer.x - stage.x()) / scale;
         const worldY = (pointer.y - stage.y()) / scale;
 
-        const currentNodes = nodesRef.current;
+        const node = nodesRef.current.find((n) => n.id === drag.nodeId);
+        if (!node) return;
 
-        // Find closest node by Y. Seed the search with the anchor node's own
-        // distance so an exactly-tied node (e.g. a single child shares its
-        // parent's Y) can't displace the node the drag started on.
-        let closestNode = currentNodes.find((n) => n.id === drag.nodeId);
-        let closestDist = closestNode
-          ? Math.abs(closestNode.y - worldY)
-          : Infinity;
-        for (const n of currentNodes) {
-          const dist = Math.abs(n.y - worldY);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closestNode = n;
-          }
-        }
-        if (!closestNode) return;
-
-        // Find char position within closest node (line by Y, column by X).
-        const data = lineDataRef.current.get(closestNode.id);
+        // Find char position within the node (line by Y, column by X). Y and X
+        // are clamped to the node's own lines, so dragging past its edges just
+        // extends the selection to the nearest end.
+        const data = lineDataRef.current.get(node.id);
         let charIdx = 0;
         if (data) {
           const blockHeight = data.lines.length * data.lineHeight;
-          const relY = worldY - (closestNode.y - blockHeight / 2);
+          const relY = worldY - (node.y - blockHeight / 2);
           const line = Math.max(
             0,
             Math.min(data.lines.length - 1, Math.floor(relY / data.lineHeight))
           );
-          const relX = worldX - closestNode.x - NODE_PADDING;
+          const relX = worldX - node.x - NODE_PADDING;
           charIdx = lineColToPos(
             data,
             line,
@@ -1062,9 +1049,8 @@ export default function MindmapEditor({
 
         dispatch({
           type: "dragSelect",
-          anchorNodeId: drag.nodeId,
+          nodeId: drag.nodeId,
           anchorOffset: drag.anchorCharIdx,
-          focusNodeId: closestNode.id,
           focusOffset: charIdx,
         });
       });
