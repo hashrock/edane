@@ -1,0 +1,402 @@
+<title>edane — 形式検証レポート 第2ラウンド</title>
+<style>
+  :root {
+    --paper: #fbfcfe; --sunken: #f1f3f9; --card: #ffffff;
+    --ink: #1a1e2b; --muted: #5a6274; --faint: #8a92a6; --line: #e2e6f0;
+    --accent: #4351c9; --accent-soft: #eaecfb;
+    --high: #c0362c; --high-soft: #fbeae8;
+    --med: #b26a12; --med-soft: #fbf1e2;
+    --ok: #2f8a54; --ok-soft: #e7f4ec;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+      "Noto Sans JP", "Yu Gothic", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0e1017; --sunken: #14171f; --card: #171b24;
+      --ink: #e7eaf2; --muted: #9aa2b4; --faint: #6b7386; --line: #262b38;
+      --accent: #8b96f0; --accent-soft: #1c2136;
+      --high: #f0857a; --high-soft: #2a1a19;
+      --med: #e2a44e; --med-soft: #2a2113;
+      --ok: #6fca92; --ok-soft: #14231a;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #fbfcfe; --sunken: #f1f3f9; --card: #ffffff;
+    --ink: #1a1e2b; --muted: #5a6274; --faint: #8a92a6; --line: #e2e6f0;
+    --accent: #4351c9; --accent-soft: #eaecfb;
+    --high: #c0362c; --high-soft: #fbeae8;
+    --med: #b26a12; --med-soft: #fbf1e2;
+    --ok: #2f8a54; --ok-soft: #e7f4ec;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0e1017; --sunken: #14171f; --card: #171b24;
+    --ink: #e7eaf2; --muted: #9aa2b4; --faint: #6b7386; --line: #262b38;
+    --accent: #8b96f0; --accent-soft: #1c2136;
+    --high: #f0857a; --high-soft: #2a1a19;
+    --med: #e2a44e; --med-soft: #2a2113;
+    --ok: #6fca92; --ok-soft: #14231a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 840px; margin: 0 auto; padding: 0 24px 96px; }
+
+  header { padding: 68px 0 36px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 44px); line-height: 1.12; margin: 0 0 18px;
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 680;
+  }
+  .lede { font-size: 18px; color: var(--muted); margin: 0; max-width: 64ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+  .tool {
+    font-family: var(--mono); font-size: 12px; padding: 5px 11px;
+    border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+    background: var(--card);
+  }
+  .tool b { color: var(--ink); font-weight: 600; }
+
+  .callout {
+    margin-top: 30px; background: var(--accent-soft); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 10px; padding: 16px 20px;
+    font-size: 14.5px; color: var(--muted);
+  }
+  .callout b { color: var(--ink); }
+
+  section { margin-top: 56px; }
+  h2 {
+    font-size: 13px; font-family: var(--mono); letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600;
+    margin: 0 0 22px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+
+  table.summary { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.summary th, table.summary td {
+    text-align: left; padding: 13px 12px; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.summary th {
+    font-size: 11.5px; font-family: var(--mono); letter-spacing: .08em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600;
+  }
+  table.summary td:first-child { font-family: var(--mono); color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .sev { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    padding: 3px 9px; border-radius: 999px; letter-spacing: .04em; }
+  .sev.high { background: var(--high-soft); color: var(--high); }
+  .sev.med { background: var(--med-soft); color: var(--med); }
+
+  .finding { margin-top: 30px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 30px 30px 34px; }
+  .finding .fhead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .finding .fid { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent); }
+  .finding h3 { font-size: 21px; line-height: 1.3; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+  .finding .frole { font-size: 14px; color: var(--faint); margin: 4px 0 22px; font-family: var(--mono); }
+
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
+  @media (max-width: 620px) { .vs { grid-template-columns: 1fr; } }
+  .vs .box { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; background: var(--sunken); }
+  .vs .box .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    margin: 0 0 10px; font-weight: 700; }
+  .vs .declared .lbl { color: var(--ok); }
+  .vs .actual .lbl { color: var(--high); }
+  .vs .box p { margin: 0; font-size: 14px; color: var(--muted); }
+  .vs .box code { font-family: var(--mono); font-size: 12.5px; background: var(--card);
+    padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink); }
+
+  .cx { margin: 22px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .cx .cxhead { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--high); background: var(--high-soft); padding: 9px 16px; font-weight: 700;
+    border-bottom: 1px solid var(--line); }
+  .cx .cxbody { padding: 18px 16px; display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; }
+  @media (max-width: 620px) { .cx .cxbody { grid-template-columns: 1fr; } .cx .arrow { transform: rotate(90deg); text-align:center; } }
+  .tree { font-family: var(--mono); font-size: 13px; line-height: 1.85; white-space: pre; overflow-x: auto;
+    background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; color: var(--ink); }
+  .tree .hi { color: var(--high); font-weight: 700; }
+  .tree .fade { color: var(--faint); }
+  .tree .ok { color: var(--ok); }
+  .arrow { font-family: var(--mono); font-size: 22px; color: var(--faint); text-align: center; }
+  .caption { font-size: 13px; color: var(--faint); margin: 4px 2px 0; }
+  .caption .step { color: var(--muted); }
+
+  .block { font-size: 15px; }
+  .block h4 { font-size: 13px; font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase;
+    color: var(--faint); margin: 26px 0 8px; font-weight: 600; }
+  .block p { margin: 8px 0; color: var(--muted); }
+  .block strong { color: var(--ink); font-weight: 640; }
+  .block code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken);
+    padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink); }
+
+  pre.term { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: #0d1016; color: #cdd6e4;
+    border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 14px 0 0; }
+  pre.term .g { color: #6fca92; } pre.term .r { color: #f0857a; } pre.term .m { color: #7f8aa8; }
+  pre.term .y { color: #e2a44e; } pre.term .b { color: #8b96f0; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
+  .repro { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+  .repro h4 { margin: 0 0 10px; font-size: 14px; }
+  .repro p { font-size: 13.5px; color: var(--muted); margin: 0 0 12px; }
+  .repro pre { font-family: var(--mono); font-size: 12px; background: var(--sunken); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0; color: var(--ink); }
+  .verdict { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+  .verdict.sat { color: var(--high); } .verdict.unsat { color: var(--ok); }
+
+  footer { margin-top: 64px; padding-top: 26px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--faint); }
+  footer code { font-family: var(--mono); }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">形式検証 · 第2ラウンド · 2026-07</p>
+    <h1>修正後コードの再検査で見つかった<br>2件の仕様の綻び</h1>
+    <p class="lede">
+      ドキュメントが<b>宣言する仕様</b>と、コードが<b>実際に計算する仕様</b>を Z3・Alloy・TLA+ で
+      形式化し、モデル検査で両者の食い違い（反例）を機械的に探索した。第1ラウンドで直した4件の
+      <em>修正後</em>コードを対象に、新たに2件の綻びを発見。いずれも実コードで再現確認済み。
+    </p>
+    <div class="meta">
+      <span class="tool"><b>Z3</b> 4.16 · 実行済み</span>
+      <span class="tool"><b>Alloy</b> 6.2 · 実行済み</span>
+      <span class="tool"><b>TLA+</b> 仕様（TLC未実行・Z3でクロスチェック）</span>
+      <span class="tool">再現テスト <b>5/5 pass</b></span>
+    </div>
+    <div class="callout">
+      <b>なぜ「再検査」か。</b> 第1ラウンドの修正は正しいが、いずれも<b>より弱い不変条件までしか
+      締めていなかった</b>。所見Aは「選択は<em>存在する</em>ノードを指す」を強制したが「ビューが
+      そのノードを<em>忠実に映す</em>」は未強制。所見Bは連結先を構造上の前ノードへ正したが、その前ノードが
+      <em>折りたたまれている</em>場合の可視性は未考慮だった。修正が動くとほころびの境界も動く——だから再実施する。
+    </div>
+  </header>
+
+  <section>
+    <h2>サマリ</h2>
+    <table class="summary">
+      <thead>
+        <tr><th>所見</th><th>宣言仕様</th><th>コードの実際</th><th>ツール</th><th>重要度</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A</td>
+          <td>ビューは常にアクティブなノードを忠実に映す</td>
+          <td>Undoは本文だけ復元。バッファ／カーソルが古いまま残り、次の入力でUndoが帳消しに</td>
+          <td>Z3 · TLA+</td>
+          <td><span class="sev high">高</span></td>
+        </tr>
+        <tr>
+          <td>B</td>
+          <td>連結・インデントは内容を折りたたみの中に隠さない</td>
+          <td>Backspace連結・Tabインデントが折りたたみを無視して突っ込み、本文や選択中ノードが不可視化</td>
+          <td>Z3 · Alloy</td>
+          <td><span class="sev med">中〜高</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- FINDING A -->
+  <section>
+    <h2>所見 A — Undoが「見た目には無反応・次の1文字で帳消し」になる</h2>
+    <div class="finding">
+      <div class="fhead">
+        <span class="fid">A</span>
+        <h3>Undoすると編集中ノードは取り消し前の本文を表示し続け、次の入力でUndoが取り消される</h3>
+      </div>
+      <p class="frole">重要度: 高 · モデル: z3/view_faithfulness.py · tla/EditUndo.tla · 再現: round2.test.ts</p>
+
+      <div class="vs">
+        <div class="box declared">
+          <p class="lbl">宣言されている仕様</p>
+          <p>あらゆる通常操作は「編集バッファ <code>editingText</code> ＝ ノード本文」「カーソルは本文の範囲内」に
+          そろえる（<code>focusView</code>）。画面もテキストエリアもこの <code>editingText</code> を描く——
+          <strong>利用者が見る文字は、ドキュメントではなくビューのバッファそのもの。</strong></p>
+        </div>
+        <div class="box actual">
+          <p class="lbl">コードが保証すること</p>
+          <p><code>reconcileView</code> は「アクティブが<em>存在すれば</em>渡ってきたビューをそのまま返す」。
+          <code>editingText</code>・<code>cursorPos</code> は<strong>Undo前のドキュメントから作られた値のまま</strong>。
+          本文が縮んでもバッファもカーソルも追従しない。</p>
+        </div>
+      </div>
+
+      <div class="cx">
+        <div class="cxhead">反例 — Z3が発見し実コードで再現</div>
+        <div class="cxbody">
+          <div>
+            <div class="tree">ノードA = <span class="hi">"hi there"</span>  (8文字)
+編集中 · カーソル <span class="hi">8</span></div>
+            <p class="caption"><span class="step">① </span>Aを "hi there" に編集中</p>
+          </div>
+          <div class="arrow">→</div>
+          <div>
+            <div class="tree">ドキュメント: A = <span class="ok">"hi"</span>  (2文字)
+画面/入力欄: <span class="hi">"hi there"</span> · カーソル <span class="hi">8</span></div>
+            <p class="caption"><span class="step">② </span>Cmd+Z。ドキュメントは戻るが表示は戻らない</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="block">
+        <h4>何が起きるか</h4>
+        <p><strong>Undoが効いていないように見える。</strong> 編集中ノードの表示は <code>editingText</code> 駆動なので、
+        Cmd+Zを押しても画面は "hi there" のまま。実際にはドキュメントは "hi" に戻っている。</p>
+        <p><strong>次の1文字で取り消しが帳消し。</strong> 入力欄には古い "hi there" が残っているので、"!" を足すと
+        <code>typeText</code> が <strong>"hi there!" をモデルに再コミット</strong>する。戻したはずの本文が復活する。</p>
+        <p><strong>カーソルが範囲外。</strong> Z3の反例では バッファ2文字・本文1文字・カーソル2 ——
+        カーソルが本文長を超える不整合な状態が、コードのルール上「合法」に到達可能だと示された。</p>
+
+        <h4>ドメイン的な影響</h4>
+        <p>Undoはアウトライン編集で最も信頼されるべき操作。それが無反応に見え、次の入力で失われると、
+        利用者は<strong>取り消しが消えたことに気づけない</strong>。過去にも近縁の無反応バグの修正実績がある
+        （第1ラウンド所見3、コミット <code>a6def5e</code>）。</p>
+
+        <h4>直し方の方向性</h4>
+        <p><code>reconcileView</code> を「存在確認」だけでなく、<strong>アクティブなノードの現在の本文から
+        <code>editingText</code> を採り直し、カーソルを本文長にクランプする</strong>まで広げる。TLA+ 仕様では
+        フラグ <code>ReconcileRefreshesBuffer</code> を <code>FALSE→TRUE</code> にすると不変条件 <code>ViewFaithful</code>
+        が破れる状態から保たれる状態へ変わる（Z3の対照実験も同じくUNSAT＝健全になる）。</p>
+      </div>
+
+      <pre class="term"><span class="m"># python3 formal/round2/z3/view_faithfulness.py</span>
+SAT — counterexample view/document pair:
+  active node          : 3  <span class="g">(present ✓ — reconcileView is satisfied)</span>
+  text(active) length  : 1   <span class="m">&lt;- what the DOCUMENT says</span>
+  view.editingText len : 2   <span class="m">&lt;- what the SCREEN + textarea show</span>
+  view.cursorPos       : 2
+  <span class="r">(I1) violated: buffer shows 2 chars, node holds 1 — stale display.</span>
+  <span class="r">(I2) violated: caret at 2 &gt; node length 1 — out-of-range caret.</span>
+  <span class="g">GAP CONFIRMED.</span>
+<span class="m"># contrast: reconcile re-derives buffer -&gt;</span> <span class="g">UNSAT (invariant holds) ✓</span></pre>
+    </div>
+  </section>
+
+  <!-- FINDING B -->
+  <section>
+    <h2>所見 B — 折りたたみの直後の編集で内容が消える</h2>
+    <div class="finding">
+      <div class="fhead">
+        <span class="fid">B</span>
+        <h3>折りたたんだ節の直後で Backspace連結／Tabインデントすると、本文や選択中ノードが折りたたみの中へ消える</h3>
+      </div>
+      <p class="frole">重要度: 中〜高 · モデル: z3/collapse_visibility.py · alloy/CollapseVisibility.als · 再現: round2.test.ts</p>
+
+      <div class="vs">
+        <div class="box declared">
+          <p class="lbl">宣言されている仕様</p>
+          <p><code>getFlatOrder</code> は折りたたみの子孫を飛ばす（隠れたノードに着地しないため）。
+          コードは<strong>「触った内容を可視に保つ」を既に守っている</strong>——<code>addChild</code>・<code>pasteBranch</code>
+          は挿入前に対象を開き、<code>mergeSuccessorInto</code>（行末Delete）は折りたたみに手を伸ばさない。</p>
+        </div>
+        <div class="box actual">
+          <p class="lbl">コードが実際にやること</p>
+          <p><code>mergeIntoPredecessor</code>（Backspace連結）と <code>indentNode</code>（Tab）は
+          <strong>前の兄弟の折りたたみを一切見ず・開きもせず</strong>そのまま子を押し込む。5つの「下に入れる」経路で
+          この2つだけが可視性を破る。</p>
+        </div>
+      </div>
+
+      <div class="cx">
+        <div class="cxhead">反例 B-1 — 行頭Backspaceの連結</div>
+        <div class="cxbody">
+          <div>
+            <div class="tree">ルート
+├─ A <span class="fade">▸ (折りたたみ / A1が隠れる)</span>
+└─ <span class="hi">B</span>          <span class="fade">← 行頭でBackspace</span>
+    ├─ B1
+    └─ B2</div>
+            <p class="caption"><span class="step">意図: </span>「Bの行を前とつなげたい」</p>
+          </div>
+          <div class="arrow">→</div>
+          <div>
+            <div class="tree">ルート
+└─ A <span class="fade">▸ ("AB" / 折りたたみのまま)</span>
+     <span class="hi">├─ B1  ✗ 不可視</span>
+     <span class="hi">└─ B2  ✗ 不可視</span></div>
+            <p class="caption">flatOrder = <code>[root, A]</code> · <strong>B1・B2が画面から消失</strong></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="cx">
+        <div class="cxhead">反例 B-2 — Tabインデント（選択中ノードが消える）</div>
+        <div class="cxbody">
+          <div>
+            <div class="tree">ルート
+├─ A <span class="fade">▸ (折りたたみ)</span>
+└─ <span class="hi">B</span>          <span class="fade">← 選択中。Tab</span></div>
+            <p class="caption"><span class="step">意図: </span>「Bを一段下げたい」</p>
+          </div>
+          <div class="arrow">→</div>
+          <div>
+            <div class="tree">ルート
+└─ A <span class="fade">▸ (折りたたみ)</span>
+     <span class="hi">└─ B   ✗ 不可視（だが選択中）</span></div>
+            <p class="caption">flatOrder = <code>[root, A]</code> · <strong>選択中のノード自身が消える</strong></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="block">
+        <h4>ドメイン的な影響</h4>
+        <p>折りたたみは長い文書を畳んで扱う中心機能で、「折りたたんだ節の直後の行」は日常的に生じる。
+        そこで多用される Backspace連結／Tabインデントが、<strong>内容や選択を静かに折りたたみの中へ隠す</strong>。
+        利用者は削除した覚えがないのに小項目が消えたように見え、しかも <code>addChild</code>／<code>paste</code> では
+        起きないため挙動が一貫しない。所見B-2は「選択が見えないノードを指す」状況（第1ラウンド所見3）の別経路での再発。</p>
+
+        <h4>直し方の方向性</h4>
+        <p><code>backspaceAtStart</code>／<code>tab(indent)</code> の連結・移動先が折りたたまれているとき、
+        <code>addChild</code>／<code>pasteBranch</code> と同じく<strong>対象を開いてから入れる</strong>
+        （<code>toggleCollapse(target, false)</code>）。行末Delete <code>mergeSuccessorInto</code> が既に持つ
+        「折りたたみに手を伸ばさない」判断と対称にそろえるのが素直。</p>
+      </div>
+
+      <pre class="term"><span class="m"># java -cp alloy.jar:. RunAlloy CollapseVisibility.als</span>
+JoinHidesContent                <span class="r">[run]  -&gt;  SATISFIABLE (instance found)</span>
+    nodes: 5   children: {N0-&gt;N2, N0-&gt;N3, <span class="y">N3-&gt;N1, N3-&gt;N4</span>}   <span class="m"># N1,N4 隠れる</span>
+ExpandFirstNeverHides           <span class="g">[run]  -&gt;  UNSAT (none)</span>     <span class="m"># 開いてから入れる経路は隠せない</span>
+VisiblePreservingReparentExists <span class="g">[run]  -&gt;  SATISFIABLE</span>          <span class="m"># サニティ</span></pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>手法と再現</h2>
+    <div class="block">
+      <p>形式化の対象は edane の<strong>ドメイン層</strong>（純粋なツリーモデルとエディタ reducer）。各ツールで、
+      ドキュメント／コメントが宣言する仕様とコードが計算する仕様を別々にモデル化し、両者が食い違う具体例を機械探索した。
+      Z3 と Alloy はこの環境で<strong>実行済み</strong>。TLA+ は <code>tla2tools.jar</code> の配布元へ到達できず TLC は
+      未実行だが、同じ不変条件を Z3 と実コード再現でクロスチェックしている。</p>
+    </div>
+    <div class="grid2" style="margin-top:16px;">
+      <div class="repro">
+        <h4>Z3 · Alloy（実行済み）</h4>
+        <p>宣言仕様 vs コード仕様の反例探索。</p>
+        <pre>python3 formal/round2/z3/view_faithfulness.py
+python3 formal/round2/z3/collapse_visibility.py
+cd formal/round2/alloy &amp;&amp; ./run.sh</pre>
+      </div>
+      <div class="repro">
+        <h4>実コードでの再現テスト（5/5 pass）</h4>
+        <p>反例を本物のドメイン／アプリ層に対して再現。修正が入ると失敗に転じる。</p>
+        <pre>npx vitest run --config \
+  formal/round2/repro/vitest.config.ts</pre>
+      </div>
+    </div>
+    <p class="caption" style="margin-top:18px;">
+      検査した性質: <span class="verdict sat">SAT=反例あり</span> ViewFaithful（所見A）・可視性保存（所見B） /
+      <span class="verdict unsat">UNSAT=健全</span> 開いてから入れる経路・reconcile修正案・可視な連結の存在（サニティ）。
+    </p>
+  </section>
+
+  <footer>
+    edane 形式仕様・モデル検査 第2ラウンド · 全文と実行手順は <code>formal/round2/README.md</code> ·
+    ドメイン説明は <code>formal/round2/FINDINGS.md</code> · 第1ラウンド（修正済み4件）は <code>formal/FINDINGS.md</code>。
+  </footer>
+</div>
