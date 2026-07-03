@@ -36,6 +36,8 @@ import {
   indentNode,
   dedentNode,
   splitNode,
+  mergeIntoPredecessor,
+  mergeSuccessorInto,
   updateNodeText,
   toggleCollapse,
   addChildToNode,
@@ -196,11 +198,26 @@ function documentReducer(
           focusId: newId,
         };
       }
+
+      if (action.pos <= 0) {
+        // At the start: insert an empty line *above* and keep the caret on this
+        // node (its id, text and children are untouched — splitting a line must
+        // never move a node's content onto a fresh id, see splitNode).
+        const result = splitNode(model, activeNodeId, 0);
+        return {
+          document: { ...document, model: result.model },
+          focusId: activeNodeId,
+          focusCursorPos: 0,
+          focusSelectionEnd: 0,
+        };
+      }
+
+      // Mid-text split: the prefix stays on this node (keeps its id + children),
+      // the suffix becomes a following sibling; the caret lands at its start.
       const result = splitNode(model, activeNodeId, action.pos);
       return {
         document: { ...document, model: result.model },
         focusId: result.newNodeId,
-        // Caret lands at the start of the split-off text, not its end.
         focusCursorPos: 0,
         focusSelectionEnd: 0,
       };
@@ -233,34 +250,18 @@ function documentReducer(
       const currentNode = findNode(model, activeNodeId);
       if (!currentNode) return { document };
 
-      const order = getFlatOrder(model);
-      const idx = order.indexOf(activeNodeId);
-
-      if (currentNode.text === "" && model.id !== activeNodeId) {
-        const newModel = removeNode(model, activeNodeId);
-        const landId = idx > 0 ? order[idx - 1] : newModel.id;
-        return { document: { ...document, model: newModel }, focusId: landId };
-      }
-
-      if (idx > 0 && model.id !== activeNodeId) {
-        const prevId = order[idx - 1];
-        const prevNode = findNode(model, prevId);
-        if (prevNode) {
-          const mergePos = prevNode.text.length;
-          const mergedText = prevNode.text + currentNode.text;
-          let newModel = updateNodeText(model, prevId, mergedText);
-          newModel = removeNode(newModel, activeNodeId);
-          return {
-            document: { ...document, model: newModel },
-            focusId: prevId,
-            // Caret lands at the merge boundary, not the end of the merged text.
-            focusCursorPos: mergePos,
-            focusSelectionEnd: mergePos,
-          };
-        }
-      }
-
-      return { document };
+      // Merge into the structural predecessor (previous sibling or parent), not
+      // the DFS-previous node, so the node's text and children never scatter
+      // into an unrelated subtree.
+      const merged = mergeIntoPredecessor(model, activeNodeId);
+      if (!merged) return { document };
+      return {
+        document: { ...document, model: merged.model },
+        focusId: merged.targetId,
+        // Caret lands at the merge boundary, not the end of the merged text.
+        focusCursorPos: merged.caretPos,
+        focusSelectionEnd: merged.caretPos,
+      };
     }
 
     case "deleteAtEnd": {
@@ -268,22 +269,14 @@ function documentReducer(
       const { model } = document;
       const currentNode = findNode(model, activeNodeId);
       if (!currentNode) return { document };
+      if (action.pos < currentNode.text.length) return { document };
 
-      const order = getFlatOrder(model);
-      const idx = order.indexOf(activeNodeId);
-
-      if (action.pos >= currentNode.text.length && idx < order.length - 1) {
-        const nextId = order[idx + 1];
-        const nextNode = findNode(model, nextId);
-        if (nextNode) {
-          const mergedText = currentNode.text + nextNode.text;
-          let newModel = updateNodeText(model, activeNodeId, mergedText);
-          newModel = removeNode(newModel, nextId);
-          return { document: { ...document, model: newModel } };
-        }
-      }
-
-      return { document };
+      // Pull the structural successor (first visible child or next sibling) up
+      // into this node — the mirror of backspaceAtStart. No successor within the
+      // node's own subtree/siblings → no-op (identity preserved).
+      const newModel = mergeSuccessorInto(model, activeNodeId);
+      if (newModel === model) return { document };
+      return { document: { ...document, model: newModel } };
     }
 
     case "typeText": {
@@ -782,7 +775,16 @@ export function editorReducer(
   state: EditorState,
   action: EditorAction
 ): EditorState {
-  if (action.type === "replace") return action.state;
+  if (action.type === "replace") {
+    // Undo/redo (and any wholesale document swap) route through `replace`.
+    // Reconcile the incoming view against its document here so the invariant
+    // "the active node always exists" is enforced by the reducer itself —
+    // never left as a rule each caller must remember to apply. Idempotent: a
+    // view that already points to a live node is returned unchanged.
+    const view = reconcileView(action.state.view, action.state.document);
+    if (view === action.state.view) return action.state;
+    return { document: action.state.document, view };
+  }
 
   const docResult = documentReducer(
     state.document,

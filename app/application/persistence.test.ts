@@ -226,6 +226,75 @@ describe("parseContent", () => {
     expect(model.text).toBe("Mindmap");
     expect(model.children[0].text).toBe("Child1");
   });
+
+  it("reassigns duplicated ids so the loaded model is a unique-id tree", () => {
+    // External JSON can carry duplicated ids; the whole domain layer addresses
+    // nodes by id (findNode/removeNode act on the first match), so load-time
+    // normalization must make every id unique.
+    const json = JSON.stringify({
+      id: "dup",
+      text: "Root",
+      children: [
+        { id: "dup", text: "A", children: [] },
+        { id: "dup", text: "B", children: [] },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    const collect = (m: MindMapModel): string[] => [
+      m.id,
+      ...m.children.flatMap(collect),
+    ];
+    const allIds = collect(model);
+    expect(new Set(allIds).size).toBe(allIds.length);
+    // Structure and text are preserved.
+    expect(model.text).toBe("Root");
+    expect(model.children.map((c) => c.text)).toEqual(["A", "B"]);
+  });
+
+  it("preserves known optional fields while normalizing", () => {
+    const json = JSON.stringify({
+      id: "r",
+      text: "Root",
+      children: [
+        {
+          id: "c",
+          text: "https://example.com",
+          type: "link",
+          bold: true,
+          fontSize: 20,
+          collapsed: true,
+          linkTitle: "Example",
+          favicon: "https://example.com/f.ico",
+          children: [],
+        },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    const c = model.children[0];
+    expect(c.type).toBe("link");
+    expect(c.bold).toBe(true);
+    expect(c.fontSize).toBe(20);
+    expect(c.collapsed).toBe(true);
+    expect(c.linkTitle).toBe("Example");
+    expect(c.favicon).toBe("https://example.com/f.ico");
+  });
+
+  it("drops malformed children instead of accepting a non-tree shape", () => {
+    // Only the root is shape-checked by the old guard; nested junk must be
+    // rejected too (children that aren't {text, children[]} nodes).
+    const json = JSON.stringify({
+      id: "r",
+      text: "Root",
+      children: [
+        { id: "ok", text: "OK", children: [] },
+        42,
+        null,
+        { id: "x", text: "missing children" },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    expect(model.children.map((c) => c.text)).toEqual(["OK"]);
+  });
 });
 
 describe("serializeModel", () => {

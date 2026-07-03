@@ -19,6 +19,8 @@ import {
   dedentNode,
   moveNodeUp,
   moveNodeDown,
+  mergeIntoPredecessor,
+  mergeSuccessorInto,
 } from "./model";
 
 /** Build a small fixed tree:
@@ -190,6 +192,111 @@ describe("splitNode at root", () => {
     expect(getFlatOrder(next)).toEqual(getFlatOrder(model));
     // Invariant: newNodeId must always exist in the returned model.
     expect(findNode(next, newNodeId)).not.toBeNull();
+  });
+
+  it("splitting at the start keeps the node's id/text/children and inserts an empty sibling before it", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "p", text: "Parent", children: [{ id: "c", text: "Child", children: [] }] },
+      ],
+    };
+    const { model: next, newNodeId } = splitNode(model, "p", 0);
+    // The original node is untouched (identity preserved).
+    const p = findNode(next, "p")!;
+    expect(p.text).toBe("Parent");
+    expect(p.children.map((n) => n.id)).toEqual(["c"]);
+    // The new node is the empty sibling inserted before it.
+    expect(next.children.map((n) => n.id)).toEqual([newNodeId, "p"]);
+    expect(findNode(next, newNodeId)!.text).toBe("");
+  });
+});
+
+describe("mergeIntoPredecessor", () => {
+  const tree = (): MindMapModel => ({
+    id: "root",
+    text: "Root",
+    children: [
+      { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
+      { id: "b", text: "B", children: [{ id: "b1", text: "B1", children: [] }] },
+    ],
+  });
+
+  it("merges a node into its previous sibling, appending children", () => {
+    const res = mergeIntoPredecessor(tree(), "b")!;
+    expect(res.targetId).toBe("a");
+    expect(res.caretPos).toBe(1); // length of "A" before the merge
+    const a = findNode(res.model, "a")!;
+    expect(a.text).toBe("AB");
+    expect(a.children.map((c) => c.id)).toEqual(["a1", "b1"]);
+    expect(findNode(res.model, "b")).toBeNull();
+  });
+
+  it("merges a first child into its parent, children taking the node's slot", () => {
+    const res = mergeIntoPredecessor(tree(), "a1")!;
+    expect(res.targetId).toBe("a");
+    const a = findNode(res.model, "a")!;
+    expect(a.text).toBe("AA1");
+    expect(findNode(res.model, "a1")).toBeNull();
+  });
+
+  it("returns null for the root (no predecessor)", () => {
+    expect(mergeIntoPredecessor(tree(), "root")).toBeNull();
+  });
+
+  it("returns null when the node is not found", () => {
+    expect(mergeIntoPredecessor(tree(), "missing")).toBeNull();
+  });
+});
+
+describe("mergeSuccessorInto", () => {
+  const tree = (): MindMapModel => ({
+    id: "root",
+    text: "Root",
+    children: [
+      { id: "x", text: "X", children: [] },
+      { id: "y", text: "Y", children: [{ id: "y1", text: "Y1", children: [] }] },
+    ],
+  });
+
+  it("merges the first visible child up into the node", () => {
+    const next = mergeSuccessorInto(tree(), "y");
+    const y = findNode(next, "y")!;
+    expect(y.text).toBe("YY1");
+    expect(findNode(next, "y1")).toBeNull();
+  });
+
+  it("merges the next sibling when the node has no visible child", () => {
+    const next = mergeSuccessorInto(tree(), "x");
+    const x = findNode(next, "x")!;
+    expect(x.text).toBe("XY");
+    expect(x.children.map((c) => c.id)).toEqual(["y1"]);
+    expect(findNode(next, "y")).toBeNull();
+  });
+
+  it("treats a collapsed node's children as hidden and merges the next sibling", () => {
+    const model = tree();
+    model.children[0] = {
+      id: "x",
+      text: "X",
+      collapsed: true,
+      children: [{ id: "xc", text: "XC", children: [] }],
+    };
+    const next = mergeSuccessorInto(model, "x");
+    const x = findNode(next, "x")!;
+    expect(x.text).toBe("XY"); // sibling Y merged, hidden child XC left in place
+    expect(findNode(next, "xc")).not.toBeNull();
+  });
+
+  it("returns the same reference when there is no successor to merge", () => {
+    const model = tree();
+    expect(mergeSuccessorInto(model, "y1")).toBe(model); // leaf, last in subtree
+  });
+
+  it("returns the same reference when the node is not found", () => {
+    const model = tree();
+    expect(mergeSuccessorInto(model, "missing")).toBe(model);
   });
 });
 

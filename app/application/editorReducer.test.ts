@@ -138,16 +138,46 @@ describe("backspaceAtStart", () => {
     expect(next.view.cursorPos).toBe(1);
   });
 
-  it("merges a non-empty node into the previous node", () => {
+  it("merges a non-empty node into its previous sibling (not the DFS-previous leaf)", () => {
     const model = sampleModel();
-    // focus "b" at start, merge into previous node in DFS order ("a1")
+    // "b"'s DFS-previous node is "a1" (a's child), but its structural
+    // predecessor is the previous sibling "a". The merge must target "a" and
+    // leave a1 in place, instead of splicing "B" into an unrelated subtree.
     const s = withView(stateAt(model, "b"), { cursorPos: 0, selectionEnd: 0 });
     const next = editorReducer(s, { type: "backspaceAtStart" });
     expect(findNode(next.document.model, "b")).toBeNull();
-    const a1 = findNode(next.document.model, "a1")!;
-    expect(a1.text).toBe("A1B");
-    expect(next.view.activeNodeId).toBe("a1");
-    expect(next.view.cursorPos).toBe(2);
+    const a = findNode(next.document.model, "a")!;
+    expect(a.text).toBe("AB");
+    expect(a.children.map((c) => c.id)).toEqual(["a1"]);
+    expect(findNode(next.document.model, "a1")!.text).toBe("A1");
+    expect(next.view.activeNodeId).toBe("a");
+    expect(next.view.cursorPos).toBe(1);
+  });
+
+  it("merges a first child into its parent, keeping the subtree together", () => {
+    // Root -> A -> [A1 -> A1a] ; backspace at start of A1 (first child) merges
+    // it into parent A and A1's children take A1's former slot.
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          children: [
+            { id: "a1", text: "A1", children: [{ id: "a1a", text: "A1a", children: [] }] },
+          ],
+        },
+      ],
+    };
+    const s = withView(stateAt(model, "a1"), { cursorPos: 0, selectionEnd: 0 });
+    const next = editorReducer(s, { type: "backspaceAtStart" });
+    const a = findNode(next.document.model, "a")!;
+    expect(a.text).toBe("AA1");
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(a.children.map((c) => c.id)).toEqual(["a1a"]);
+    expect(next.view.activeNodeId).toBe("a");
+    expect(next.view.cursorPos).toBe(1);
   });
 
   it("does nothing at the root node", () => {
@@ -161,15 +191,50 @@ describe("backspaceAtStart", () => {
 });
 
 describe("deleteAtEnd", () => {
-  it("merges the next node into the current node", () => {
+  it("merges the next sibling into the current node", () => {
+    // Root -> [x "X", y "Y" -> y1] ; Delete at end of x pulls y up into x,
+    // and y's children come along with its text.
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "x", text: "X", children: [] },
+        {
+          id: "y",
+          text: "Y",
+          children: [{ id: "y1", text: "Y1", children: [] }],
+        },
+      ],
+    };
+    const next = editorReducer(stateAt(model, "x"), {
+      type: "deleteAtEnd",
+      pos: 1,
+    });
+    expect(findNode(next.document.model, "y")).toBeNull();
+    const x = findNode(next.document.model, "x")!;
+    expect(x.text).toBe("XY");
+    expect(x.children.map((c) => c.id)).toEqual(["y1"]);
+    expect(next.view.cursorPos).toBe(1);
+  });
+
+  it("merges the first visible child up when the node has children", () => {
+    const model = sampleModel(); // a -> a1
+    const next = editorReducer(stateAt(model, "a"), {
+      type: "deleteAtEnd",
+      pos: 1,
+    });
+    const a = findNode(next.document.model, "a")!;
+    expect(a.text).toBe("AA1");
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(next.view.cursorPos).toBe(1);
+  });
+
+  it("is a no-op when the DFS-next node lives in an unrelated subtree", () => {
+    // a1 has no child and no next sibling; the DFS-next node "b" belongs to a
+    // different branch, so nothing merges (mirror of backspaceAtStart).
     const model = sampleModel();
-    const s = stateAt(model, "a1"); // cursor at end of "A1"
-    const next = editorReducer(s, { type: "deleteAtEnd", pos: 2 });
-    // next node in DFS order after a1 is "b"
-    expect(findNode(next.document.model, "b")).toBeNull();
-    const a1 = findNode(next.document.model, "a1")!;
-    expect(a1.text).toBe("A1B");
-    expect(next.view.cursorPos).toBe(2);
+    const s = stateAt(model, "a1");
+    expect(editorReducer(s, { type: "deleteAtEnd", pos: 2 })).toBe(s);
   });
 });
 
