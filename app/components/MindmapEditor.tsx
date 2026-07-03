@@ -741,8 +741,8 @@ export default function MindmapEditor({
 
     // Text formatting (font size / bold).
     if (type === "text") {
-      const SIZES = [12, 14, 18, 24, 32];
-      const current = node.fontSize ?? 14;
+      const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
+      const current = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bigger = SIZES.find((s) => s > current);
       const smaller = [...SIZES].reverse().find((s) => s < current);
       const applyStyle = (style: { fontSize?: number | null; bold?: boolean }) => {
@@ -762,7 +762,7 @@ export default function MindmapEditor({
           label: "文字を小さく",
           onSelect: () => applyStyle({ fontSize: smaller }),
         });
-      if (node.fontSize !== undefined && node.fontSize !== 14)
+      if (node.fontSize !== undefined && node.fontSize !== DEFAULT_FONT_SIZE)
         items.push({
           label: "標準サイズに戻す",
           onSelect: () => applyStyle({ fontSize: null }),
