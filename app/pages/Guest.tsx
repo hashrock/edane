@@ -1,22 +1,29 @@
-import { Head, Link } from "@inertiajs/react";
+import { Head } from "@inertiajs/react";
 import MindmapEditor from "../components/MindmapEditor";
+import { stashPendingNote, type PendingNote } from "../lib/guestNote";
+import type { SessionUser } from "../utils/session";
 
-export default function Guest() {
+export default function Guest({
+  user,
+  embed,
+}: {
+  user: SessionUser | null;
+  embed?: boolean;
+}) {
+  // Stash the current document, then break out of the iframe (window.top ===
+  // self when not embedded) and send the visitor to login. After Google auth
+  // they land on /notes, which imports the stashed note into a real one. When
+  // already signed in, skip straight to /notes.
+  const saveToAccount = (note: PendingNote) => {
+    stashPendingNote(note);
+    const dest = user ? "/notes" : "/auth/google";
+    (window.top ?? window).location.href = dest;
+  };
+
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col bg-slate-50 text-slate-950">
       <Head title="ゲストエディタ" />
-      <header className="flex items-center gap-2 md:gap-4 px-3 md:px-4 py-2 border-b bg-white flex-wrap">
-        <Link href="/notes" className="text-blue-600 hover:underline text-sm">
-          &larr; 一覧
-        </Link>
-        <h1 className="font-semibold text-sm md:text-base">ゲストエディタ</h1>
-        <span className="text-xs text-gray-400">
-          保存はされません（ローカルのみ）
-        </span>
-      </header>
-      <div className="flex-1 overflow-hidden">
-        <MindmapEditor />
-      </div>
+      <MindmapEditor embed={embed} onSaveToAccount={saveToAccount} />
     </div>
   );
 }
