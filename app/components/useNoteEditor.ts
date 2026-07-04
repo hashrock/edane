@@ -133,7 +133,23 @@ export function useNoteEditor({
 
   // --- Save ---
   const updateSaveStatus = useCallback((status: string) => {
-    if (saveStatusRef.current) saveStatusRef.current.textContent = status;
+    const el = saveStatusRef.current;
+    if (!el) return;
+    el.textContent = status;
+    el.style.transition = "opacity 300ms ease";
+    if (status === "") {
+      // Hidden state (e.g. unsaved): drop out immediately, no fade.
+      el.style.opacity = "0";
+    } else if (status === "保存済み") {
+      // Fade the "saved" confirmation in so it appears gently.
+      el.style.opacity = "0";
+      requestAnimationFrame(() => {
+        if (saveStatusRef.current === el) el.style.opacity = "1";
+      });
+    } else {
+      // Transient states (保存中... / 保存失敗 / etc.) show instantly.
+      el.style.opacity = "1";
+    }
   }, []);
 
   const saveNote = useCallback(
@@ -186,9 +202,10 @@ export function useNoteEditor({
   // Debounced auto-save (with retry-on-failure).
   useEffect(() => {
     if (!noteId) return;
-    // Reflect the pending edit immediately so the header shows the note isn't
-    // persisted yet (the save itself flips this to 保存中... → 保存済み).
-    if (isDirty()) updateSaveStatus("未保存");
+    // Don't surface the "unsaved" state as visible text — it's visual noise.
+    // Clear the status so the header stays quiet until the save itself flips
+    // this to 保存中... → 保存済み.
+    if (isDirty()) updateSaveStatus("");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     let cancelled = false;
     // A failed autosave used to sit unsaved until the next edit or navigation.
