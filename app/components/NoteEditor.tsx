@@ -24,18 +24,16 @@ type Layout = "canvas" | "outline";
  * breakpoint. Both views share a single {@link useNoteEditor} engine, so the
  * document, caret, selection and undo history survive the switch untouched.
  *
- * A header button lets the user override the automatic choice (e.g. force the
- * mind map on a tablet, or the outline on a wide screen).
+ * The layout follows the viewport width only — there is no manual toggle.
  */
 export default function NoteEditor(props: Props) {
   const engine = useNoteEditor(props);
 
-  // Auto choice follows the viewport; an explicit user override wins until the
-  // user toggles again. Default to the mind map for SSR / first paint (there is
-  // no viewport on the server) so hydration matches, then correct on mount.
+  // The layout tracks the viewport. Default to the mind map for SSR / first
+  // paint (there is no viewport on the server) so hydration matches, then
+  // correct on mount.
   const [mounted, setMounted] = useState(false);
   const [narrow, setNarrow] = useState(false);
-  const [override, setOverride] = useState<Layout | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -46,10 +44,7 @@ export default function NoteEditor(props: Props) {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  const auto: Layout = narrow ? "outline" : "canvas";
-  const layout: Layout = !mounted ? "canvas" : (override ?? auto);
-  const switchLayout = () =>
-    setOverride(layout === "canvas" ? "outline" : "canvas");
+  const layout: Layout = mounted && narrow ? "outline" : "canvas";
 
   if (layout === "outline") {
     return (
@@ -57,7 +52,6 @@ export default function NoteEditor(props: Props) {
         engine={engine}
         embed={props.embed}
         onSaveToAccount={props.onSaveToAccount}
-        onSwitchLayout={switchLayout}
       />
     );
   }
@@ -66,7 +60,6 @@ export default function NoteEditor(props: Props) {
       engine={engine}
       embed={props.embed}
       onSaveToAccount={props.onSaveToAccount}
-      onSwitchLayout={switchLayout}
     />
   );
 }

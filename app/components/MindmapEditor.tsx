@@ -244,8 +244,6 @@ interface ViewProps {
   /** Embedded (iframe) mode: hide the navigation header. */
   embed?: boolean;
   onSaveToAccount?: (note: { title: string; content: string }) => void;
-  /** Switch to the outline layout (rendered as a header button when present). */
-  onSwitchLayout?: () => void;
 }
 
 /**
@@ -257,7 +255,6 @@ export function MindmapEditorView({
   engine,
   embed,
   onSaveToAccount,
-  onSwitchLayout,
 }: ViewProps) {
   const {
     state,
@@ -1753,15 +1750,6 @@ export function MindmapEditorView({
             >
               {isPublic ? "公開" : "非公開"}
             </span>
-          )}
-          {onSwitchLayout && (
-            <button
-              onClick={onSwitchLayout}
-              className="whitespace-nowrap rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              title="アウトライン表示に切り替え"
-            >
-              アウトライン
-            </button>
           )}
         </div>
         {noteId && (

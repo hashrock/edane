@@ -60,14 +60,33 @@ async function activeTextarea(): Promise<HTMLTextAreaElement> {
 }
 
 describe("OutlineEditor (browser e2e)", () => {
-  it("renders each descendant as an indented row (root excluded)", async () => {
+  it("renders the root first, then each descendant as an indented row", async () => {
     render(<Harness />);
     await waitFor(() => document.body.textContent?.includes("Alpha"));
     expect(document.body.textContent).toContain("Alpha");
     expect(document.body.textContent).toContain("Bravo");
-    // Root text is the header title, not an outline row.
+    // The root is the first outline row (and also mirrored in the header title).
     const rows = document.querySelectorAll("ul > li");
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(3);
+    expect(rows[0].textContent).toContain("Root");
+  });
+
+  it("↑ from the first child lands on the root instead of stalling", async () => {
+    render(<Harness />);
+    const alpha = await waitFor(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
+        li.textContent?.includes("Alpha")
+      )
+    );
+    await userEvent.click(alpha.querySelector(".cursor-text")!);
+    await waitFor(() => engine().state.view.activeNodeId === "a");
+
+    const ta = await activeTextarea();
+    await userEvent.click(ta);
+    await userEvent.keyboard("{Home}{ArrowUp}");
+    // The caret crosses into the root rather than hitting a wall.
+    await waitFor(() => engine().state.view.activeNodeId === "root");
+    expect(engine().state.view.editing).toBe(true);
   });
 
   it("tapping a row activates it and typing edits the node", async () => {

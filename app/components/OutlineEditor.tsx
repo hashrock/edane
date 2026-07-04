@@ -26,8 +26,6 @@ interface Props {
   embed?: boolean;
   /** Guest mode: hand the current document off to be saved to an account. */
   onSaveToAccount?: (note: { title: string; content: string }) => void;
-  /** Switch to the mind-map layout (rendered as a header button when present). */
-  onSwitchLayout?: () => void;
 }
 
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
@@ -49,7 +47,6 @@ export default function OutlineEditor({
   engine,
   embed,
   onSaveToAccount,
-  onSwitchLayout,
 }: Props) {
   const {
     state,
@@ -75,8 +72,9 @@ export default function OutlineEditor({
 
   const rows = useMemo(() => outlineRows(model), [model]);
   const title = model.text;
-  // The root is the note title (edited in the header), never an outline row.
-  const bodyActive = editing && !!activeNodeId && activeNodeId !== model.id;
+  // The root is mirrored in the header title, but it is also a real outline row
+  // (the first one) so the caret can rest on and edit it — see outlineRows().
+  const bodyActive = editing && !!activeNodeId;
   const activeNode_ = activeNodeId ? findNode(model, activeNodeId) : null;
 
   // --- Refs ---
@@ -327,15 +325,6 @@ export default function OutlineEditor({
             className="shrink-0 whitespace-nowrap text-xs text-slate-500"
           />
         )}
-        {onSwitchLayout && (
-          <button
-            onClick={onSwitchLayout}
-            className="shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            title="マインドマップ表示に切り替え"
-          >
-            マップ
-          </button>
-        )}
         {!noteId && onSaveToAccount && (
           <button
             onClick={() =>
@@ -370,19 +359,11 @@ export default function OutlineEditor({
 
       {/* Outline body */}
       <div ref={scrollRef} className="relative flex-1 overflow-y-auto px-2 py-3">
-        {rows.length === 0 ? (
-          <button
-            onClick={() => withSave("add-child", { type: "addChild", nodeId: model.id })}
-            className="mx-auto mt-8 block rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50"
-          >
-            ＋ 最初の項目を追加
-          </button>
-        ) : (
-          <ul>
+        <ul>
             {rows.map((row) => {
               const { node, depth, hasChildren, collapsed } = row;
               const isActive = node.id === activeNodeId;
-              const isEditingThis = isActive && editing && node.id !== model.id;
+              const isEditingThis = isActive && editing;
               const type = node.type ?? "text";
               const isEmpty = node.text === "";
               const displayText = isEditingThis ? editingText : node.text;
@@ -393,7 +374,7 @@ export default function OutlineEditor({
                     className={`flex items-start gap-1.5 rounded-lg py-1 pr-1 ${
                       isActive ? "bg-emerald-50" : ""
                     }`}
-                    style={{ paddingLeft: (depth - 1) * INDENT }}
+                    style={{ paddingLeft: depth * INDENT }}
                   >
                     {/* Bullet / disclosure */}
                     <button
@@ -481,6 +462,13 @@ export default function OutlineEditor({
               );
             })}
           </ul>
+        {model.children.length === 0 && (
+          <button
+            onClick={() => withSave("add-child", { type: "addChild", nodeId: model.id })}
+            className="mx-auto mt-4 block rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50"
+          >
+            ＋ 最初の項目を追加
+          </button>
         )}
 
         {/* Single overlaid editor for the active row (keeps the keyboard open). */}

@@ -18,22 +18,22 @@ export interface OutlineRow {
 }
 
 /**
- * Visible outline rows in DFS order, EXCLUDING the root (the root is the note
- * title, shown in the header). Descendants of a collapsed node are omitted; the
- * collapsed node itself stays and still reports `hasChildren` so the disclosure
- * control renders.
+ * Visible outline rows in DFS order, INCLUDING the root as the first row (depth
+ * 0). The root is still mirrored in the header title, but giving it a real row
+ * means caret navigation matches {@link getFlatOrder} (which also starts at the
+ * root): pressing ↑ from the first child lands on the root instead of hitting a
+ * wall. Descendants of a collapsed node are omitted; the collapsed node itself
+ * stays and still reports `hasChildren` so the disclosure control renders.
  */
 export function outlineRows(model: MindMapModel): OutlineRow[] {
   const rows: OutlineRow[] = [];
   function walk(node: MindMapModel, depth: number) {
-    if (depth > 0) {
-      rows.push({
-        node,
-        depth,
-        hasChildren: node.children.length > 0,
-        collapsed: !!node.collapsed,
-      });
-    }
+    rows.push({
+      node,
+      depth,
+      hasChildren: node.children.length > 0,
+      collapsed: !!node.collapsed,
+    });
     if (node.collapsed) return;
     for (const c of node.children) walk(c, depth + 1);
   }
