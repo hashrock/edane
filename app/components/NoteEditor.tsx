@@ -24,7 +24,8 @@ type Layout = "canvas" | "outline";
  * breakpoint. Both views share a single {@link useNoteEditor} engine, so the
  * document, caret, selection and undo history survive the switch untouched.
  *
- * The layout follows the viewport width only — there is no manual toggle.
+ * The layout follows the viewport width, but a hidden shortcut
+ * (⌘/Ctrl+Shift+O) can force the outline on any width for those who prefer it.
  */
 export default function NoteEditor(props: Props) {
   const engine = useNoteEditor(props);
@@ -34,6 +35,8 @@ export default function NoteEditor(props: Props) {
   // correct on mount.
   const [mounted, setMounted] = useState(false);
   const [narrow, setNarrow] = useState(false);
+  // Manual override set by the hidden shortcut. null = follow the viewport.
+  const [override, setOverride] = useState<Layout | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -44,7 +47,21 @@ export default function NoteEditor(props: Props) {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  const layout: Layout = mounted && narrow ? "outline" : "canvas";
+  // Hidden power-user shortcut: ⌘/Ctrl+Shift+O forces the outline layout even on
+  // wide viewports; pressing it again releases the override back to the
+  // viewport-driven default.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        setOverride((prev) => (prev === "outline" ? null : "outline"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const layout: Layout = override ?? (mounted && narrow ? "outline" : "canvas");
 
   if (layout === "outline") {
     return (
