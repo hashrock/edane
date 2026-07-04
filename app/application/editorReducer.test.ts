@@ -683,6 +683,52 @@ describe("startEditing / exitEditing", () => {
     const s = withView(stateAt(model, "a"), { editing: false });
     expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
   });
+
+  it("exitEditing deletes a blank leaf node and focuses its predecessor", () => {
+    // Root -> [A -> [A1(blank)], B]. Flat order: root, a, a1, b.
+    const model = sampleModel();
+    findNode(model, "a1")!.text = "";
+    const s = stateAt(model, "a1"); // editing=true, text ""
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    expect(next.view.editing).toBe(false);
+    expect(next.view.activeNodeId).toBe("a"); // predecessor in flat order
+  });
+
+  it("exitEditing treats a whitespace-only node as blank", () => {
+    const model = sampleModel();
+    findNode(model, "b")!.text = "   ";
+    const s = stateAt(model, "b");
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(findNode(next.document.model, "b")).toBeNull();
+    expect(next.view.activeNodeId).toBe("a1"); // predecessor of b
+  });
+
+  it("exitEditing keeps a blank node that still has children", () => {
+    const model = sampleModel();
+    findNode(model, "a")!.text = ""; // A is blank but has child A1
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(findNode(next.document.model, "a")).not.toBeNull();
+    expect(next.view.editing).toBe(false);
+  });
+
+  it("exitEditing never deletes the root even when blank", () => {
+    const model = sampleModel();
+    model.text = "";
+    // Root has children, but assert the root-id guard holds regardless.
+    const s = stateAt(model, "root");
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(next.document.model.id).toBe("root");
+    expect(next.document).toBe(s.document); // untouched
+  });
+
+  it("exitEditing does not delete a non-empty node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a1"); // "A1"
+    const next = editorReducer(s, { type: "exitEditing" });
+    expect(findNode(next.document.model, "a1")).not.toBeNull();
+  });
 });
 
 describe("selectAllInNode", () => {

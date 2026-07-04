@@ -500,10 +500,35 @@ function documentReducer(
     case "setSelection":
     case "activateNode":
     case "startEditing":
-    case "exitEditing":
     case "selectAllInNode":
     case "dragSelect":
       return { document };
+
+    case "exitEditing": {
+      // Leaving edit mode on a blank leaf node deletes it — an accidentally
+      // created empty node (Enter then Escape) shouldn't linger. Never delete
+      // the root, and never a node that still has children (its subtree would
+      // vanish with it); those just exit to selection with no model change.
+      if (!activeNodeId) return { document };
+      const node = findNode(document.model, activeNodeId);
+      if (
+        !node ||
+        node.id === document.model.id ||
+        node.text.trim() !== "" ||
+        node.children.length > 0
+      ) {
+        return { document };
+      }
+      const order = getFlatOrder(document.model);
+      const idx = order.indexOf(activeNodeId);
+      const { model: newModel } = detachBranch(document.model, activeNodeId);
+      // Land on the predecessor (nearest surviving node), else the root —
+      // mirrors deleteNode's refocus preference.
+      const prevId = idx > 0 ? order[idx - 1] : null;
+      const landId =
+        prevId && findNode(newModel, prevId) ? prevId : newModel.id;
+      return { document: { ...document, model: newModel }, focusId: landId };
+    }
 
     case "replace":
       return { document: action.state.document };
@@ -724,6 +749,11 @@ function viewReducer(
 
     case "exitEditing": {
       if (!view.activeNodeId || !view.editing) return view;
+      // A blank leaf node was deleted on exit: focus the landing node in
+      // selection mode instead of the now-gone node.
+      if (focusId !== undefined) {
+        return { ...focusView(view, model, focusId), editing: false };
+      }
       const node = findNode(model, view.activeNodeId);
       const len = node?.text.length ?? 0;
       return {
