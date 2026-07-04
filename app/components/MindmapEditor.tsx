@@ -284,6 +284,10 @@ export default function MindmapEditor({
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [konvaReady, setKonvaReady] = useState(false);
+  // Bumped whenever the stage is panned or zoomed so the (viewport-culled)
+  // redraw effect re-runs and refills the newly-visible area. See the redraw
+  // effect below — only nodes intersecting the visible viewport are built.
+  const [viewportTick, setViewportTick] = useState(0);
   // Transient highlight of just-inserted nodes (paste / child add) so the
   // insertion position is obvious. Cleared after a short delay.
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
@@ -1063,6 +1067,10 @@ export default function MindmapEditor({
       updateGridRef.current = updateGrid;
       updateGrid();
       stage.on("dragmove", updateGrid);
+      // After a pan settles, refill the viewport: nodes just scrolled into view
+      // (beyond the pre-rendered margin) need to be built. During the drag the
+      // margin covers the movement, so we only redraw on release.
+      stage.on("dragend", () => setViewportTick((t) => t + 1));
 
       // Zoom
       stage.on("wheel", (e: any) => {
@@ -1083,8 +1091,13 @@ export default function MindmapEditor({
           x: pointer.x - mousePointTo.x * limitedScale,
           y: pointer.y - mousePointTo.y * limitedScale,
         });
-        layer.draw();
+        // Immediate feedback at the new transform; the effect below then
+        // refills any nodes the zoom brought into view.
+        layer.batchDraw();
         updateGrid();
+        // Zoom changes which nodes fall inside the viewport (zooming out reveals
+        // more) — re-run the culled redraw instead of just translating.
+        setViewportTick((t) => t + 1);
       });
 
       // Click on empty space: keep the node selected, just leave edit mode
@@ -1270,12 +1283,57 @@ export default function MindmapEditor({
     const nodeMap: Record<string, MindMapNode> = {};
     nodes.forEach((n) => (nodeMap[n.id] = n));
 
-    // Pre-calculate per-node line data + widths (cached, see top of file).
+    // --- Viewport culling ---
+    // Only nodes/connections intersecting the visible viewport (expanded by a
+    // margin so short pans stay smooth) are built and rasterised. At large tree
+    // sizes most nodes are off-screen, so this is the dominant per-keystroke
+    // win: both the JS object build and the Konva raster scale with the number
+    // of *drawn* nodes, not the total. A stage pan/zoom bumps `viewportTick`
+    // (see the setup effect) to refill the area.
+    const stage = konvaStageRef.current;
+    const scale = stage ? stage.scaleX() : 1;
+    const invScale = 1 / scale;
+    const viewW = (stage ? stage.width() : 800) * invScale;
+    const viewH = (stage ? stage.height() : 600) * invScale;
+    const originX = stage ? -stage.x() * invScale : 0;
+    const originY = stage ? -stage.y() * invScale : 0;
+    const MARGIN = 0.6; // extra viewport fraction rendered on each side
+    const cullLeft = originX - viewW * MARGIN;
+    const cullTop = originY - viewH * MARGIN;
+    const cullRight = originX + viewW * (1 + MARGIN);
+    const cullBottom = originY + viewH * (1 + MARGIN);
+
+    /** A node's (generous) world bounding box intersects the cull rect. */
+    const nodeVisible = (node: MindMapNode, isRoot: boolean): boolean => {
+      // The active node is always drawn (auto-scroll keeps it on-screen, and
+      // the cursor/input effects read its line data).
+      if (node.id === activeNodeId) return true;
+      const left = node.x - 8;
+      const right = node.x + nodeBoxWidth(node.width, isRoot) + 48;
+      const top = node.y - node.height / 2 - 8;
+      const bottom = node.y + node.height / 2 + 8;
+      return (
+        right >= cullLeft &&
+        left <= cullRight &&
+        bottom >= cullTop &&
+        top <= cullBottom
+      );
+    };
+
+    const visible = new Array<boolean>(nodes.length);
+    nodes.forEach((node, index) => {
+      visible[index] = nodeVisible(node, index === 0);
+    });
+
+    // Pre-calculate per-node line data + widths (cached, see top of file), but
+    // only for the nodes we're actually drawing. lineDataRef must still hold the
+    // active node so the cursor/input/drag effects can resolve caret geometry.
     const textWidths = new Map<string, number>();
     const lineDataMap = new Map<string, LineData>();
     const nodePadding = NODE_PADDING;
 
-    nodes.forEach((node) => {
+    nodes.forEach((node, index) => {
+      if (!visible[index]) return;
       // For active node during editing, use editingText
       const displayRaw = activeNodeId === node.id ? editingText : node.text;
       const data = buildLineData(
@@ -1291,16 +1349,28 @@ export default function MindmapEditor({
     });
     lineDataRef.current = lineDataMap;
 
-    // Draw connections
+    // Draw connections whose parent→child segment crosses the cull rect. A long
+    // edge can cross the viewport while both endpoints sit outside it, so we
+    // test the segment's bounding box rather than either node's visibility.
     nodes.forEach((node) => {
       node.children.forEach((childId) => {
         const child = nodeMap[childId];
         if (!child) return;
-        const parentWidth = textWidths.get(node.id) || 100;
+        // Exact width for drawn parents; node.width otherwise (invisible sub-
+        // pixel difference on an off-screen curve start).
+        const parentWidth = textWidths.get(node.id) ?? node.width;
         const startX = node.x + parentWidth + 40;
         const startY = node.y;
         const endX = child.x;
         const endY = child.y;
+        if (
+          Math.max(startX, endX) < cullLeft ||
+          Math.min(startX, endX) > cullRight ||
+          Math.max(startY, endY) < cullTop ||
+          Math.min(startY, endY) > cullBottom
+        ) {
+          return;
+        }
         const controlOffset = Math.abs(endX - startX) * 0.5;
         const path = new Konva.Path({
           data: `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`,
@@ -1314,6 +1384,7 @@ export default function MindmapEditor({
 
     // Draw nodes
     nodes.forEach((node, index) => {
+      if (!visible[index]) return;
       const isRoot = index === 0;
       // isEditing = caret/text-input active; isSelected = node highlighted but
       // not being edited (single click). A selected node renders like any other
@@ -1594,7 +1665,7 @@ export default function MindmapEditor({
       perfRef.current.redrawLastMs = now - perfStart;
       perfRef.current.redrawDrawMs += now - drawStart;
     }
-  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch]);
+  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, viewportTick]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
