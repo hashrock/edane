@@ -390,6 +390,7 @@ export function MindmapEditorView({
   const konvaStageRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
   const cursorLayerRef = useRef<any>(null);
+  const flashLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
@@ -1066,6 +1067,13 @@ export function MindmapEditorView({
       const cursorLayer = new Konva.Layer();
       stage.add(cursorLayer);
       cursorLayerRef.current = cursorLayer;
+
+      // Paste / insert flash layer. Kept separate from the cursor layer so its
+      // soft fade animation isn't torn down and restarted by the caret blink,
+      // which destroyChildren()'s the cursor layer twice a second.
+      const flashLayer = new Konva.Layer({ listening: false });
+      stage.add(flashLayer);
+      flashLayerRef.current = flashLayer;
 
       // Drag & drop preview layer. Drawn imperatively on every mousemove of a
       // move drag — going through React state would re-render per move. It sits
@@ -1994,31 +2002,6 @@ export function MindmapEditorView({
 
     const nodePadding = NODE_PADDING;
 
-    // Transient insertion highlight: dashed amber outline around just-inserted
-    // nodes (paste / add-child) so the destination is obvious.
-    if (highlightIds.size > 0) {
-      for (const id of highlightIds) {
-        const node = nodes.find((n) => n.id === id);
-        if (!node) continue;
-        const isRoot = nodes.indexOf(node) === 0;
-        const rectWidth = nodeBoxWidth(node.width, isRoot);
-        const rectHeight = node.height;
-        cursorLayer.add(
-          new Konva.Rect({
-            x: node.x - 4,
-            y: node.y - rectHeight / 2 - 4,
-            width: rectWidth + 8,
-            height: rectHeight + 8,
-            cornerRadius: 14,
-            stroke: "#f59e0b",
-            strokeWidth: 2.5,
-            dash: [6, 4],
-            listening: false,
-          })
-        );
-      }
-    }
-
     // Caret + in-node text selection — only while TEXT-editing. A merely
     // selected node gets its accent outline on the main layer, and an edited
     // image/link node keeps its caret in the visible URL box instead.
@@ -2094,7 +2077,101 @@ export function MindmapEditorView({
     }
 
     cursorLayer.draw();
-  }, [activeNodeId, editing, cursorPos, selectionEnd, cursorVisible, nodes, highlightIds]);
+  }, [activeNodeId, editing, cursorPos, selectionEnd, cursorVisible, nodes]);
+
+  // --- Paste / insert flash ---
+  // A soft amber glow that blooms in and gently dissolves around just-inserted
+  // nodes, so the destination reads at a glance without the harsh dashed
+  // outline. Runs on its own layer with Konva tweens (see stage setup) so the
+  // caret blink can't restart it mid-fade.
+  useEffect(() => {
+    const Konva = konvaRef.current;
+    const flashLayer = flashLayerRef.current;
+    if (!Konva || !flashLayer) return;
+
+    flashLayer.destroyChildren();
+    if (highlightIds.size === 0) {
+      flashLayer.batchDraw();
+      return;
+    }
+
+    const group = new Konva.Group({ opacity: 0, listening: false });
+    const bloomTweens: any[] = [];
+
+    for (const id of highlightIds) {
+      const node = nodes.find((n) => n.id === id);
+      if (!node) continue;
+      const isRoot = nodes.indexOf(node) === 0;
+      const rectWidth = nodeBoxWidth(node.width, isRoot);
+      const rectHeight = node.height;
+      const w = rectWidth + 12;
+      const h = rectHeight + 12;
+      // Position by centre so the bloom scales symmetrically about the node.
+      const cx = node.x - 6 + w / 2;
+      const cy = node.y - rectHeight / 2 - 6 + h / 2;
+      const rect = new Konva.Rect({
+        x: cx,
+        y: cy,
+        width: w,
+        height: h,
+        offsetX: w / 2,
+        offsetY: h / 2,
+        cornerRadius: 18,
+        fill: "#f59e0b",
+        opacity: 0.1,
+        shadowColor: "#f59e0b",
+        shadowBlur: 24,
+        shadowOpacity: 0.5,
+        scaleX: 0.92,
+        scaleY: 0.92,
+        listening: false,
+      });
+      group.add(rect);
+      const bloom = new Konva.Tween({
+        node: rect,
+        duration: 0.34,
+        scaleX: 1,
+        scaleY: 1,
+        easing: Konva.Easings.EaseOut,
+      });
+      bloomTweens.push(bloom);
+    }
+
+    flashLayer.add(group);
+
+    let holdTimer: ReturnType<typeof setTimeout> | null = null;
+    let fadeOut: any = null;
+    const fadeIn = new Konva.Tween({
+      node: group,
+      duration: 0.24,
+      opacity: 1,
+      easing: Konva.Easings.EaseOut,
+      onFinish: () => {
+        // Linger briefly at full strength, then dissolve.
+        holdTimer = setTimeout(() => {
+          fadeOut = new Konva.Tween({
+            node: group,
+            duration: 0.66,
+            opacity: 0,
+            easing: Konva.Easings.EaseInOut,
+          });
+          fadeOut.play();
+        }, 480);
+      },
+    });
+
+    fadeIn.play();
+    bloomTweens.forEach((t) => t.play());
+
+    return () => {
+      if (holdTimer) clearTimeout(holdTimer);
+      fadeIn.destroy();
+      fadeOut?.destroy();
+      bloomTweens.forEach((t) => t.destroy());
+      group.destroy();
+      flashLayer.batchDraw();
+    };
+  }, [highlightIds, nodes]);
 
   // --- Test API (non-production): imperative hooks for browser e2e tests ---
   // Exposes the live model plus a "node select" helper that returns the screen
