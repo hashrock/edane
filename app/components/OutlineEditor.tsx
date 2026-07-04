@@ -76,8 +76,14 @@ export default function OutlineEditor({
   const title = model.text;
   // The root is mirrored in the header title, but it is also a real outline row
   // (the first one) so the caret can rest on and edit it — see outlineRows().
-  const bodyActive = editing && !!activeNodeId;
   const activeNode_ = activeNodeId ? findNode(model, activeNodeId) : null;
+  // Custom nodes (image / link) keep their rendered preview while editing and
+  // expose the URL in an inline box below it, instead of swapping the whole row
+  // for a raw-text field. Those use a dedicated inline editor, so the floating
+  // caret overlay (which is for plain text rows) is suppressed for them.
+  const activeType = activeNode_?.type ?? "text";
+  const activeIsCustom = activeType === "image" || activeType === "link";
+  const bodyActive = editing && !!activeNodeId && !activeIsCustom;
 
   // --- Refs ---
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -122,6 +128,24 @@ export default function OutlineEditor({
       });
     },
     [dispatch, stateRef, undoManagerRef]
+  );
+
+  // Inline URL editor (image / link nodes): edits the node's `text` (its URL)
+  // while the preview above stays rendered. Persists on change so the preview
+  // and any saved copy stay in sync.
+  const handleUrlChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      undoManagerRef.current.handleTextChange(stateRef.current.document);
+      const next = dispatch({
+        type: "typeText",
+        text: e.target.value,
+        cursorPos: e.target.selectionStart ?? e.target.value.length,
+        selectionEnd: e.target.selectionEnd ?? e.target.value.length,
+        commitModel: true,
+      });
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, noteId, saveNote, stateRef, undoManagerRef]
   );
 
   const handleCompositionEnd = useCallback(() => {
@@ -372,6 +396,10 @@ export default function OutlineEditor({
               const isActive = node.id === activeNodeId;
               const isEditingThis = isActive && editing;
               const type = node.type ?? "text";
+              const isCustom = type === "image" || type === "link";
+              // Image/link nodes keep their preview while editing and expose the
+              // URL in an inline box below (instead of raw-text editing).
+              const showUrlEditor = isEditingThis && isCustom;
               const isEmpty = node.text === "";
               const displayText = isEditingThis ? editingText : node.text;
 
@@ -421,16 +449,24 @@ export default function OutlineEditor({
                       onClick={() => activateRow(node.id)}
                       className="min-w-0 flex-1 cursor-text py-0.5"
                     >
-                      {type === "image" && !isEditingThis ? (
-                        <img
-                          src={node.text}
-                          alt=""
-                          className="max-h-48 max-w-full rounded-lg"
-                        />
+                      {type === "image" ? (
+                        node.text ? (
+                          <img
+                            src={node.text}
+                            alt=""
+                            className="max-h-48 max-w-full rounded-lg"
+                          />
+                        ) : (
+                          <span className="block italic leading-6 text-slate-400">
+                            画像URL未設定
+                          </span>
+                        )
                       ) : (
                         <span
                           className={`block whitespace-pre-wrap break-words leading-6 ${
-                            isEditingThis ? "opacity-0" : ""
+                            // Text nodes hide their static text under the caret
+                            // overlay while editing; custom nodes keep the preview.
+                            isEditingThis && !isCustom ? "opacity-0" : ""
                           } ${
                             type === "link"
                               ? "text-blue-600 underline"
@@ -451,6 +487,28 @@ export default function OutlineEditor({
                         <span className="ml-1 align-middle text-[10px] text-slate-400">
                           ({node.children.length})
                         </span>
+                      )}
+
+                      {/* Inline URL editor for image / link nodes. */}
+                      {showUrlEditor && (
+                        <input
+                          type="text"
+                          autoFocus
+                          inputMode="url"
+                          value={editingText}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={handleUrlChange}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "Escape") {
+                              e.preventDefault();
+                              dispatch({ type: "exitEditing" });
+                            }
+                          }}
+                          placeholder={
+                            type === "image" ? "画像のURL" : "リンクのURL"
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        />
                       )}
                     </div>
 

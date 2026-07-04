@@ -24,6 +24,30 @@ function Harness() {
   return <OutlineEditor engine={engine} />;
 }
 
+// A model containing a link node and an image node, for the custom-node editor.
+const CUSTOM_MODEL: MindMapModel = {
+  id: "root",
+  text: "Root",
+  children: [
+    { id: "lnk", text: "https://example.com", type: "link", children: [] },
+    {
+      id: "img",
+      text: "https://example.com/pic.png",
+      type: "image",
+      children: [],
+    },
+  ],
+};
+
+function CustomHarness() {
+  const engine = useNoteEditor({
+    initialContent: JSON.stringify(CUSTOM_MODEL),
+    initialTitle: "Root",
+  });
+  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
+  return <OutlineEditor engine={engine} />;
+}
+
 function engine(): NoteEditorEngine {
   const e = (window as unknown as { __engine?: NoteEditorEngine }).__engine;
   if (!e) throw new Error("engine not exposed yet");
@@ -58,6 +82,58 @@ async function activeTextarea(): Promise<HTMLTextAreaElement> {
     document.querySelector<HTMLTextAreaElement>("textarea")
   );
 }
+
+describe("OutlineEditor custom nodes (browser e2e)", () => {
+  it("editing a link node keeps the preview and shows a URL box below", async () => {
+    render(<CustomHarness />);
+    const linkRow = await waitFor(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
+        li.textContent?.includes("example.com")
+      )
+    );
+    await userEvent.click(linkRow.querySelector(".cursor-text")!);
+    await waitFor(() => engine().state.view.activeNodeId === "lnk");
+
+    // A URL editor input appears...
+    const input = await waitFor(() =>
+      linkRow.querySelector<HTMLInputElement>('input[placeholder="リンクのURL"]')
+    );
+    // ...while the link preview span stays visible (not opacity-0).
+    const preview = linkRow.querySelector<HTMLElement>("span.text-blue-600");
+    expect(preview).not.toBeNull();
+    expect(preview!.className).not.toContain("opacity-0");
+    // No floating caret textarea is used for custom nodes.
+    expect(document.querySelector("textarea")).toBeNull();
+
+    // Typing edits the node's URL (its `text`).
+    await userEvent.click(input);
+    await userEvent.fill(input, "https://changed.example");
+    await waitFor(
+      () => findNode(engine().model, "lnk")?.text === "https://changed.example"
+    );
+    expect(findNode(engine().model, "lnk")?.text).toBe(
+      "https://changed.example"
+    );
+  });
+
+  it("editing an image node keeps the <img> preview and shows a URL box", async () => {
+    render(<CustomHarness />);
+    const imgRow = await waitFor(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
+        li.querySelector("img")
+      )
+    );
+    await userEvent.click(imgRow.querySelector(".cursor-text")!);
+    await waitFor(() => engine().state.view.activeNodeId === "img");
+
+    // The <img> preview stays and a URL box appears.
+    expect(imgRow.querySelector("img")).not.toBeNull();
+    const input = await waitFor(() =>
+      imgRow.querySelector<HTMLInputElement>('input[placeholder="画像のURL"]')
+    );
+    expect(input).not.toBeNull();
+  });
+});
 
 describe("OutlineEditor (browser e2e)", () => {
   it("renders the root first, then each descendant as an indented row", async () => {
