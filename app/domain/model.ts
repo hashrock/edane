@@ -3,8 +3,11 @@
  * No framework or rendering dependencies.
  */
 
-/** Node kind. `text` is the default; `image`/`link` store their URL in `text`. */
-export type NodeType = "text" | "image" | "link";
+/**
+ * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
+ * `markdown` stores a raw Markdown blob in `text` (rendered as a source card).
+ */
+export type NodeType = "text" | "image" | "link" | "markdown";
 
 /**
  * Node kind as stored in JSON. `"text"` is represented by absence so that

@@ -75,7 +75,8 @@ function normalizeTree(
 
   // Preserve the known optional fields, guarding each by type.
   if (v.collapsed === true) node.collapsed = true;
-  if (v.type === "image" || v.type === "link") node.type = v.type;
+  if (v.type === "image" || v.type === "link" || v.type === "markdown")
+    node.type = v.type;
   if (typeof v.fontSize === "number") node.fontSize = v.fontSize;
   if (v.bold === true) node.bold = true;
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
