@@ -125,11 +125,10 @@ export default function NotesIndex({
         <section className="anim-item">
           <div className="mb-4">
             <h2 className="text-lg font-bold tracking-tight">
-              ログイン不要で試す
+              シンプルで軽快なアイデアノート
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              下のエディタでそのまま書けます。「アカウントに保存」を押すと
-              Google ログイン後にマイノートへ保存されます。
+              思いついたことを、そのまま書いて広げる。ログイン不要ですぐ試せます。
             </p>
           </div>
           <div
