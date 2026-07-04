@@ -834,6 +834,71 @@ describe("moveNodeUp / moveNodeDown", () => {
   });
 });
 
+describe("moveBranch", () => {
+  it("moves a subtree under a new parent and keeps selection on it", () => {
+    const model = sampleModel();
+    const s = withView(stateAt(model, "a1"), { editing: false });
+    const next = editorReducer(s, {
+      type: "moveBranch",
+      nodeId: "a1",
+      newParentId: "b",
+    });
+    expect(findNode(next.document.model, "b")!.children.map((c) => c.id)).toEqual(
+      ["a1"]
+    );
+    expect(findNode(next.document.model, "a")!.children).toEqual([]);
+    expect(next.view.activeNodeId).toBe("a1"); // focus follows the moved node
+    expect(next.view.editing).toBe(false); // selection mode preserved
+  });
+
+  it("inserts at the given sibling index", () => {
+    const model = sampleModel();
+    const s = withView(stateAt(model, "a1"), { editing: false });
+    const next = editorReducer(s, {
+      type: "moveBranch",
+      nodeId: "a1",
+      newParentId: "root",
+      index: 1,
+    });
+    expect(next.document.model.children.map((c) => c.id)).toEqual([
+      "a",
+      "a1",
+      "b",
+    ]);
+  });
+
+  it("expands a collapsed drop target", () => {
+    const model = sampleModel();
+    findNode(model, "a")!.collapsed = true;
+    const s = withView(stateAt(model, "b"), { editing: false });
+    const next = editorReducer(s, {
+      type: "moveBranch",
+      nodeId: "b",
+      newParentId: "a",
+    });
+    const a = findNode(next.document.model, "a")!;
+    expect(a.collapsed).toBe(false);
+    expect(a.children.map((c) => c.id)).toEqual(["a1", "b"]);
+  });
+
+  it("is a no-op (same state) for an invalid move", () => {
+    const model = sampleModel();
+    const s = withView(stateAt(model, "a"), { editing: false });
+    // Into its own descendant.
+    expect(
+      editorReducer(s, { type: "moveBranch", nodeId: "a", newParentId: "a1" })
+    ).toBe(s);
+    // Root can't move.
+    expect(
+      editorReducer(s, { type: "moveBranch", nodeId: "root", newParentId: "b" })
+    ).toBe(s);
+    // Already the last child of the target.
+    expect(
+      editorReducer(s, { type: "moveBranch", nodeId: "a1", newParentId: "a" })
+    ).toBe(s);
+  });
+});
+
 describe("moveToParent", () => {
   it("moves focus to the active node's parent", () => {
     const model = sampleModel();

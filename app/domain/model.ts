@@ -310,6 +310,55 @@ export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel 
 }
 
 /**
+ * Reparent/reorder: move a node together with its WHOLE subtree under a new
+ * parent. `index` is the insertion position in the new parent's children as
+ * they are BEFORE the move (undefined = append); a same-parent move compensates
+ * for the slot freed by the removal. Returns the SAME model reference when the
+ * move is impossible or a no-op — root move, dropping on itself or one of its
+ * own descendants, unknown ids, or a position identical to the current one —
+ * so callers can treat identity as "skip undo/save".
+ */
+export function moveBranch(
+  model: MindMapModel,
+  nodeId: string,
+  newParentId: string,
+  index?: number
+): MindMapModel {
+  if (model.id === nodeId || nodeId === newParentId) return model;
+  const node = findNode(model, nodeId);
+  if (!node) return model;
+  // The new parent must not live inside the moved subtree (cycle guard).
+  if (findNode(node, newParentId)) return model;
+  const newParent = findNode(model, newParentId);
+  if (!newParent) return model;
+  const cur = findParentAndIndex(model, nodeId);
+  if (!cur) return model;
+
+  // No-op positions: already the last child on an append, or an index that
+  // resolves to the node's current slot.
+  if (cur.parent.id === newParentId) {
+    const last = cur.parent.children.length - 1;
+    if (index === undefined && cur.index === last) return model;
+    if (index !== undefined && (index === cur.index || index === cur.index + 1))
+      return model;
+  }
+
+  const cloned = cloneModel(model);
+  const { parent, index: removedIndex } = findParentAndIndex(cloned, nodeId)!;
+  const [moved] = parent.children.splice(removedIndex, 1);
+  const target = findNode(cloned, newParentId)!;
+  if (index === undefined) {
+    target.children.push(moved);
+  } else {
+    // Same-parent move: the removal shifted later slots down by one.
+    const shift = parent.id === newParentId && removedIndex < index ? 1 : 0;
+    const at = Math.max(0, Math.min(index - shift, target.children.length));
+    target.children.splice(at, 0, moved);
+  }
+  return cloned;
+}
+
+/**
  * Line-join for outline editing (Backspace at the start of a line): merge a
  * node into its *structural* predecessor, NOT the flat DFS-previous node (which
  * is often the deepest leaf of an unrelated sibling subtree, so the text would

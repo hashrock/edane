@@ -46,6 +46,7 @@ import {
   setLinkMeta,
   moveNodeUp,
   moveNodeDown,
+  moveBranch,
 } from "../domain/model";
 
 export interface DocumentState {
@@ -81,6 +82,9 @@ export type EditorAction =
   // and undoable, unlike the pure navigation actions below.
   | { type: "moveNodeUp" }
   | { type: "moveNodeDown" }
+  // Drag & drop: move a whole subtree under a new parent (index = insertion
+  // position among the parent's current children; absent = append).
+  | { type: "moveBranch"; nodeId: string; newParentId: string; index?: number }
   // --- navigation ---
   | { type: "moveUp" }
   | { type: "moveDown" }
@@ -246,6 +250,27 @@ function documentReducer(
       // the document identity so the reducer skips undo/save for a no-op.
       if (newModel === document.model) return { document };
       return { document: { ...document, model: newModel }, focusId: activeNodeId };
+    }
+
+    case "moveBranch": {
+      const moved = moveBranch(
+        document.model,
+        action.nodeId,
+        action.newParentId,
+        action.index
+      );
+      // moveBranch returns the same reference when the move is impossible or a
+      // no-op; keep the document identity so undo/save are skipped.
+      if (moved === document.model) return { document };
+      // Expand a collapsed drop target so the moved node stays visible.
+      const parent = findNode(moved, action.newParentId);
+      const newModel = parent?.collapsed
+        ? toggleCollapse(moved, action.newParentId, false)
+        : moved;
+      return {
+        document: { ...document, model: newModel },
+        focusId: action.nodeId,
+      };
     }
 
     case "backspaceAtStart": {
@@ -533,6 +558,7 @@ function viewReducer(
     case "insertNodes":
     case "moveNodeUp":
     case "moveNodeDown":
+    case "moveBranch":
       return focusId === undefined
         ? view
         : focusView(view, model, focusId, focusCursorPos, focusSelectionEnd);

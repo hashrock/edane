@@ -19,6 +19,7 @@ import {
   dedentNode,
   moveNodeUp,
   moveNodeDown,
+  moveBranch,
   mergeIntoPredecessor,
   mergeSuccessorInto,
 } from "./model";
@@ -487,6 +488,112 @@ describe("moveNodeUp / moveNodeDown", () => {
     const model = sampleModel();
     expect(moveNodeUp(model, "nope")).toBe(model);
     expect(moveNodeDown(model, "nope")).toBe(model);
+  });
+});
+
+describe("moveBranch", () => {
+  /** Root / A(A1(A1a), A2) / B / C — three siblings, A with two children. */
+  const wideModel = (): MindMapModel => ({
+    id: "root",
+    text: "Root",
+    children: [
+      {
+        id: "a",
+        text: "A",
+        children: [
+          {
+            id: "a1",
+            text: "A1",
+            fontSize: 20,
+            bold: true,
+            children: [{ id: "a1a", text: "A1a", children: [] }],
+          },
+          { id: "a2", text: "A2", children: [] },
+        ],
+      },
+      { id: "b", text: "B", children: [] },
+      { id: "c", text: "C", children: [] },
+    ],
+  });
+
+  it("moves a whole subtree to the end of a new parent (append)", () => {
+    const result = moveBranch(wideModel(), "a1", "b");
+    const b = findNode(result, "b")!;
+    expect(b.children.map((n) => n.id)).toEqual(["a1"]);
+    // The subtree travels with the node.
+    expect(findNode(result, "a1")!.children.map((n) => n.id)).toEqual(["a1a"]);
+    expect(findNode(result, "a")!.children.map((n) => n.id)).toEqual(["a2"]);
+  });
+
+  it("inserts at a given index under a new parent", () => {
+    const result = moveBranch(wideModel(), "b", "a", 1);
+    expect(findNode(result, "a")!.children.map((n) => n.id)).toEqual([
+      "a1",
+      "b",
+      "a2",
+    ]);
+    expect(result.children.map((n) => n.id)).toEqual(["a", "c"]);
+  });
+
+  it("compensates the index on a same-parent forward move", () => {
+    // [a,b,c]: moving a to index 2 (before c) must land [b,a,c], not [b,c,a].
+    const result = moveBranch(wideModel(), "a", "root", 2);
+    expect(result.children.map((n) => n.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("moves backward within the same parent without compensation", () => {
+    const result = moveBranch(wideModel(), "c", "root", 0);
+    expect(result.children.map((n) => n.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("preserves node attributes through a move", () => {
+    const result = moveBranch(wideModel(), "a1", "c");
+    const a1 = findNode(result, "a1")!;
+    expect(a1.fontSize).toBe(20);
+    expect(a1.bold).toBe(true);
+  });
+
+  it("does not mutate the original model", () => {
+    const model = wideModel();
+    moveBranch(model, "b", "a");
+    expect(model.children.map((n) => n.id)).toEqual(["a", "b", "c"]);
+    expect(findNode(model, "a")!.children.map((n) => n.id)).toEqual([
+      "a1",
+      "a2",
+    ]);
+  });
+
+  it("returns the SAME reference for the root", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "root", "a")).toBe(model);
+  });
+
+  it("returns the SAME reference when dropping on itself", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "a", "a")).toBe(model);
+  });
+
+  it("returns the SAME reference when dropping into its own descendant", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "a", "a1a")).toBe(model);
+  });
+
+  it("returns the SAME reference for unknown ids", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "nope", "a")).toBe(model);
+    expect(moveBranch(model, "a", "nope")).toBe(model);
+  });
+
+  it("returns the SAME reference for a no-op append (already last child)", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "c", "root")).toBe(model);
+    expect(moveBranch(model, "a2", "a")).toBe(model);
+  });
+
+  it("returns the SAME reference for a no-op index (current slot)", () => {
+    const model = wideModel();
+    expect(moveBranch(model, "b", "root", 1)).toBe(model);
+    expect(moveBranch(model, "b", "root", 2)).toBe(model);
   });
 });
 

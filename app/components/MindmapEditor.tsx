@@ -17,7 +17,11 @@ import {
   flattenToNodes,
   FAVICON_SIZE,
   FAVICON_GAP,
+  NODE_PADDING,
+  nodeBoxWidth,
+  nodeBoxHeight,
 } from "../application/nodeUtils";
+import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import PublicityDropdown from "./PublicityDropdown";
 import {
@@ -96,12 +100,53 @@ function measureEmptyWidth(): number {
 }
 
 // --- Multi-line geometry ---
-const NODE_PADDING = 20;
 
 // Screen-space distance (px) the pointer must travel after mousedown before a
 // press turns into a drag-select. Below this a small jitter stays a plain click
 // so selection doesn't jump to a neighbouring (e.g. same-Y parent) node.
 const DRAG_THRESHOLD = 4;
+
+/**
+ * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
+ * - "text": drag inside the node being edited extends a text selection.
+ * - "move": drag on any other (non-root) node picks the branch up and moves it
+ *   to a new parent / sibling slot on release.
+ * Both start at mousedown and only become "real" once the pointer travels past
+ * DRAG_THRESHOLD (`moved`); below that the press stays a plain click.
+ */
+type DragState =
+  | {
+      mode: "text";
+      nodeId: string;
+      anchorCharIdx: number;
+      // Screen-space pointer position at mousedown, used to distinguish a
+      // click (with minor jitter) from an intentional drag-select.
+      startX: number;
+      startY: number;
+      // Flips true once the pointer moves past DRAG_THRESHOLD; from then on
+      // every move is treated as a drag even if it dips back under.
+      moved: boolean;
+    }
+  | {
+      mode: "move";
+      nodeId: string;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      // Pointer offset from the node's box origin at mousedown (world), so
+      // the ghost stays under the grab point instead of snapping to it.
+      grabDX: number;
+      grabDY: number;
+      // Built lazily when the drag becomes real (moved = true):
+      /** Dragged node + its visible descendants — never valid drop targets. */
+      excluded: Set<string> | null;
+      /** child id → parent id over the current flat node array. */
+      parentOf: Map<string, string> | null;
+      /** Total descendant count (incl. hidden), for the ghost's "+N" badge. */
+      descendants: number;
+      /** Current drop resolution (null = would not drop anywhere). */
+      drop: DropTarget | null;
+    };
 
 interface LineData {
   lines: string[];
@@ -162,13 +207,16 @@ function lineDataWidth(data: LineData): number {
   return w;
 }
 
-/**
- * Visual box width for a measured text/content width: add horizontal padding,
- * then floor (roots a little wider). Keeps every node-box width derivation in
- * one place so the draw never re-implements per-kind sizing.
- */
-function nodeBoxWidth(measuredWidth: number, isRoot: boolean): number {
-  return Math.max(measuredWidth + NODE_PADDING * 2, isRoot ? 100 : 80);
+/** Number of descendants (incl. hidden ones) of a node in the model. */
+function countDescendants(model: MindMapModel, nodeId: string): number {
+  const node = findNode(model, nodeId);
+  if (!node) return 0;
+  let count = -1;
+  (function walk(n: MindMapModel) {
+    count++;
+    for (const child of n.children) walk(child);
+  })(node);
+  return count;
 }
 
 /** Find the caret column nearest `relX` within a line's offsets. */
@@ -214,6 +262,10 @@ export interface MindmapTestApi {
     editing: boolean;
   };
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
+  /** Screen-space box of a node (x/y = top-left), for drag & drop zone tests. */
+  getNodeRect: (
+    id: string
+  ) => { x: number; y: number; width: number; height: number } | null;
   /** Main-canvas-redraw timing counters (the dominant per-keystroke cost). */
   getRedrawStats: () => RedrawStats;
   resetRedrawStats: () => void;
@@ -317,17 +369,8 @@ export function MindmapEditorView({
   const konvaRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
-  const dragStateRef = useRef<{
-    nodeId: string;
-    anchorCharIdx: number;
-    // Screen-space pointer position at mousedown, used to distinguish a click
-    // (with minor jitter) from an intentional drag-select.
-    startX: number;
-    startY: number;
-    // Flips true once the pointer moves past DRAG_THRESHOLD; from then on every
-    // move is treated as a drag even if it dips back under the threshold.
-    moved: boolean;
-  } | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isComposingRef = useRef(false);
@@ -348,6 +391,30 @@ export function MindmapEditorView({
       1600
     );
   }, []);
+
+  // Commit a drag & drop branch move. Called from the Konva mouseup handler
+  // via a ref — the stage setup effect runs once, so capturing saveNote (which
+  // is re-created when isPublic changes) directly would go stale.
+  const commitMove = useCallback(
+    (nodeId: string, drop: DropTarget) => {
+      const prevModel = stateRef.current.document.model;
+      const next = dispatch(
+        {
+          type: "moveBranch",
+          nodeId,
+          newParentId: drop.parentId,
+          index: drop.kind === "sibling" ? drop.index : undefined,
+        },
+        "move-branch"
+      );
+      if (next.document.model === prevModel) return;
+      flashNodes([nodeId]);
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, flashNodes, noteId, saveNote]
+  );
+  const commitMoveRef = useRef(commitMove);
+  commitMoveRef.current = commitMove;
 
   // Re-render when an image-node's image finishes loading (size becomes known).
   const [imageVersion, setImageVersion] = useState(0);
@@ -860,6 +927,7 @@ export function MindmapEditorView({
   useEffect(() => {
     if (!canvasRef.current) return;
     const container = canvasRef.current;
+    let removeWindowMouseUp: (() => void) | null = null;
 
     import("konva").then((mod) => {
       const Konva = mod.default;
@@ -880,6 +948,145 @@ export function MindmapEditorView({
       const cursorLayer = new Konva.Layer();
       stage.add(cursorLayer);
       cursorLayerRef.current = cursorLayer;
+
+      // Drag & drop preview layer. Drawn imperatively on every mousemove of a
+      // move drag — going through React state would re-render per move. It sits
+      // above the cursor layer and is never touched by the React effects (the
+      // cursor layer gets destroyChildren()'d, so the preview can't live there).
+      const dragLayer = new Konva.Layer({ listening: false });
+      stage.add(dragLayer);
+      dragLayerRef.current = dragLayer;
+
+      // Preview shapes: a ghost of the dragged node following the pointer, and
+      // a marker showing where it would land (box highlight = become a child,
+      // horizontal line = insert as sibling at that slot).
+      let ghost: any = null;
+      let marker: any = null;
+      let markerKey: string | null = null;
+
+      const clearMovePreview = () => {
+        ghost?.destroy();
+        marker?.destroy();
+        ghost = marker = markerKey = null;
+        dragLayer.batchDraw();
+        stage.container().style.cursor = "";
+      };
+
+      const buildGhost = (nodeId: string, descendants: number) => {
+        const flat = nodesRef.current;
+        const node = flat.find((n) => n.id === nodeId);
+        if (!node) return;
+        const w = nodeBoxWidth(node.width, false);
+        const h = nodeBoxHeight(node.height);
+        const g = new Konva.Group({ opacity: 0.65, listening: false });
+        g.add(
+          new Konva.Rect({
+            width: w,
+            height: h,
+            cornerRadius: 12,
+            fill: "#ffffff",
+            stroke: "#94a3b8",
+            strokeWidth: 1.5,
+            shadowColor: "#0f172a",
+            shadowBlur: 12,
+            shadowOpacity: 0.25,
+            shadowOffsetY: 4,
+          })
+        );
+        const firstLine = node.text.split("\n")[0];
+        const label = !firstLine
+          ? "empty"
+          : firstLine.length > 24
+            ? firstLine.slice(0, 24) + "…"
+            : firstLine;
+        g.add(
+          new Konva.Text({
+            x: NODE_PADDING,
+            y: h / 2 - 7,
+            text: label,
+            fontSize: 14,
+            fontFamily: "sans-serif",
+            fill: firstLine ? "#0f172a" : "#94a3b8",
+            fontStyle: firstLine ? "normal" : "italic",
+          })
+        );
+        // Subtree travels along — surface its size like the collapse badge does.
+        if (descendants > 0) {
+          const badgeR = 9;
+          g.add(
+            new Konva.Circle({
+              x: w + 4 + badgeR,
+              y: h / 2,
+              radius: badgeR,
+              fill: "#000000",
+            })
+          );
+          g.add(
+            new Konva.Text({
+              x: w + 4,
+              y: h / 2 - 5,
+              width: badgeR * 2,
+              align: "center",
+              text: `+${descendants}`,
+              fontSize: 10,
+              fontFamily: "sans-serif",
+              fill: "#ffffff",
+            })
+          );
+        }
+        ghost = g;
+        dragLayer.add(g);
+      };
+
+      // Rebuild the drop marker only when the resolved target actually changes
+      // (its identity, not the pointer position) — the common per-move path is
+      // just a ghost position update + batchDraw.
+      const updateDropMarker = (drop: DropTarget | null) => {
+        const key = drop
+          ? `${drop.kind}:${drop.targetId}:${drop.kind === "sibling" ? drop.position : ""}`
+          : null;
+        if (key === markerKey) return;
+        marker?.destroy();
+        marker = null;
+        markerKey = key;
+        if (!drop) return;
+        const flat = nodesRef.current;
+        const target = flat.find((n) => n.id === drop.targetId);
+        if (!target) return;
+        const isRoot = flat[0]?.id === target.id;
+        const w = nodeBoxWidth(target.width, isRoot);
+        const h = nodeBoxHeight(target.height);
+        if (drop.kind === "child") {
+          marker = new Konva.Rect({
+            x: target.x - 3,
+            y: target.y - h / 2 - 3,
+            width: w + 6,
+            height: h + 6,
+            cornerRadius: 14,
+            fill: "rgba(16, 185, 129, 0.12)",
+            stroke: "#10b981",
+            strokeWidth: 2,
+            listening: false,
+          });
+        } else {
+          // Insertion line in the middle of the sibling gap (VERTICAL_GAP=10).
+          const y =
+            drop.position === "before" ? target.y - h / 2 - 5 : target.y + h / 2 + 5;
+          const g = new Konva.Group({ listening: false });
+          g.add(
+            new Konva.Line({
+              points: [target.x - 4, y, target.x + w + 4, y],
+              stroke: "#10b981",
+              strokeWidth: 3,
+              lineCap: "round",
+            })
+          );
+          g.add(new Konva.Circle({ x: target.x - 4, y, radius: 3.5, fill: "#10b981" }));
+          marker = g;
+        }
+        dragLayer.add(marker);
+        ghost?.moveToTop();
+      };
 
       // Keep the CSS dot grid in sync with stage pan/zoom. The dots only appear
       // once zoomed in past 150% — at normal zoom they'd just be visual noise.
@@ -940,8 +1147,9 @@ export function MindmapEditorView({
         }
       });
 
-      // Drag within a node selects a text range. Selection stays on the node
-      // the drag started on — it never crosses to another node.
+      // Drag from a node: on the node being edited it selects a text range
+      // (never crossing to another node); on any other non-root node it picks
+      // the branch up and moves it (see the "move" branch below).
       stage.on("mousemove", () => {
         const drag = dragStateRef.current;
         if (!drag) return;
@@ -960,6 +1168,40 @@ export function MindmapEditorView({
         const scale = stage.scaleX();
         const worldX = (pointer.x - stage.x()) / scale;
         const worldY = (pointer.y - stage.y()) / scale;
+
+        if (drag.mode === "move") {
+          if (!drag.excluded || !drag.parentOf) {
+            // First real move: snapshot the drag context once. The flat array
+            // is stable for the whole drag (no dispatches until drop).
+            const flat = nodesRef.current;
+            const byId = new Map(flat.map((n) => [n.id, n]));
+            const parentOf = new Map<string, string>();
+            for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
+            const excluded = new Set<string>();
+            (function collect(id: string) {
+              excluded.add(id);
+              byId.get(id)?.children.forEach(collect);
+            })(drag.nodeId);
+            drag.excluded = excluded;
+            drag.parentOf = parentOf;
+            buildGhost(drag.nodeId, drag.descendants);
+          }
+          drag.drop = resolveDropTarget(
+            nodesRef.current,
+            drag.nodeId,
+            drag.excluded,
+            drag.parentOf,
+            worldX,
+            worldY
+          );
+          ghost?.position({ x: worldX - drag.grabDX, y: worldY - drag.grabDY });
+          updateDropMarker(drag.drop);
+          const cursor = drag.drop ? "grabbing" : "no-drop";
+          const el = stage.container();
+          if (el.style.cursor !== cursor) el.style.cursor = cursor;
+          dragLayer.batchDraw();
+          return;
+        }
 
         const node = nodesRef.current.find((n) => n.id === drag.nodeId);
         if (!node) return;
@@ -993,12 +1235,32 @@ export function MindmapEditorView({
       });
 
       stage.on("mouseup touchend", () => {
-        if (dragStateRef.current) {
+        const drag = dragStateRef.current;
+        if (drag) {
+          if (drag.mode === "move") {
+            clearMovePreview();
+            if (drag.moved && drag.drop) {
+              commitMoveRef.current(drag.nodeId, drag.drop);
+            }
+          }
           wasDraggingRef.current = true;
           dragStateRef.current = null;
           stage.draggable(true);
         }
       });
+
+      // Releasing the pointer outside the canvas never reaches the stage's own
+      // mouseup — treat it as a drag cancel so the preview can't get stuck.
+      const onWindowMouseUp = () => {
+        const drag = dragStateRef.current;
+        if (!drag) return;
+        if (drag.mode === "move") clearMovePreview();
+        dragStateRef.current = null;
+        stage.draggable(true);
+      };
+      window.addEventListener("mouseup", onWindowMouseUp);
+      removeWindowMouseUp = () =>
+        window.removeEventListener("mouseup", onWindowMouseUp);
 
       const resizeObserver = new ResizeObserver(() => {
         stage.width(container.clientWidth);
@@ -1012,11 +1274,13 @@ export function MindmapEditorView({
     });
 
     return () => {
+      removeWindowMouseUp?.();
       if (konvaStageRef.current) {
         konvaStageRef.current.destroy();
         konvaStageRef.current = null;
         layerRef.current = null;
         cursorLayerRef.current = null;
+        dragLayerRef.current = null;
       }
     };
   }, [dispatch]);
@@ -1260,7 +1524,7 @@ export function MindmapEditorView({
         rectHeight = Math.max(32, blockHeight + 14);
       } else {
         rectWidth = nodeBoxWidth(node.width, isRoot);
-        rectHeight = Math.max(32, node.height);
+        rectHeight = nodeBoxHeight(node.height);
       }
 
       const group = new Konva.Group();
@@ -1444,16 +1708,35 @@ export function MindmapEditorView({
           });
         }
 
-        // Start drag selection (anchored at the clicked caret position). The
-        // drag only becomes "real" once the pointer moves past DRAG_THRESHOLD;
-        // until then it's a plain click and selection stays on this node.
-        dragStateRef.current = {
-          nodeId: node.id,
-          anchorCharIdx: charIdx,
-          startX: pointer.x,
-          startY: pointer.y,
-          moved: false,
-        };
+        // Arm a drag (it only becomes "real" once the pointer moves past
+        // DRAG_THRESHOLD; below that it stays a plain click). Dragging the node
+        // being edited extends a text selection; dragging any other node picks
+        // the branch up to move it. The root anchors the tree and can't move,
+        // so it keeps the text-selection drag.
+        if (editingThis || isRoot) {
+          dragStateRef.current = {
+            mode: "text",
+            nodeId: node.id,
+            anchorCharIdx: charIdx,
+            startX: pointer.x,
+            startY: pointer.y,
+            moved: false,
+          };
+        } else {
+          dragStateRef.current = {
+            mode: "move",
+            nodeId: node.id,
+            startX: pointer.x,
+            startY: pointer.y,
+            moved: false,
+            grabDX: worldX - node.x,
+            grabDY: worldY - (node.y - rectHeight / 2),
+            excluded: null,
+            parentOf: null,
+            descendants: countDescendants(modelRef.current, node.id),
+            drop: null,
+          };
+        }
         if (stage) stage.draggable(false);
 
         // Focus the hidden input in a macrotask so it survives the click
@@ -1638,6 +1921,21 @@ export function MindmapEditorView({
         const worldX = node.x + NODE_PADDING + textW / 2;
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
+      },
+      getNodeRect: (id: string) => {
+        const flat = nodesRef.current;
+        const node = flat.find((n) => n.id === id);
+        const stage = konvaStageRef.current;
+        if (!node || !stage) return null;
+        const scale = stage.scaleX();
+        const w = nodeBoxWidth(node.width, flat[0]?.id === id);
+        const h = nodeBoxHeight(node.height);
+        return {
+          x: node.x * scale + stage.x(),
+          y: (node.y - h / 2) * scale + stage.y(),
+          width: w * scale,
+          height: h * scale,
+        };
       },
       getRedrawStats: () => ({ ...perfRef.current }),
       resetRedrawStats: () => {

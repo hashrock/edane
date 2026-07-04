@@ -37,6 +37,24 @@ export interface MindMapNode {
 export const FAVICON_SIZE = 16;
 export const FAVICON_GAP = 6;
 
+/** Horizontal padding between a node's box edge and its content (px). */
+export const NODE_PADDING = 20;
+
+/**
+ * Visual box width for a measured text/content width: add horizontal padding,
+ * then floor (roots a little wider). Keeps every node-box width derivation in
+ * one place — the canvas draw and the drag-drop hit test must agree — so
+ * neither ever re-implements per-kind sizing.
+ */
+export function nodeBoxWidth(measuredWidth: number, isRoot: boolean): number {
+  return Math.max(measuredWidth + NODE_PADDING * 2, isRoot ? 100 : 80);
+}
+
+/** Visual box height for a measured content height (px), with the 32px floor. */
+export function nodeBoxHeight(measuredHeight: number): number {
+  return Math.max(32, measuredHeight);
+}
+
 /** The node currently being edited (rendered as text regardless of its kind). */
 export interface EditingNode {
   id: string;
