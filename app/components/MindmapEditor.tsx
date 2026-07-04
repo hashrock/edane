@@ -31,7 +31,10 @@ import {
   centerOffset,
   ensureVisibleOffset,
 } from "../lib/viewport";
-import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
+import ContextMenu, {
+  type ContextMenuAction,
+  type ContextMenuItem,
+} from "./ContextMenu";
 import PublicityDropdown from "./PublicityDropdown";
 import {
   serializeModel,
@@ -881,17 +884,50 @@ export function MindmapEditorView({
     const isRoot = node.id === modelRef.current.id;
     const hasChildren = node.children.length > 0;
     const type = node.type ?? "text";
-    const items: ContextMenuItem[] = [];
 
-    // Link: jump to the URL (single click edits, so open lives in the menu).
+    // Items are grouped by category; empty groups are dropped and the
+    // remaining groups are joined with divider separators below.
+    const groups: ContextMenuAction[][] = [];
+
+    // --- Link actions: open / fetch metadata (link only) ---
+    // Single click edits, so opening the URL lives in the menu.
+    const linkGroup: ContextMenuAction[] = [];
     if (type === "link" && node.text) {
-      items.push({
+      linkGroup.push({
         label: "リンクを開く",
         onSelect: () => window.open(node.text, "_blank", "noopener"),
       });
+      linkGroup.push({
+        label: "リンク情報を取得（タイトル/favicon）",
+        onSelect: () => fetchLinkMeta(nodeId),
+      });
     }
+    groups.push(linkGroup);
 
-    // Kind conversion (root excluded — it's the note title).
+    // --- Structure: add child / collapse ---
+    const structureGroup: ContextMenuAction[] = [];
+    structureGroup.push({
+      label: "子ノードを追加",
+      onSelect: () => {
+        const next = dispatch({ type: "addChild", nodeId }, "add-child");
+        if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+        if (noteId) saveNote(next.document.model);
+        focusEditorSoon();
+      },
+    });
+    if (hasChildren) {
+      structureGroup.push({
+        label: node.collapsed ? "展開する" : "折りたたむ",
+        onSelect: () => {
+          const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
+          if (noteId) saveNote(next.document.model);
+        },
+      });
+    }
+    groups.push(structureGroup);
+
+    // --- Kind conversion (root excluded — it's the note title) ---
+    const typeGroup: ContextMenuAction[] = [];
     if (!isRoot) {
       const setType = (nodeType: "text" | "image" | "link" | "markdown") => () => {
         const next = dispatch(
@@ -901,13 +937,15 @@ export function MindmapEditorView({
         if (noteId) saveNote(next.document.model);
         focusEditorSoon();
       };
-      if (type !== "text") items.push({ label: "テキストにする", onSelect: setType("text") });
-      if (type !== "image") items.push({ label: "画像にする（URL）", onSelect: setType("image") });
-      if (type !== "link") items.push({ label: "リンクにする（URL）", onSelect: setType("link") });
-      if (type !== "markdown") items.push({ label: "Markdownにする", onSelect: setType("markdown") });
+      if (type !== "text") typeGroup.push({ label: "テキストにする", onSelect: setType("text") });
+      if (type !== "image") typeGroup.push({ label: "画像にする（URL）", onSelect: setType("image") });
+      if (type !== "link") typeGroup.push({ label: "リンクにする（URL）", onSelect: setType("link") });
+      if (type !== "markdown") typeGroup.push({ label: "Markdownにする", onSelect: setType("markdown") });
     }
+    groups.push(typeGroup);
 
-    // Text formatting (font size / bold).
+    // --- Text formatting (font size / bold) ---
+    const formatGroup: ContextMenuAction[] = [];
     if (type === "text") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
       const current = node.fontSize ?? DEFAULT_FONT_SIZE;
@@ -921,68 +959,51 @@ export function MindmapEditorView({
         if (noteId) saveNote(next.document.model);
       };
       if (bigger !== undefined)
-        items.push({
+        formatGroup.push({
           label: "文字を大きく",
           onSelect: () => applyStyle({ fontSize: bigger }),
         });
       if (smaller !== undefined)
-        items.push({
+        formatGroup.push({
           label: "文字を小さく",
           onSelect: () => applyStyle({ fontSize: smaller }),
         });
       if (node.fontSize !== undefined && node.fontSize !== DEFAULT_FONT_SIZE)
-        items.push({
+        formatGroup.push({
           label: "標準サイズに戻す",
           onSelect: () => applyStyle({ fontSize: null }),
         });
-      items.push({
+      formatGroup.push({
         label: node.bold ? "太字を解除" : "太字にする",
         onSelect: () => applyStyle({ bold: !node.bold }),
       });
     }
+    groups.push(formatGroup);
 
-    // Link metadata fetch (title + favicon).
-    if (type === "link" && node.text) {
-      items.push({
-        label: "リンク情報を取得（タイトル/favicon）",
-        onSelect: () => fetchLinkMeta(nodeId),
-      });
-    }
-
-    // Image upload (R2). Replaces the node's content with the uploaded image.
+    // --- Media: image upload (R2). Replaces the node's content ---
+    const mediaGroup: ContextMenuAction[] = [];
     if (!isRoot) {
-      items.push({
+      mediaGroup.push({
         label: "画像をアップロード",
         onSelect: () => triggerImageUpload(nodeId),
       });
     }
+    groups.push(mediaGroup);
 
-    if (hasChildren) {
-      items.push({
-        label: node.collapsed ? "展開する" : "折りたたむ",
-        onSelect: () => {
-          const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
-          if (noteId) saveNote(next.document.model);
-        },
-      });
-    }
-    items.push({
-      label: "子ノードを追加",
-      onSelect: () => {
-        const next = dispatch({ type: "addChild", nodeId }, "add-child");
-        if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
-        if (noteId) saveNote(next.document.model);
-        focusEditorSoon();
-      },
-    });
-    items.push({
+    // --- Copy ---
+    const copyGroup: ContextMenuAction[] = [];
+    copyGroup.push({
       label: "枝をテキストコピー",
       onSelect: () => {
         navigator.clipboard.writeText(modelToText(node));
       },
     });
+    groups.push(copyGroup);
+
+    // --- Destructive ---
+    const dangerGroup: ContextMenuAction[] = [];
     if (!isRoot) {
-      items.push({
+      dangerGroup.push({
         label: "ノードを削除",
         danger: true,
         onSelect: () => {
@@ -990,6 +1011,14 @@ export function MindmapEditorView({
           if (noteId) saveNote(next.document.model);
         },
       });
+    }
+    groups.push(dangerGroup);
+
+    // Join non-empty groups with divider separators.
+    const items: ContextMenuItem[] = [];
+    for (const group of groups.filter((g) => g.length > 0)) {
+      if (items.length > 0) items.push({ separator: true });
+      items.push(...group);
     }
     return items;
   }, [
