@@ -18,6 +18,7 @@ import {
 } from "../application/editorKeymap";
 import { DEFAULT_FONT_SIZE } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
+import PublicityDropdown from "./PublicityDropdown";
 import type { NoteEditorEngine } from "./useNoteEditor";
 
 interface Props {
@@ -342,18 +343,13 @@ export default function OutlineEditor({
 
       {noteId && (
         <div className="flex shrink-0 items-center justify-end gap-2 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-emerald-600"
-              checked={isPublic}
-              onChange={(e) => {
-                setIsPublic(e.target.checked);
-                saveNote(model, e.target.checked);
-              }}
-            />
-            公開する
-          </label>
+          <PublicityDropdown
+            isPublic={isPublic}
+            onChange={(next) => {
+              setIsPublic(next);
+              saveNote(model, next);
+            }}
+          />
         </div>
       )}
 

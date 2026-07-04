@@ -19,6 +19,7 @@ import {
   FAVICON_GAP,
 } from "../application/nodeUtils";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
+import PublicityDropdown from "./PublicityDropdown";
 import {
   serializeModel,
   modelToText,
@@ -1744,13 +1745,6 @@ export function MindmapEditorView({
               <span className="text-slate-400">✎</span>
             </button>
           )}
-          {noteId && (
-            <span
-              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-            >
-              {isPublic ? "公開" : "非公開"}
-            </span>
-          )}
         </div>
         {noteId && (
           <div className="flex items-center gap-4 text-sm">
@@ -1758,19 +1752,13 @@ export function MindmapEditorView({
               ref={saveStatusRef}
               className="whitespace-nowrap text-slate-500"
             />
-            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-emerald-600"
-                checked={isPublic}
-                onChange={(e) => {
-                  const newVal = e.target.checked;
-                  setIsPublic(newVal);
-                  saveNote(model, newVal);
-                }}
-              />
-              公開する
-            </label>
+            <PublicityDropdown
+              isPublic={isPublic}
+              onChange={(next) => {
+                setIsPublic(next);
+                saveNote(model, next);
+              }}
+            />
           </div>
         )}
         {!noteId && onSaveToAccount && (
