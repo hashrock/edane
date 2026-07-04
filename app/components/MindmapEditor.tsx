@@ -2520,6 +2520,19 @@ export function MindmapEditorView({
               if (e.key === "Enter" || e.key === "Escape") {
                 e.preventDefault();
                 dispatch({ type: "exitEditing" });
+                return;
+              }
+              // The URL box owns the keyboard while an image/link node is being
+              // edited, so the hidden-textarea keymap never sees Up/Down. Route
+              // them here so vertical arrows still move between nodes instead of
+              // being trapped in this single-line field. Left/Right stay native
+              // (caret movement within the URL).
+              if (e.key === "ArrowUp" && !e.altKey) {
+                e.preventDefault();
+                dispatch({ type: "moveUp" });
+              } else if (e.key === "ArrowDown" && !e.altKey) {
+                e.preventDefault();
+                dispatch({ type: "moveDown" });
               }
             }}
             placeholder={
