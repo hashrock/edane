@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { GlobeIcon, LockIcon } from "./icons";
 
 interface Props {
   isPublic: boolean;
@@ -6,9 +7,9 @@ interface Props {
   onChange: (next: boolean) => void;
 }
 
-const OPTIONS: { value: boolean; label: string }[] = [
-  { value: false, label: "非公開" },
-  { value: true, label: "公開" },
+const OPTIONS: { value: boolean; label: string; icon: React.ReactNode }[] = [
+  { value: false, label: "非公開", icon: <LockIcon width="15" height="15" /> },
+  { value: true, label: "公開", icon: <GlobeIcon width="15" height="15" /> },
 ];
 
 /**
@@ -63,8 +64,15 @@ export default function PublicityDropdown({ isPublic, onChange }: Props) {
         ref={triggerRef}
         popoverTarget={popId}
         style={{ anchorName } as React.CSSProperties}
-        className="flex items-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
+        <span className="text-slate-500">
+          {isPublic ? (
+            <GlobeIcon width="15" height="15" />
+          ) : (
+            <LockIcon width="15" height="15" />
+          )}
+        </span>
         {isPublic ? "公開" : "非公開"}
         <span
           className={`text-[10px] text-slate-400 transition-transform ${
@@ -100,9 +108,10 @@ export default function PublicityDropdown({ isPublic, onChange }: Props) {
               popoverRef.current?.hidePopover();
               if (opt.value !== isPublic) onChange(opt.value);
             }}
-            className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
           >
-            {opt.label}
+            <span className="text-slate-500">{opt.icon}</span>
+            <span className="flex-1">{opt.label}</span>
             {opt.value === isPublic && <span className="text-slate-900">✓</span>}
           </button>
         ))}

@@ -881,11 +881,14 @@ export function MindmapEditorView({
       stage.add(cursorLayer);
       cursorLayerRef.current = cursorLayer;
 
-      // Keep the CSS dot grid in sync with stage pan/zoom
+      // Keep the CSS dot grid in sync with stage pan/zoom. The dots only appear
+      // once zoomed in past 150% — at normal zoom they'd just be visual noise.
       const GRID = 20;
+      const DOTS = "radial-gradient(#dbe2ea 1px, transparent 1px)";
       const updateGrid = () => {
         const scale = stage.scaleX();
         const size = GRID * scale;
+        container.style.backgroundImage = scale >= 1.5 ? DOTS : "none";
         container.style.backgroundSize = `${size}px ${size}px`;
         container.style.backgroundPosition = `${stage.x()}px ${stage.y()}px`;
       };
@@ -1787,7 +1790,7 @@ export function MindmapEditorView({
         <div
           ref={canvasRef}
           data-testid="mm-canvas"
-          className="absolute inset-0 bg-[radial-gradient(#dbe2ea_1px,transparent_1px)] [background-size:20px_20px]"
+          className="absolute inset-0 [background-size:20px_20px]"
         />
         <textarea
           ref={inputRef}

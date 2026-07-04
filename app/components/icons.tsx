@@ -62,3 +62,24 @@ export function MoreVerticalIcon(props: React.SVGProps<SVGSVGElement>) {
     </IconSvg>
   );
 }
+
+/** Globe icon (public). */
+export function GlobeIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" />
+    </IconSvg>
+  );
+}
+
+/** Lock icon (private). */
+export function LockIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg {...props}>
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </IconSvg>
+  );
+}
