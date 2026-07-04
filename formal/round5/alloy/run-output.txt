@@ -1,0 +1,21 @@
+Alloy module: MoveBranch.als
+commands: 5
+======================================================================
+MovePreservesTree            [check]  ->  UNSAT (none)
+----------------------------------------------------------------------
+MoveIsPossible               [run]  ->  SATISFIABLE (instance found)
+    nodes: 3
+    nid: {Node$0->Id$3, Node$1->Id$2, Node$2->Id$1}
+    children: {Node$0->Node$1, Node$0->Node$2}
+    childrenP: {Node$0->Node$1, Node$1->Node$2}
+----------------------------------------------------------------------
+MoveLosesNoNode              [check]  ->  UNSAT (none)
+----------------------------------------------------------------------
+MoveReparents                [check]  ->  UNSAT (none)
+----------------------------------------------------------------------
+CycleWithoutG3               [run]  ->  SATISFIABLE (instance found)
+    nodes: 4
+    nid: {Node$0->Id$3, Node$1->Id$2, Node$2->Id$1, Node$3->Id$0}
+    children: {Node$0->Node$3, Node$1->Node$2, Node$3->Node$1}
+    childrenP: {Node$1->Node$2, Node$2->Node$3, Node$3->Node$1}
+----------------------------------------------------------------------
