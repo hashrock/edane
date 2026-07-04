@@ -288,7 +288,10 @@ export default function OutlineEditor({
   });
 
   return (
-    <div className="flex h-full flex-col bg-white text-slate-950">
+    <div
+      data-testid="outline-view"
+      className="flex h-full flex-col bg-white text-slate-950"
+    >
       <ConfirmDialog
         open={leaveConfirm !== null}
         variant="danger"
