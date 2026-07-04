@@ -24,6 +24,13 @@ import {
   markdownPreview,
 } from "../application/nodeUtils";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
+import {
+  nodeRect,
+  rectCenter,
+  worldViewport,
+  centerOffset,
+  ensureVisibleOffset,
+} from "../lib/viewport";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import PublicityDropdown from "./PublicityDropdown";
 import {
@@ -399,6 +406,9 @@ export function MindmapEditorView({
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isComposingRef = useRef(false);
+  // True once the view has been centred for the current note (see the
+  // centre-on-open logic in the Konva setup). Reset when the note changes.
+  const didCenterRef = useRef(false);
   // Non-production perf counters for the (expensive) main canvas redraw.
   const perfRef = useRef({
     redrawCount: 0,
@@ -1391,9 +1401,19 @@ export function MindmapEditorView({
       const resizeObserver = new ResizeObserver(() => {
         stage.width(container.clientWidth);
         stage.height(container.clientHeight);
+        // First time the stage gains a real size, centre the open document
+        // (covers the case where it was 0×0 at setup time).
+        if (!didCenterRef.current && centerOnOpenRef.current()) {
+          didCenterRef.current = true;
+        }
         layer.draw();
       });
       resizeObserver.observe(container);
+
+      // Centre the view on the active node before the first paint, so the very
+      // first frame — and the coordinates the test API reports — are already
+      // centred (no async post-layout shift that could race a click).
+      if (centerOnOpenRef.current()) didCenterRef.current = true;
 
       // Signal that Konva is ready so the redraw effect can fire
       setKonvaReady(true);
@@ -1411,51 +1431,71 @@ export function MindmapEditorView({
     };
   }, [dispatch]);
 
-  // --- Auto-scroll to active node ---
+  // --- Centre the active node when the document first opens ---
+  // On open the caret sits on the active node (the root), so we place that
+  // node's box centre at the viewport centre. Placing the target requires the
+  // stage to be sized and the first layout to exist; returns false (so the
+  // caller keeps trying) until both are true. Called synchronously from the
+  // Konva setup BEFORE the first redraw — so the very first frame (and the
+  // coordinates the test API reports) are already centred, with no async shift.
+  const centerOnOpen = useCallback(() => {
+    const stage = konvaStageRef.current;
+    if (!stage) return false;
+    const width = stage.width();
+    const height = stage.height();
+    if (width <= 0 || height <= 0) return false;
+    const flat = nodesRef.current;
+    if (flat.length === 0) return false;
+    const activeId = stateRef.current.view.activeNodeId;
+    const target = flat.find((n) => n.id === activeId) ?? flat[0];
+    const rect = nodeRect(target, flat[0]?.id === target.id);
+    const { offsetX, offsetY } = centerOffset(rectCenter(rect), stage.scaleX(), {
+      width,
+      height,
+    });
+    stage.x(offsetX);
+    stage.y(offsetY);
+    layerRef.current?.draw();
+    updateGridRef.current();
+    return true;
+  }, []);
+  const centerOnOpenRef = useRef(centerOnOpen);
+  centerOnOpenRef.current = centerOnOpen;
+
+  // Re-centre when the note changes (a fresh document should open centred too).
+  useEffect(() => {
+    didCenterRef.current = false;
+  }, [noteId]);
+
+  // Fallback: if the setup couldn't centre yet (stage not sized, or the first
+  // layout not ready), try again once those become available.
+  useEffect(() => {
+    if (didCenterRef.current || !konvaReady) return;
+    if (centerOnOpenRef.current()) {
+      didCenterRef.current = true;
+      setViewportTick((t) => t + 1);
+    }
+  }, [konvaReady, nodes]);
+
+  // --- Keep the active node on-screen (scroll it just into view) ---
+  // Skips the initial open (centre-on-open owns that first frame).
   useEffect(() => {
     const stage = konvaStageRef.current;
-    if (!stage || !activeNodeId) return;
+    if (!stage || !activeNodeId || !didCenterRef.current) return;
 
     const activeNode = nodes.find((n) => n.id === activeNodeId);
     if (!activeNode) return;
 
-    const scale = stage.scaleX();
-    const stageWidth = stage.width();
-    const stageHeight = stage.height();
-    const nodeWidth = 200;
-    const nodeHeight = 32;
-    const padding = 50;
-
-    const nodeScreenX = activeNode.x * scale + stage.x();
-    const nodeScreenY = (activeNode.y - nodeHeight / 2) * scale + stage.y();
-    const nodeScreenWidth = nodeWidth * scale;
-    const nodeScreenHeight = nodeHeight * scale;
-
-    const isVisible =
-      nodeScreenX >= padding &&
-      nodeScreenX + nodeScreenWidth <= stageWidth - padding &&
-      nodeScreenY >= padding &&
-      nodeScreenY + nodeScreenHeight <= stageHeight - padding;
-
-    if (!isVisible) {
-      let targetX = stage.x();
-      let targetY = stage.y();
-
-      if (nodeScreenX < padding) {
-        targetX = padding - activeNode.x * scale;
-      } else if (nodeScreenX + nodeScreenWidth > stageWidth - padding) {
-        targetX = stageWidth - padding - (activeNode.x + nodeWidth) * scale;
-      }
-
-      if (nodeScreenY < padding) {
-        targetY = padding - (activeNode.y - nodeHeight / 2) * scale;
-      } else if (nodeScreenY + nodeScreenHeight > stageHeight - padding) {
-        targetY =
-          stageHeight - padding - (activeNode.y + nodeHeight / 2) * scale;
-      }
-
-      stage.x(targetX);
-      stage.y(targetY);
+    const rect = nodeRect(activeNode, nodes[0]?.id === activeNode.id);
+    const { offsetX, offsetY, changed } = ensureVisibleOffset(
+      rect,
+      { scale: stage.scaleX(), offsetX: stage.x(), offsetY: stage.y() },
+      { width: stage.width(), height: stage.height() },
+      50
+    );
+    if (changed) {
+      stage.x(offsetX);
+      stage.y(offsetY);
       layerRef.current?.draw();
       updateGridRef.current();
     }
@@ -1536,16 +1576,18 @@ export function MindmapEditorView({
     // (see the setup effect) to refill the area.
     const stage = konvaStageRef.current;
     const scale = stage ? stage.scaleX() : 1;
-    const invScale = 1 / scale;
-    const viewW = (stage ? stage.width() : 800) * invScale;
-    const viewH = (stage ? stage.height() : 600) * invScale;
-    const originX = stage ? -stage.x() * invScale : 0;
-    const originY = stage ? -stage.y() * invScale : 0;
+    // World rectangle currently on screen (single source of truth in viewport.ts).
+    const view = stage
+      ? worldViewport(
+          { scale, offsetX: stage.x(), offsetY: stage.y() },
+          { width: stage.width(), height: stage.height() }
+        )
+      : { x: 0, y: 0, width: 800, height: 600 };
     const MARGIN = 0.6; // extra viewport fraction rendered on each side
-    const cullLeft = originX - viewW * MARGIN;
-    const cullTop = originY - viewH * MARGIN;
-    const cullRight = originX + viewW * (1 + MARGIN);
-    const cullBottom = originY + viewH * (1 + MARGIN);
+    const cullLeft = view.x - view.width * MARGIN;
+    const cullTop = view.y - view.height * MARGIN;
+    const cullRight = view.x + view.width * (1 + MARGIN);
+    const cullBottom = view.y + view.height * (1 + MARGIN);
 
     /** A node's (generous) world bounding box intersects the cull rect. */
     const nodeVisible = (node: MindMapNode, isRoot: boolean): boolean => {
