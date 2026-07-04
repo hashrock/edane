@@ -1794,15 +1794,18 @@ export function MindmapEditorView({
               : isEmpty
                 ? "#f8fafc"
                 : "#ffffff",
-        stroke:
-          isEditing || isSelected
+        // Editing gets the emerald accent so "I'm typing here" reads distinctly
+        // from a mere selection (black); everything else keeps its resting edge.
+        stroke: isEditing
+          ? "#10b981"
+          : isSelected
             ? "#000000"
             : isRoot
               ? "#0f172a"
               : asMarkdown
                 ? "#d8b4fe"
                 : "#e2e8f0",
-        strokeWidth: isEditing || isSelected ? 2 : 1,
+        strokeWidth: isEditing ? 2.5 : isSelected ? 2 : 1,
         // Shadow blur is the dominant raster cost; keep the soft shadow only on
         // the single root node and drop the near-invisible one on every other.
         shadowColor: "#0f172a",
