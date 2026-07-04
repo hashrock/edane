@@ -30,7 +30,6 @@ import {
   generateId,
   cloneModel,
   addSiblingAfter,
-  removeNode,
   detachBranch,
   cloneWithNewIds,
   indentNode,
@@ -416,7 +415,13 @@ function documentReducer(
       if (action.nodeId === document.model.id) return { document }; // never delete root
       const order = getFlatOrder(document.model);
       const idx = order.indexOf(action.nodeId);
-      const newModel = removeNode(document.model, action.nodeId);
+      // Delete the node together with its WHOLE subtree (children are removed,
+      // not promoted to the parent level).
+      const { model: newModel, removed } = detachBranch(
+        document.model,
+        action.nodeId
+      );
+      if (removed === null) return { document }; // root (or unknown) → no-op
       const newDocument = { ...document, model: newModel };
       // Only refocus if the currently active node disappeared.
       if (activeNodeId && !findNode(newModel, activeNodeId)) {
