@@ -954,6 +954,19 @@ describe("deleteNode", () => {
     const s = stateAt(model, "root");
     expect(editorReducer(s, { type: "deleteNode", nodeId: "root" })).toBe(s);
   });
+
+  it("deletes the whole subtree, removing children too (no promotion)", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a"); // active = "a", which has child "a1"
+    const next = editorReducer(s, { type: "deleteNode", nodeId: "a" });
+    // "a" and its child "a1" are both gone; the child is NOT promoted to root.
+    expect(findNode(next.document.model, "a")).toBeNull();
+    expect(findNode(next.document.model, "a1")).toBeNull();
+    // Root's remaining children are just "b".
+    expect(next.document.model.children.map((c) => c.id)).toEqual(["b"]);
+    // Active node "a" disappeared → refocus to root (no surviving previous node).
+    expect(next.view.activeNodeId).toBe("root");
+  });
 });
 
 describe("setNodeType", () => {
