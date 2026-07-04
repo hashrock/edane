@@ -366,6 +366,8 @@ export function MindmapEditorView({
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [konvaReady, setKonvaReady] = useState(false);
+  // True while an image file is being dragged over the canvas (drop-to-upload).
+  const [dropActive, setDropActive] = useState(false);
   // Bumped whenever the stage is panned or zoomed so the (viewport-culled)
   // redraw effect re-runs and refills the newly-visible area. See the redraw
   // effect below — only nodes intersecting the visible viewport are built.
@@ -640,6 +642,84 @@ export function MindmapEditorView({
       }
     },
     [dispatch, noteId, saveNote, updateSaveStatus]
+  );
+
+  // --- Drag & drop image files from the OS onto the canvas ---
+  // Resolve which node (if any) sits under a client-space point, so a dropped
+  // image attaches as that node's child; misses fall back to the active node.
+  const nodeIdAtClientPoint = useCallback(
+    (clientX: number, clientY: number): string | null => {
+      const stage = konvaStageRef.current;
+      if (!stage) return null;
+      const rect = stage.container().getBoundingClientRect();
+      const scale = stage.scaleX();
+      const worldX = (clientX - rect.left - stage.x()) / scale;
+      const worldY = (clientY - rect.top - stage.y()) / scale;
+      const flat = nodesRef.current;
+      for (const n of flat) {
+        const w = nodeBoxWidth(n.width, flat[0]?.id === n.id);
+        const h = nodeBoxHeight(n.height);
+        if (
+          worldX >= n.x &&
+          worldX <= n.x + w &&
+          worldY >= n.y - h / 2 &&
+          worldY <= n.y + h / 2
+        ) {
+          return n.id;
+        }
+      }
+      return null;
+    },
+    []
+  );
+
+  const dragHasImage = (dt: DataTransfer | null) =>
+    !!dt && Array.from(dt.items ?? []).some((it) => it.kind === "file");
+
+  const handleCanvasDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!dragHasImage(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setDropActive(true);
+    },
+    []
+  );
+
+  const handleCanvasDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      // Ignore leaves into descendant elements; only clear when the pointer
+      // actually exits the drop container.
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setDropActive(false);
+    },
+    []
+  );
+
+  const handleCanvasDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      setDropActive(false);
+      const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+        f.type.startsWith("image/")
+      );
+      if (files.length === 0) return;
+      e.preventDefault();
+      const st = stateRef.current;
+      const targetId =
+        nodeIdAtClientPoint(e.clientX, e.clientY) ??
+        st.view.activeNodeId ??
+        st.document.model.id;
+      // Each image becomes a fresh child of the drop target; upload sequentially
+      // so the save-status line and the R2 requests don't stomp each other.
+      void (async () => {
+        for (const file of files) {
+          const next = dispatch({ type: "addChild", nodeId: targetId }, "add-child");
+          const newId = next.view.activeNodeId;
+          if (newId) await uploadAndSetImage(newId, file);
+        }
+      })();
+    },
+    [dispatch, nodeIdAtClientPoint, stateRef, uploadAndSetImage]
   );
 
   const triggerImageUpload = useCallback((nodeId: string) => {
@@ -2475,12 +2555,27 @@ export function MindmapEditorView({
           </div>
         )}
       </header>
-      <div className="flex-1 relative overflow-hidden bg-slate-50">
+      <div
+        className="flex-1 relative overflow-hidden bg-slate-50"
+        onDragOver={handleCanvasDragOver}
+        onDragLeave={handleCanvasDragLeave}
+        onDrop={handleCanvasDrop}
+      >
         <div
           ref={canvasRef}
           data-testid="mm-canvas"
           className="absolute inset-0 [background-size:20px_20px]"
         />
+        {dropActive && (
+          <div
+            data-testid="mm-drop-overlay"
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-500/10"
+          >
+            <span className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-md">
+              画像をドロップしてアップロード
+            </span>
+          </div>
+        )}
         <textarea
           ref={inputRef}
           value={editingText}
