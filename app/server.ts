@@ -25,6 +25,25 @@ const app = new Hono<Env>();
 // --- Session middleware (with dev bypass) ---
 app.use("*", async (c, next) => {
   if (c.env.DEV_BYPASS_AUTH) {
+    // Dev-only: preview the logged-out landing page while auth is bypassed.
+    // `?guest=1` flips into guest mode (persisted in a cookie so the LP's
+    // embedded /guest iframe is guest too); `?guest=0` flips back to Dev User.
+    const cookie = c.req.header("Cookie") || "";
+    let guest = /(?:^|;\s*)dev_guest=1(?:;|$)/.test(cookie);
+    const q = new URL(c.req.url).searchParams.get("guest");
+    if (q !== null) {
+      guest = q !== "0";
+      c.header(
+        "Set-Cookie",
+        guest
+          ? "dev_guest=1; Path=/; SameSite=Lax"
+          : "dev_guest=; Path=/; Max-Age=0; SameSite=Lax"
+      );
+    }
+    if (guest) {
+      c.set("user", null);
+      return next();
+    }
     const db = drizzle(c.env.DB);
     const existing = await db
       .select()
