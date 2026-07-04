@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 interface Props {
   isPublic: boolean;
@@ -14,33 +14,55 @@ const OPTIONS: { value: boolean; label: string }[] = [
 /**
  * Publicity selector rendered as a dropdown (replaces the old "公開する"
  * checkbox). The trigger shows the current state; the menu lists both options
- * with a check next to the active one. Closes on outside click or Escape.
+ * with a check next to the active one.
+ *
+ * The menu uses the Popover API (`popover="auto"`) so it renders in the browser
+ * top layer — it can never be hidden behind the Konva canvas or any other
+ * stacking context (the previous z-index approach lost that fight). CSS anchor
+ * positioning pins it to the trigger's bottom-right. Light-dismiss (outside
+ * click / Escape) is handled by the platform, so no manual listeners are needed.
  */
+// CSS anchor positioning is Chromium-only today; elsewhere the popover would
+// render top-layer but unanchored (centered). Detect support once so we can
+// fall back to positioning it from the trigger's rect by hand.
+const SUPPORTS_ANCHOR =
+  typeof CSS !== "undefined" && CSS.supports?.("anchor-name: --a");
+
 export default function PublicityDropdown({ isPublic, onChange }: Props) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Unique, CSS-ident-safe names so multiple instances don't clash.
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const popId = `publicity-menu-${uid}`;
+  const anchorName = `--publicity-anchor-${uid}`;
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
+  const handleToggle = (e: React.ToggleEvent<HTMLDivElement>) => {
+    const nowOpen = e.newState === "open";
+    setOpen(nowOpen);
+    // Fallback positioning for browsers without CSS anchor positioning: pin the
+    // popover's top-right under the trigger using viewport coordinates.
+    if (nowOpen && !SUPPORTS_ANCHOR) {
+      const t = triggerRef.current;
+      const p = popoverRef.current;
+      if (t && p) {
+        const r = t.getBoundingClientRect();
+        p.style.top = `${r.bottom + 4}px`;
+        p.style.right = `${window.innerWidth - r.right}px`;
+        p.style.left = "auto";
+        p.style.bottom = "auto";
+        p.style.margin = "0";
+      }
+    }
+  };
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        ref={triggerRef}
+        popoverTarget={popId}
+        style={{ anchorName } as React.CSSProperties}
         className="flex items-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
         {isPublic ? "みんなに公開中" : "自分だけ"}
@@ -52,26 +74,39 @@ export default function PublicityDropdown({ isPublic, onChange }: Props) {
           ▾
         </span>
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
-          {OPTIONS.map((opt) => (
-            <button
-              key={String(opt.value)}
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                if (opt.value !== isPublic) onChange(opt.value);
-              }}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-            >
-              {opt.label}
-              {opt.value === isPublic && (
-                <span className="text-slate-900">✓</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      <div
+        ref={popoverRef}
+        id={popId}
+        popover="auto"
+        onToggle={handleToggle}
+        style={
+          {
+            positionAnchor: anchorName,
+            top: "anchor(bottom)",
+            right: "anchor(right)",
+            left: "auto",
+            bottom: "auto",
+            margin: 0,
+            marginTop: "4px",
+          } as React.CSSProperties
+        }
+        className="min-w-[160px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+      >
+        {OPTIONS.map((opt) => (
+          <button
+            key={String(opt.value)}
+            type="button"
+            onClick={() => {
+              popoverRef.current?.hidePopover();
+              if (opt.value !== isPublic) onChange(opt.value);
+            }}
+            className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+          >
+            {opt.label}
+            {opt.value === isPublic && <span className="text-slate-900">✓</span>}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }

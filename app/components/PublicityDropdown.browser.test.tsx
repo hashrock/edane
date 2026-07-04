@@ -39,9 +39,11 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
 
 const trigger = () =>
   waitFor(() => document.querySelector<HTMLButtonElement>("button"));
+const popover = () => document.querySelector<HTMLElement>("[popover]");
+const isOpen = () => !!popover()?.matches(":popover-open");
 const menuItems = () =>
   Array.from(
-    document.querySelectorAll<HTMLButtonElement>(".absolute button")
+    popover()?.querySelectorAll<HTMLButtonElement>("button") ?? []
   );
 
 describe("PublicityDropdown (browser e2e)", () => {
@@ -57,15 +59,23 @@ describe("PublicityDropdown (browser e2e)", () => {
     expect((await trigger()).textContent).toContain("自分だけ");
   });
 
+  it("renders the menu in the top layer (popover), not a z-indexed div", async () => {
+    calls().length = 0;
+    render(<Harness initial={false} />);
+    await trigger();
+    // The menu is a real popover element — it lives in the browser top layer,
+    // so it can't be occluded by the canvas/stacking contexts.
+    expect(popover()).not.toBeNull();
+    expect(popover()!.getAttribute("popover")).toBe("auto");
+  });
+
   it("opens the menu, checks the active option, and switches on select", async () => {
     calls().length = 0;
     render(<Harness initial={false} />);
     await userEvent.click(await trigger());
+    await waitFor(isOpen);
 
-    const items = await waitFor(() => {
-      const its = menuItems();
-      return its.length === 2 ? its : null;
-    });
+    const items = menuItems();
     expect(items.map((b) => b.textContent?.replace("✓", "").trim())).toEqual([
       "自分だけ",
       "みんなに公開",
@@ -77,20 +87,50 @@ describe("PublicityDropdown (browser e2e)", () => {
     await userEvent.click(items[1]);
     expect(calls()).toEqual([true]);
     // Menu closes after selecting.
-    await waitFor(() => menuItems().length === 0 || true);
-    expect(menuItems().length).toBe(0);
+    await waitFor(() => !isOpen());
     expect((await trigger()).textContent).toContain("みんなに公開中");
+  });
+
+  it("renders above a high z-index overlay (the reported bug)", async () => {
+    calls().length = 0;
+    render(
+      <>
+        {/* Stand-in for the Konva canvas / stacking context that used to win. */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2147483647,
+            background: "rgba(255,0,0,0.5)",
+          }}
+        />
+        <Harness initial={false} />
+      </>
+    );
+    // Open programmatically: in this synthetic layout the overlay also covers
+    // the trigger (in the real app the trigger is in the header, above the
+    // canvas). We only want to assert top-layer stacking of the open menu.
+    await trigger();
+    popover()!.showPopover();
+    await waitFor(isOpen);
+
+    // The top layer beats any z-index: the point over a menu item hits the
+    // menu, not the overlay.
+    const item = menuItems()[1];
+    const r = item.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      r.left + r.width / 2,
+      r.top + r.height / 2
+    );
+    expect(popover()!.contains(hit)).toBe(true);
   });
 
   it("does not fire onChange when picking the already-active option", async () => {
     calls().length = 0;
     render(<Harness initial={true} />);
     await userEvent.click(await trigger());
-    const items = await waitFor(() => {
-      const its = menuItems();
-      return its.length === 2 ? its : null;
-    });
-    await userEvent.click(items[1]); // みんなに公開 (already active)
+    await waitFor(isOpen);
+    await userEvent.click(menuItems()[1]); // みんなに公開 (already active)
     expect(calls()).toEqual([]);
   });
 });
