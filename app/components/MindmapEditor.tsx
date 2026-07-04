@@ -1702,15 +1702,26 @@ export function MindmapEditorView({
       <header className="anim-header flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
         <div className="flex items-center gap-3 min-w-0">
           {!embed && (
-            <>
-              <Link
-                href="/notes"
-                className="text-sm font-medium text-emerald-700 hover:text-emerald-800 whitespace-nowrap"
+            <Link
+              href="/notes"
+              aria-label="一覧へ戻る"
+              title="一覧へ戻る"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                ← 一覧
-              </Link>
-              <div className="h-6 w-px bg-slate-200" />
-            </>
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </Link>
           )}
           {editingTitle ? (
             <input
