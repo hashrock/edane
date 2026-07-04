@@ -1,0 +1,4 @@
+states/
+*.st
+*.old
+MC.out

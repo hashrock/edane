@@ -1,0 +1,9 @@
+Implied-temporal checking--satisfiability problem has 1 branches.
+Finished computing initial states: 1 distinct state generated at 2026-07-04 16:01:23.
+Progress(7) at 2026-07-04 16:01:23: 39 states generated, 13 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 13 total distinct states at (2026-07-04 16:01:23)
+Finished checking temporal properties in 00s at 2026-07-04 16:01:23
+Model checking completed. No error has been found.
+  because two distinct states had the same fingerprint:
+39 states generated, 13 distinct states found, 0 states left on queue.
+Finished in 00s at (2026-07-04 16:01:23)

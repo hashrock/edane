@@ -1,0 +1,5 @@
+Error: Invariant NoStuckPreview is violated.
+State 1: <Initial predicate>
+State 2: <MouseDownMove line 58, col 3 to line 64, col 22 of module DragLifecycleBug>
+State 3: <ThresholdMove line 79, col 3 to line 84, col 36 of module DragLifecycleBug>
+State 4: <ReleaseOff line 117, col 3 to line 122, col 19 of module DragLifecycleBug>
