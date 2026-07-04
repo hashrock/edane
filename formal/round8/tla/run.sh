@@ -12,3 +12,5 @@ echo; echo "== FINDING: no retry on failed autosave (Spec) — expect: violation
 tlc -deadlock -config AutosaveRace.cfg Autosave.tla || true
 echo; echo "== FINDING: out-of-order save completion (SpecHappy) — expect: violation =="
 tlc -deadlock -config AutosaveRaceHappy.cfg Autosave.tla || true
+echo; echo "== FIXED (version guard + retry) — expect: No error incl. BaselineConsistent =="
+tlc -deadlock -config AutosaveFixed.cfg Autosave.tla

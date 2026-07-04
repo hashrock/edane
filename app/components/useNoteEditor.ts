@@ -99,6 +99,14 @@ export function useNoteEditor({
   // initial model, so that's our clean baseline; every successful save advances
   // it. `isDirty()` compares the live model against this.
   const lastSavedContentRef = useRef<string>(serializeModel(model));
+  // Monotonic save-dispatch counter. An edit can arrive while a save is still
+  // in flight, so two saves run concurrently and their responses may land out
+  // of order. Each save takes the next `saveSeqRef` on dispatch; on success we
+  // only advance the baseline when this save is the newest one acknowledged
+  // (`ackedSeqRef`), so a slow older save can never regress the baseline and
+  // resurrect a false "unsaved" state.
+  const saveSeqRef = useRef(0);
+  const ackedSeqRef = useRef(0);
   // Set true just before re-issuing a visit we already flushed, so the
   // navigation guard lets that one visit pass through instead of re-flushing.
   const bypassNavGuardRef = useRef(false);
@@ -132,6 +140,7 @@ export function useNoteEditor({
     async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
       if (!noteId) return true;
       const content = serializeModel(currentModel);
+      const seq = ++saveSeqRef.current;
       updateSaveStatus("保存中...");
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
@@ -145,10 +154,14 @@ export function useNoteEditor({
           }),
         });
         if (res.ok) {
-          // Remember exactly what we persisted so isDirty() goes clean until
-          // the next edit (avoids false "unsaved" prompts on navigation).
-          lastSavedContentRef.current = content;
-          updateSaveStatus("保存済み");
+          // Advance the baseline only if no newer save has already been
+          // acknowledged — an out-of-order older completion must not roll the
+          // baseline (and the "unsaved" state) backwards.
+          if (seq > ackedSeqRef.current) {
+            ackedSeqRef.current = seq;
+            lastSavedContentRef.current = content;
+            updateSaveStatus("保存済み");
+          }
           return true;
         }
         updateSaveStatus("保存失敗");
@@ -170,15 +183,27 @@ export function useNoteEditor({
     [noteId]
   );
 
-  // Debounced auto-save
+  // Debounced auto-save (with retry-on-failure).
   useEffect(() => {
     if (!noteId) return;
     // Reflect the pending edit immediately so the header shows the note isn't
     // persisted yet (the save itself flips this to 保存中... → 保存済み).
     if (isDirty()) updateSaveStatus("未保存");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => saveNote(model), 1500);
+    let cancelled = false;
+    // A failed autosave used to sit unsaved until the next edit or navigation.
+    // Re-arm with exponential backoff (capped) so a transient failure recovers
+    // on its own; stop once the save lands or the model changes (this effect
+    // re-runs and resets the chain).
+    const arm = (delay: number) => {
+      saveTimerRef.current = setTimeout(async () => {
+        const ok = await saveNote(modelRef.current);
+        if (!cancelled && !ok && isDirty()) arm(Math.min(delay * 2, 15000));
+      }, delay);
+    };
+    arm(1500);
     return () => {
+      cancelled = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [model, noteId, saveNote, isDirty, updateSaveStatus]);

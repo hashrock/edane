@@ -1,29 +1,14 @@
 ### safety (Spec) — expect: No error
 Model checking completed. No error has been found.
-  because two distinct states had the same fingerprint:
-126 states generated, 55 distinct states found, 0 states left on queue.
 
 ### liveness happy (SpecHappy) — expect: No error
-Progress(9) at 2026-07-04 16:12:52: 35 states generated, 25 distinct states found, 0 states left on queue.
-Checking temporal properties for the complete state space with 25 total distinct states at (2026-07-04 16:12:52)
 Model checking completed. No error has been found.
-  because two distinct states had the same fingerprint:
-35 states generated, 25 distinct states found, 0 states left on queue.
 
-### race full (Spec) — expect: BaselineConsistent violated (no-retry-on-fail)
+### FINDING no-retry (Spec) — expect: violation
 Error: Invariant BaselineConsistent is violated.
-State 4: <Edit line 106, col 3 to line 113, col 36 of module Autosave>
-State 5: <TimerFire line 121, col 3 to line 127, col 76 of module Autosave>
-State 6: <Next line 184, col 6 to line 184, col 36 of module Autosave>
 
-### race happy (SpecHappy) — expect: BaselineConsistent violated (out-of-order completion)
+### FINDING out-of-order (SpecHappy) — expect: violation
 Error: Invariant BaselineConsistent is violated.
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 0
-/\ lastSaved = 2
-/\ lastSaved = 1
+
+### FIXED (SpecFixed) — expect: No error incl. BaselineConsistent
+Model checking completed. No error has been found.

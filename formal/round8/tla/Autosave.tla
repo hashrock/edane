@@ -204,6 +204,40 @@ NextHappy ==
 SpecHappy == Init /\ [][NextHappy]_vars /\ Fairness
 
 ------------------------------------------------------------------------------
+\* ---- The FIXED autosave (app/components/useNoteEditor.ts, this round) ----
+\* Two fixes, each mirrored here to re-verify BaselineConsistent now HOLDS:
+\*   (1) version guard: on success, advance the baseline only when this save is
+\*       the newest acknowledged — lastSaved := Max(lastSaved, v) — so an
+\*       out-of-order older completion can't regress it.
+\*   (2) retry-on-failure: a failed save re-arms the debounce timer, instead of
+\*       leaving the doc unsaved until the next edit / navigation.
+
+SaveOkGuarded(v) ==
+  /\ ~navigated
+  /\ v \in inflight
+  /\ inflight' = inflight \ {v}
+  /\ lastSaved' = Max(lastSaved, v)      \* (1) never regress the baseline
+  /\ UNCHANGED <<phase, konvaReady, modelVer, serverLatest, timer,
+                 navigated, dialog>>
+
+SaveFailRetry(v) ==
+  /\ ~navigated
+  /\ v \in inflight
+  /\ inflight' = inflight \ {v}
+  /\ timer' = "armed"                     \* (2) re-arm to retry
+  /\ UNCHANGED <<phase, konvaReady, modelVer, lastSaved, serverLatest,
+                 navigated, dialog>>
+
+NextFixed ==
+  \/ ResolveGuest \/ ResolveEditing \/ Render
+  \/ Edit
+  \/ TimerFire
+  \/ \E v \in inflight : SaveOkGuarded(v)
+  \/ \E v \in inflight : SaveFailRetry(v)
+  \/ NavClean \/ NavFlushOk \/ NavFlushFail
+SpecFixed == Init /\ [][NextFixed]_vars /\ Fairness
+
+------------------------------------------------------------------------------
 \* ---- Safety invariants (expected to HOLD) ----
 
 \* Login gating: a guest never issues a network write — nothing in flight, and
