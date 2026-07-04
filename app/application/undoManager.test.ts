@@ -117,6 +117,19 @@ describe("UndoManager text batching", () => {
     expect(m.canUndo()).toBe(false);
   });
 
+  it("does not push an entry when the pending batch changed nothing", () => {
+    // A batch can open (handleTextChange) without the document changing — e.g.
+    // mid-IME composition. Committing must not leave a no-op entry, or the next
+    // undo() would be wasted popping it (first Ctrl+Z appears to do nothing).
+    const m = new UndoManager();
+    const same = st("same");
+    m.setCommitCallback(() => same);
+    m.handleTextChange(same);
+    m.commitPendingText();
+    expect(m.hasPendingText()).toBe(false);
+    expect(m.canUndo()).toBe(false);
+  });
+
   it("canUndo is true when there is pending text even with no stack entries", () => {
     const m = new UndoManager();
     m.handleTextChange(st("x"));

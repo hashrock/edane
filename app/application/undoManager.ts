@@ -38,11 +38,19 @@ export class UndoManager {
     this.onCommitPending = () => {
       if (this.pendingTextBefore) {
         const stateAfter = fn();
-        this.pushCommand({
-          type: "text",
-          stateBefore: this.pendingTextBefore,
-          stateAfter,
-        });
+        // Only record an entry when the document actually changed. A batch can
+        // open (handleTextChange) without the model changing — e.g. mid-IME
+        // composition, where typeText updates only the view. Pushing a no-op
+        // pair here would waste an undo press: undo() commits pending text, then
+        // pops that empty entry, so the first Ctrl+Z appears to do nothing.
+        // Mirrors the stateBefore !== after guard in endTransaction().
+        if (this.pendingTextBefore !== stateAfter) {
+          this.pushCommand({
+            type: "text",
+            stateBefore: this.pendingTextBefore,
+            stateAfter,
+          });
+        }
         this.pendingTextBefore = null;
       }
     };

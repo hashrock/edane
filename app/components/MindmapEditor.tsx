@@ -657,6 +657,12 @@ export function MindmapEditorView({
         { type: "insertNodes", targetId, nodes: freshChildren },
         "paste"
       );
+      // Land in selection mode on the pasted subtree rather than leaving the
+      // caret inside a pasted node: if the paste happened while editing, edit
+      // mode would otherwise persist (focusView keeps it), and the next
+      // keystroke would become a separate "text" undo entry — making the paste
+      // feel like it needs two Ctrl+Z to undo. View-only, so no undo entry.
+      dispatch({ type: "exitEditing" });
       // Flash every inserted node so the paste destination is obvious.
       const collectIds = (n: MindMapModel): string[] => [
         n.id,
@@ -768,6 +774,9 @@ export function MindmapEditorView({
           { type: "insertNodes", targetId, nodes: fresh },
           "paste"
         );
+        // Land in selection mode so a follow-up keystroke doesn't become a
+        // separate undo step (see pasteTextAsNodes). View-only, no undo entry.
+        dispatch({ type: "exitEditing" });
         flashNodes(fresh.flatMap(collectIds));
         if (noteId) saveNote(next.document.model);
       };

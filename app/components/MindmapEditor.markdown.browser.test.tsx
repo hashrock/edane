@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
+import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
@@ -123,5 +124,41 @@ describe("MindmapEditor markdown paste", () => {
     expect(heading.children.map((c) => c.text)).toEqual(["one", "two"]);
     // The decomposed nodes are plain text, not markdown.
     expect(heading.type).toBeUndefined();
+  });
+
+  it("lands in selection mode and reverts in one undo when pasted while editing", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    // Enter edit mode on "Alpha" so the paste happens while editing.
+    const point = await waitFor(() => api().getNodeClickPoint("a"));
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+    const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
+    await userEvent.click(canvas, {
+      position: { x: Math.round(point.x), y: Math.round(point.y) },
+    });
+    await waitFor(() => api().getActiveNodeId() === "a");
+    await userEvent.keyboard("[Space]");
+    await waitFor(() => api().getSelection().editing === true);
+
+    const before = api().getModel().children.length; // 1
+
+    pasteMarkdown("# Heading\n- one\n- two");
+    const btn = await waitFor(() =>
+      [...document.querySelectorAll("button")].find((b) =>
+        b.textContent?.includes("分解してペースト")
+      )
+    );
+    btn.click();
+    await waitFor(() => allNodes(api().getModel()).find((n) => n.text === "Heading"));
+
+    // Paste must drop back to selection mode — otherwise the caret sits inside a
+    // pasted node and the next keystroke becomes a separate undo step.
+    expect(api().getSelection().editing).toBe(false);
+
+    // A single undo fully reverts the decompose paste.
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    await waitFor(() => api().getModel().children.length === before);
+    expect(allNodes(api().getModel()).some((n) => n.text === "Heading")).toBe(false);
   });
 });
