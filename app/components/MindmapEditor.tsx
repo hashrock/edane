@@ -3,6 +3,7 @@ import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel } from "../domain/model";
 import { findNode, cloneWithNewIds } from "../domain/model";
+import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
@@ -19,7 +20,6 @@ import {
 } from "../application/nodeUtils";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import {
-  parseContent,
   serializeModel,
   modelToText,
   textToModel,
@@ -28,18 +28,13 @@ import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
-import {
-  editorReducer,
-  type EditorState,
-  type EditorAction,
-} from "../application/editorReducer";
+import type { EditorState } from "../application/editorReducer";
 import {
   buildKeymap,
   runKeymap,
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
-import { UndoManager } from "../application/undoManager";
 
 // --- Text measurement (cached) ---
 // The canvas redraw needs each node's width and per-character cursor offsets.
@@ -244,40 +239,52 @@ interface Props {
   onSaveToAccount?: (note: { title: string; content: string }) => void;
 }
 
-export default function MindmapEditor({
-  noteId,
-  initialContent,
-  initialTitle,
-  initialIsPublic,
+interface ViewProps {
+  engine: NoteEditorEngine;
+  /** Embedded (iframe) mode: hide the navigation header. */
+  embed?: boolean;
+  onSaveToAccount?: (note: { title: string; content: string }) => void;
+  /** Switch to the outline layout (rendered as a header button when present). */
+  onSwitchLayout?: () => void;
+}
+
+/**
+ * The Konva mind-map view. Rendering + pointer interaction only; all editing
+ * state, dispatch, undo and persistence come from the shared {@link useNoteEditor}
+ * engine so this view and the mobile outline view stay perfectly in sync.
+ */
+export function MindmapEditorView({
+  engine,
   embed,
   onSaveToAccount,
-}: Props) {
-  // --- Single source of truth: the full editor state ---
-  // Exactly one node is always selected; the root starts active.
-  const [state, setStateRaw] = useState<EditorState>(() => {
-    const model = parseContent(initialContent, initialTitle);
-    return {
-      document: { model, clipboard: null },
-      view: {
-        activeNodeId: model.id,
-        editing: false,
-        editingText: model.text,
-        cursorPos: 0,
-        selectionEnd: 0,
-      },
-    };
-  });
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  onSwitchLayout,
+}: ViewProps) {
+  const {
+    state,
+    stateRef,
+    model,
+    modelRef,
+    dispatch,
+    saveNote,
+    updateSaveStatus,
+    saveStatusRef,
+    undoManagerRef,
+    undo,
+    redo,
+    isPublic,
+    setIsPublic,
+    noteId,
+    leaveConfirm,
+    setLeaveConfirm,
+    bypassNavGuardRef,
+  } = engine;
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
-    document: { model },
     view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
   } = state;
 
   // --- UI-only state (not part of the editing document) ---
-  const [isPublic, setIsPublic] = useState(initialIsPublic || false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -301,13 +308,6 @@ export default function MindmapEditor({
     y: number;
     nodeId: string;
   } | null>(null);
-  // A navigation was attempted while a save was failing; ask before leaving so
-  // an unsaved edit isn't dropped. Holds the pending Inertia visit to resume.
-  const [leaveConfirm, setLeaveConfirm] = useState<{
-    url: string | URL;
-    method: "get" | "post" | "put" | "patch" | "delete";
-  } | null>(null);
-
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -317,16 +317,7 @@ export default function MindmapEditor({
   const layerRef = useRef<any>(null);
   const cursorLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
-  const saveTimerRef = useRef<any>(null);
-  // Serialized content last confirmed persisted. The server just handed us the
-  // initial model, so that's our clean baseline; every successful save advances
-  // it. `isDirty()` compares the live model against this.
-  const lastSavedContentRef = useRef<string>(serializeModel(model));
-  // Set true just before re-issuing a visit we already flushed, so the
-  // navigation guard lets that one visit pass through instead of re-flushing.
-  const bypassNavGuardRef = useRef(false);
   const updateGridRef = useRef<() => void>(() => {});
-  const saveStatusRef = useRef<HTMLSpanElement>(null);
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<{
     nodeId: string;
@@ -340,7 +331,6 @@ export default function MindmapEditor({
     moved: boolean;
   } | null>(null);
   const wasDraggingRef = useRef(false);
-  const undoManagerRef = useRef(new UndoManager());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isComposingRef = useRef(false);
   // Non-production perf counters for the (expensive) main canvas redraw.
@@ -350,27 +340,6 @@ export default function MindmapEditor({
     redrawLastMs: 0,
     redrawDrawMs: 0,
   });
-  const modelRef = useRef(model);
-  modelRef.current = model;
-
-  // --- Central dispatch: state -> action -> newState ---
-  // Pure reducer computes the complete next state; a no-op returns the same
-  // reference so we skip re-render and undo bookkeeping.
-  const dispatch = useCallback(
-    (action: EditorAction, undoType?: string): EditorState => {
-      const prev = stateRef.current;
-      const next = editorReducer(prev, action);
-      if (next === prev) return prev;
-      if (undoType && next.document !== prev.document) {
-        undoManagerRef.current.push(undoType, prev.document, next.document);
-      }
-      stateRef.current = next;
-      setStateRaw(next);
-      return next;
-    },
-    []
-  );
-
   // Briefly highlight a set of nodes (used to show where a paste/insert landed).
   const flashNodes = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
@@ -408,127 +377,6 @@ export default function MindmapEditor({
   // Title = root node text
   const title = model.text;
 
-  // --- Save ---
-  const updateSaveStatus = useCallback((status: string) => {
-    if (saveStatusRef.current) saveStatusRef.current.textContent = status;
-  }, []);
-
-  const saveNote = useCallback(
-    async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
-      if (!noteId) return true;
-      const content = serializeModel(currentModel);
-      updateSaveStatus("保存中...");
-      try {
-        const res = await fetch(`/api/notes/${noteId}`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content,
-            title: currentModel.text,
-            isPublic: pub ?? isPublic,
-          }),
-        });
-        if (res.ok) {
-          // Remember exactly what we persisted so isDirty() goes clean until
-          // the next edit (avoids false "unsaved" prompts on navigation).
-          lastSavedContentRef.current = content;
-          updateSaveStatus("保存済み");
-          return true;
-        }
-        updateSaveStatus("保存失敗");
-        return false;
-      } catch {
-        updateSaveStatus("保存失敗");
-        return false;
-      }
-    },
-    [noteId, isPublic, updateSaveStatus]
-  );
-
-  // Are there edits not yet confirmed persisted? Only meaningful with a noteId
-  // (guest/embed mode has no autosave and nothing to guard).
-  const isDirty = useCallback(
-    () =>
-      !!noteId &&
-      serializeModel(modelRef.current) !== lastSavedContentRef.current,
-    [noteId]
-  );
-
-  // Debounced auto-save
-  useEffect(() => {
-    if (!noteId) return;
-    // Reflect the pending edit immediately so the header shows the note isn't
-    // persisted yet (the save itself flips this to 保存中... → 保存済み).
-    if (isDirty()) updateSaveStatus("未保存");
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => saveNote(model), 1500);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [model, noteId, saveNote, isDirty, updateSaveStatus]);
-
-  // --- Guard against leaving with unsaved edits ---
-  // Tab close / reload / hard navigation: fire a best-effort keepalive save so
-  // the last edit survives, and raise the browser's native confirm as a
-  // backstop in case that request doesn't land.
-  useEffect(() => {
-    if (!noteId) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      if (!isDirty()) return;
-      const current = modelRef.current;
-      fetch(`/api/notes/${noteId}`, {
-        method: "PUT",
-        credentials: "include",
-        keepalive: true,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: serializeModel(current),
-          title: current.text,
-          isPublic,
-        }),
-      }).catch(() => {});
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [noteId, isDirty, isPublic]);
-
-  // Client-side (Inertia) navigation — e.g. the "← 一覧" link or the browser
-  // back button. When there are unsaved edits, hold the visit, flush the save,
-  // then let it proceed; only interrupt the user with a dialog if that save
-  // fails (otherwise navigation stays invisible, matching the autosave UX).
-  useEffect(() => {
-    if (!noteId) return;
-    return router.on("before", (event) => {
-      // The visit we re-issue after a successful flush must pass through.
-      if (bypassNavGuardRef.current) {
-        bypassNavGuardRef.current = false;
-        return;
-      }
-      if (!isDirty()) return;
-      event.preventDefault();
-      const visit = event.detail.visit;
-      void (async () => {
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        const ok = await saveNote(modelRef.current);
-        if (ok) {
-          bypassNavGuardRef.current = true;
-          router.visit(visit.url, {
-            method: visit.method,
-            data: visit.data,
-            replace: visit.replace,
-            preserveScroll: visit.preserveScroll,
-            preserveState: visit.preserveState,
-          });
-        } else {
-          setLeaveConfirm({ url: visit.url, method: visit.method });
-        }
-      })();
-    });
-  }, [noteId, isDirty, saveNote]);
-
   // --- Cursor blink ---
   useEffect(() => {
     if (!activeNodeId) return;
@@ -536,11 +384,6 @@ export default function MindmapEditor({
     const interval = setInterval(() => setCursorVisible((v) => !v), 530);
     return () => clearInterval(interval);
   }, [activeNodeId, cursorPos, editingText]);
-
-  // --- Undo manager: commit pending text using the latest state ---
-  useEffect(() => {
-    undoManagerRef.current.setCommitCallback(() => stateRef.current.document);
-  }, []);
 
   // --- Sync the hidden input to the editor state (single place) ---
   // Replaces the scattered value/setSelectionRange/focus calls.
@@ -966,22 +809,6 @@ export default function MindmapEditor({
   ]);
 
   // --- Keyboard handling ---
-  // Undo/redo restore only the document; the current selection/caret (view
-  // state) is carried over as-is. The `replace` reducer reconciles it against
-  // the restored document, so if the active node no longer exists there it
-  // falls back to the root instead of dangling (which would silently no-op
-  // every subsequent keyboard action).
-  const restoreDocument = useCallback(
-    (restored: EditorState["document"] | null) => {
-      if (!restored) return;
-      dispatch({
-        type: "replace",
-        state: { document: restored, view: stateRef.current.view },
-      });
-    },
-    [dispatch]
-  );
-
   // Central keymap: a single declarative table (see editorKeymap.ts) drives all
   // shortcuts, so bindings stay auditable and the help overlay is generated
   // from the same source.
@@ -992,11 +819,11 @@ export default function MindmapEditor({
         saveNote: (m) => saveNote(m),
         openPalette: () => setCmdPaletteOpen(true),
         openHelp: () => setHelpOpen(true),
-        undo: () => restoreDocument(undoManagerRef.current.undo()),
-        redo: () => restoreDocument(undoManagerRef.current.redo()),
+        undo,
+        redo,
         verticalMove,
       }),
-    [dispatch, saveNote, restoreDocument]
+    [dispatch, saveNote, undo, redo]
   );
 
   const handleKeyDown = useCallback(
@@ -1927,6 +1754,15 @@ export default function MindmapEditor({
               {isPublic ? "公開" : "非公開"}
             </span>
           )}
+          {onSwitchLayout && (
+            <button
+              onClick={onSwitchLayout}
+              className="whitespace-nowrap rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              title="アウトライン表示に切り替え"
+            >
+              アウトライン
+            </button>
+          )}
         </div>
         {noteId && (
           <div className="flex items-center gap-4 text-sm">
@@ -2025,5 +1861,21 @@ export default function MindmapEditor({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Standalone mind-map editor: owns its own editing engine. Used directly by the
+ * guest editor and the browser tests. The responsive {@link NoteEditor} wrapper
+ * instead lifts the engine so it can share it with the mobile outline view.
+ */
+export default function MindmapEditor(props: Props) {
+  const engine = useNoteEditor(props);
+  return (
+    <MindmapEditorView
+      engine={engine}
+      embed={props.embed}
+      onSaveToAccount={props.onSaveToAccount}
+    />
   );
 }

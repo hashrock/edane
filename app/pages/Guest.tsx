@@ -1,5 +1,5 @@
 import { Head } from "@inertiajs/react";
-import MindmapEditor from "../components/MindmapEditor";
+import NoteEditor from "../components/NoteEditor";
 import { stashPendingNote, type PendingNote } from "../lib/guestNote";
 import type { SessionUser } from "../utils/session";
 
@@ -23,7 +23,7 @@ export default function Guest({
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-950">
       <Head title="ゲストエディタ" />
-      <MindmapEditor embed={embed} onSaveToAccount={saveToAccount} />
+      <NoteEditor embed={embed} onSaveToAccount={saveToAccount} />
     </div>
   );
 }
