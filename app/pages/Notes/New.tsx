@@ -1,5 +1,5 @@
 import { Head, Link, useForm } from "@inertiajs/react";
-import type { SessionUser } from "../../utils/session";
+import type { SessionUser } from "../../user";
 
 type User = SessionUser | null;
 

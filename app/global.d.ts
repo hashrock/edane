@@ -1,4 +1,4 @@
-import type { SessionUser } from "./utils/session";
+import type { SessionUser } from "./user";
 
 declare module "hono" {
   interface ContextVariableMap {

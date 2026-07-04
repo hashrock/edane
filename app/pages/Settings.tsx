@@ -1,6 +1,6 @@
 import { Head, Link } from "@inertiajs/react";
 import { useEffect, useState, useCallback } from "react";
-import type { SessionUser } from "../utils/session";
+import type { SessionUser } from "../user";
 
 type User = SessionUser | null;
 

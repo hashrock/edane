@@ -334,6 +334,14 @@ export function MindmapEditorView({
     view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
   } = state;
 
+  // Custom nodes (image / link) keep their rendered preview while editing and
+  // expose the URL in a visible input below the node — mirroring the outline
+  // view — instead of swapping the canvas node to raw-text editing.
+  const activeModelNode = activeNodeId ? findNode(model, activeNodeId) : null;
+  const activeIsCustom =
+    activeModelNode?.type === "image" || activeModelNode?.type === "link";
+  const urlEditing = editing && !!activeNodeId && activeIsCustom;
+
   // --- UI-only state (not part of the editing document) ---
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -352,6 +360,13 @@ export function MindmapEditorView({
     x: 0,
     y: 0,
   });
+  // Screen-space slot of the visible URL box shown under an image/link node
+  // while it is being edited (null = hidden).
+  const [urlBoxPos, setUrlBoxPos] = useState<{
+    x: number;
+    y: number;
+    width: number;
+  } | null>(null);
   // Right-click context menu over a node (null = closed).
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -360,6 +375,7 @@ export function MindmapEditorView({
   } | null>(null);
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -424,19 +440,21 @@ export function MindmapEditorView({
     []
   );
 
-  // Derived: flat nodes with layout. Only while a caret is active (editing) is
-  // the node sized as text from the live buffer, so image/link nodes grow to fit
-  // the URL you type. When merely selected, they keep their real (image/link)
-  // size so the layout box matches what's drawn.
+  // Derived: flat nodes with layout. Only while a caret is active on a TEXT
+  // node is it sized from the live buffer. Image/link nodes keep their real
+  // preview size even while editing — their URL is edited in the visible box
+  // below the node, so the canvas box must keep matching the drawn preview.
   const nodes = useMemo(() => {
     const flat = flattenToNodes(
       model,
-      editing && activeNodeId ? { id: activeNodeId, text: editingText } : undefined
+      editing && activeNodeId && !activeIsCustom
+        ? { id: activeNodeId, text: editingText }
+        : undefined
     );
     if (flat.length > 0) layoutMindMap(flat);
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, editing, activeNodeId, editingText, imageVersion]);
+  }, [model, editing, activeNodeId, activeIsCustom, editingText, imageVersion]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -452,14 +470,23 @@ export function MindmapEditorView({
   }, [activeNodeId, cursorPos, editingText]);
 
   // --- Sync the hidden input to the editor state (single place) ---
-  // Replaces the scattered value/setSelectionRange/focus calls.
+  // Replaces the scattered value/setSelectionRange/focus calls. While a custom
+  // node's URL box is open, the box owns the keyboard — never steal focus back.
   useEffect(() => {
     const el = inputRef.current;
     if (!el || isComposingRef.current) return;
     if (el.value !== editingText) el.value = editingText;
     el.setSelectionRange(cursorPos, selectionEnd);
-    if (activeNodeId) el.focus();
-  }, [editingText, cursorPos, selectionEnd, activeNodeId]);
+    if (activeNodeId && !urlEditing) el.focus();
+  }, [editingText, cursorPos, selectionEnd, activeNodeId, urlEditing]);
+
+  // Hand the keyboard to the right editor when URL editing starts/stops: the
+  // visible URL box while open, the hidden textarea (keymap host) otherwise —
+  // e.g. after Enter/Escape closes the box, arrow navigation must stay live.
+  useEffect(() => {
+    if (urlEditing) urlInputRef.current?.focus();
+    else if (activeNodeId) inputRef.current?.focus();
+  }, [urlEditing, activeNodeId]);
 
   // --- Input handling ---
   const handleInputChange = useCallback(
@@ -509,6 +536,43 @@ export function MindmapEditorView({
       selectionEnd: el.selectionEnd || 0,
     });
   }, [dispatch]);
+
+  // Visible URL box (image / link nodes): edits the node's `text` (its URL)
+  // while the canvas keeps drawing the preview. Persists on change so the
+  // preview and any saved copy stay in sync (same behaviour as the outline
+  // view's inline URL editor).
+  const handleUrlChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      undoManagerRef.current.handleTextChange(stateRef.current.document);
+      const next = dispatch({
+        type: "typeText",
+        text: e.target.value,
+        cursorPos: e.target.selectionStart ?? e.target.value.length,
+        selectionEnd: e.target.selectionEnd ?? e.target.value.length,
+        commitModel: true,
+      });
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, noteId, saveNote]
+  );
+
+  // Refocus the editor after a click/menu/palette interaction, picking the
+  // right keyboard host: the visible URL box while an image/link node is being
+  // edited, the hidden textarea (keymap host) otherwise. Deferred a macrotask
+  // so it survives the interaction's own default focus handling.
+  const focusEditorSoon = useCallback(() => {
+    setTimeout(() => {
+      const v = stateRef.current.view;
+      const t = v.activeNodeId
+        ? findNode(modelRef.current, v.activeNodeId)?.type
+        : undefined;
+      if (v.editing && (t === "image" || t === "link")) {
+        urlInputRef.current?.focus();
+      } else {
+        inputRef.current?.focus();
+      }
+    }, 0);
+  }, []);
 
   // --- Image upload: push a file to R2 and turn the node into an image ---
   const uploadAndSetImage = useCallback(
@@ -772,7 +836,7 @@ export function MindmapEditorView({
           "set-type"
         );
         if (noteId) saveNote(next.document.model);
-        setTimeout(() => inputRef.current?.focus(), 0);
+        focusEditorSoon();
       };
       if (type !== "text") items.push({ label: "テキストにする", onSelect: setType("text") });
       if (type !== "image") items.push({ label: "画像にする（URL）", onSelect: setType("image") });
@@ -844,7 +908,7 @@ export function MindmapEditorView({
         const next = dispatch({ type: "addChild", nodeId }, "add-child");
         if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
         if (noteId) saveNote(next.document.model);
-        setTimeout(() => inputRef.current?.focus(), 0);
+        focusEditorSoon();
       },
     });
     items.push({
@@ -1370,6 +1434,32 @@ export function MindmapEditorView({
     setInputPos({ x: screenX, y: screenY });
   }, [activeNodeId, nodes, cursorPos, editingText]);
 
+  // --- Position the visible URL box under the edited image/link node ---
+  // Re-runs on pan/zoom via viewportTick (like the culled redraw); during an
+  // in-flight pan the box goes briefly stale and snaps back on release.
+  useEffect(() => {
+    const stage = konvaStageRef.current;
+    if (!urlEditing || !stage || !activeNodeId) {
+      setUrlBoxPos(null);
+      return;
+    }
+    const node = nodes.find((n) => n.id === activeNodeId);
+    if (!node) {
+      setUrlBoxPos(null);
+      return;
+    }
+    const scale = stage.scaleX();
+    const isRoot = nodes[0]?.id === node.id;
+    const w = nodeBoxWidth(node.width, isRoot);
+    const h = nodeBoxHeight(node.height);
+    setUrlBoxPos({
+      x: node.x * scale + stage.x(),
+      y: (node.y + h / 2) * scale + stage.y() + 8,
+      // Wide enough to read a URL even when the node (or zoom) is small.
+      width: Math.max(240, w * scale),
+    });
+  }, [urlEditing, activeNodeId, nodes, viewportTick]);
+
   // --- Redraw canvas ---
   useEffect(() => {
     const Konva = konvaRef.current;
@@ -1491,13 +1581,15 @@ export function MindmapEditorView({
       // (link title, stored format) with just an accent outline.
       const isEditing = editing && activeNodeId === node.id;
       const isSelected = !editing && activeNodeId === node.id;
-      // The edited node shows raw text (image/link nodes show their URL while
-      // editing) but still honours its stored font size / weight, so the text
-      // doesn't visually jump when entering or leaving edit mode.
-      const asImage = !isEditing && node.type === "image";
-      const asLink = !isEditing && node.type === "link";
+      // Image/link nodes keep their rendered preview even while editing — the
+      // URL is edited in the visible box below the node — so only TEXT nodes
+      // swap to raw-text (live buffer) editing on the canvas.
+      const isCustom = node.type === "image" || node.type === "link";
+      const isTextEditing = isEditing && !isCustom;
+      const asImage = node.type === "image";
+      const asLink = node.type === "link";
       // Links display their fetched title (falling back to the raw URL).
-      const displayRaw = isEditing
+      const displayRaw = isTextEditing
         ? editingText
         : asLink
           ? node.linkTitle || node.text
@@ -1520,13 +1612,13 @@ export function MindmapEditorView({
         favEntry?.status === "loaded" ? favEntry.img : undefined;
       const favOffset = asLink && node.favicon ? FAVICON_SIZE + FAVICON_GAP : 0;
 
-      // Box geometry from a single measured size. While editing it follows the
-      // caret's own line measurement (so the caret can't overflow the box);
+      // Box geometry from a single measured size. While text-editing it follows
+      // the caret's own line measurement (so the caret can't overflow the box);
       // otherwise it trusts node.width/height from measureModelNode — image,
       // link and text are all sized there, so there's no per-kind branch here.
       let rectWidth: number;
       let rectHeight: number;
-      if (isEditing) {
+      if (isTextEditing) {
         const textWidth = textWidths.get(node.id) || 100;
         rectWidth = nodeBoxWidth(textWidth, isRoot);
         rectHeight = Math.max(32, blockHeight + 14);
@@ -1751,13 +1843,13 @@ export function MindmapEditorView({
         // event's default focus handling (mousedown → mouseup → click are
         // separate tasks; the click default would otherwise blur the input,
         // overriding the focus applied by the input-sync effect).
-        setTimeout(() => inputRef.current?.focus(), 0);
+        focusEditorSoon();
       });
 
       // Double-click → select all text
       group.on("dblclick dbltap", () => {
         dispatch({ type: "selectAllInNode", nodeId: node.id });
-        setTimeout(() => inputRef.current?.focus(), 0);
+        focusEditorSoon();
       });
 
       // Right-click → open the node context menu at the cursor.
@@ -1802,10 +1894,13 @@ export function MindmapEditorView({
 
     const nodePadding = NODE_PADDING;
 
-    if (editing) {
-      // Caret + in-node text selection — only while editing. A merely selected
-      // node is shown with the accent outline drawn on the main layer.
-      const activeNode = nodes.find((n) => n.id === activeNodeId);
+    // Caret + in-node text selection — only while TEXT-editing. A merely
+    // selected node gets its accent outline on the main layer, and an edited
+    // image/link node keeps its caret in the visible URL box instead.
+    const activeNode = nodes.find((n) => n.id === activeNodeId);
+    const activeCustom =
+      activeNode?.type === "image" || activeNode?.type === "link";
+    if (editing && !activeCustom) {
       if (!activeNode) return;
 
       const isRoot = nodes.indexOf(activeNode) === 0;
@@ -2050,7 +2145,7 @@ export function MindmapEditorView({
         open={cmdPaletteOpen}
         onClose={() => {
           setCmdPaletteOpen(false);
-          setTimeout(() => inputRef.current?.focus(), 0);
+          focusEditorSoon();
         }}
       />
       <ShortcutHelp
@@ -2058,7 +2153,7 @@ export function MindmapEditorView({
         open={helpOpen}
         onClose={() => {
           setHelpOpen(false);
-          setTimeout(() => inputRef.current?.focus(), 0);
+          focusEditorSoon();
         }}
       />
       <ConfirmDialog
@@ -2200,6 +2295,36 @@ export function MindmapEditorView({
             fontSize: "14px",
           }}
         />
+        {/* Visible URL editor for image/link nodes: the canvas keeps drawing
+            the node's preview while this box below it edits the URL. Enter /
+            Escape close it and hand the keyboard back to the hidden textarea
+            (via the urlEditing focus effect). */}
+        {urlEditing && urlBoxPos && (
+          <input
+            ref={urlInputRef}
+            data-testid="mm-url-input"
+            type="text"
+            inputMode="url"
+            autoFocus
+            value={editingText}
+            onChange={handleUrlChange}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === "Escape") {
+                e.preventDefault();
+                dispatch({ type: "exitEditing" });
+              }
+            }}
+            placeholder={
+              activeModelNode?.type === "image" ? "画像のURL" : "リンクのURL"
+            }
+            className="absolute z-10 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-md outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            style={{
+              left: `${urlBoxPos.x}px`,
+              top: `${urlBoxPos.y}px`,
+              width: `${urlBoxPos.width}px`,
+            }}
+          />
+        )}
         <input
           ref={imageFileInputRef}
           type="file"
@@ -2220,7 +2345,7 @@ export function MindmapEditorView({
             items={contextMenuItems}
             onClose={() => {
               setContextMenu(null);
-              setTimeout(() => inputRef.current?.focus(), 0);
+              focusEditorSoon();
             }}
           />
         )}

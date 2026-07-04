@@ -1,12 +1,6 @@
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
-
-export type SessionUser = {
-  id: string;
-  email: string;
-  name: string;
-  avatarUrl: string;
-};
+import type { SessionUser } from "../user";
 
 const SESSION_COOKIE = "session";
 
