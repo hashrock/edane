@@ -19,6 +19,7 @@ import {
 import { DEFAULT_FONT_SIZE } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
+import { TrashIcon } from "./icons";
 import type { NoteEditorEngine } from "./useNoteEditor";
 
 interface Props {
@@ -378,7 +379,7 @@ export default function OutlineEditor({
                 <li key={node.id}>
                   <div
                     className={`flex items-start gap-1.5 rounded-lg py-1 pr-1 ${
-                      isActive ? "bg-emerald-50" : ""
+                      isActive ? "bg-slate-100" : ""
                     }`}
                     style={{ paddingLeft: depth * INDENT }}
                   >
@@ -394,7 +395,9 @@ export default function OutlineEditor({
                           activateRow(node.id);
                         }
                       }}
-                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center text-slate-400"
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center ${
+                        isActive ? "text-slate-900" : "text-slate-400"
+                      }`}
                       aria-label={
                         hasChildren ? (collapsed ? "展開" : "折りたたむ") : "項目"
                       }
@@ -545,9 +548,9 @@ export default function OutlineEditor({
             if (activeNodeId)
               withSave("delete", { type: "deleteNode", nodeId: activeNodeId });
           }}
-          className="flex-1 rounded-lg py-2 text-lg text-rose-600 disabled:text-slate-300 enabled:hover:bg-rose-50 enabled:active:bg-rose-100"
+          className="flex flex-1 items-center justify-center rounded-lg py-2 text-rose-600 disabled:text-slate-300 enabled:hover:bg-rose-50 enabled:active:bg-rose-100"
         >
-          🗑
+          <TrashIcon width="20" height="20" />
         </button>
       </div>
     </div>
