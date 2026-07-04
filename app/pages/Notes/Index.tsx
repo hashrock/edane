@@ -245,7 +245,7 @@ export default function NotesIndex({
               onSelect: () => togglePin(menu.note),
             },
             {
-              label: "ごみ箱にいれる",
+              label: "ゴミ箱に移動",
               icon: <TrashIcon />,
               danger: true,
               onSelect: () => trashNote(menu.note),
