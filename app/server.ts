@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle } from "drizzle-orm/d1";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
@@ -386,11 +386,29 @@ const routes = app
         updatedAt: notes.updatedAt,
       })
       .from(notes)
-      .where(eq(notes.userId, user.id))
+      // Exclude trashed notes; they live on the /trash page.
+      .where(and(eq(notes.userId, user.id), isNull(notes.deletedAt)))
       // Pinned notes float to the top; ties (and everything else) fall back to
       // most-recently-updated.
       .orderBy(desc(notes.pinned), desc(notes.updatedAt));
     return c.render("Notes/Index", { user, notes: myNotes });
+  })
+  .get("/trash", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/");
+    const db = drizzle(c.env.DB);
+    const trashed = await db
+      .select({
+        id: notes.id,
+        title: notes.title,
+        isPublic: notes.isPublic,
+        deletedAt: notes.deletedAt,
+        updatedAt: notes.updatedAt,
+      })
+      .from(notes)
+      .where(and(eq(notes.userId, user.id), isNotNull(notes.deletedAt)))
+      .orderBy(desc(notes.deletedAt));
+    return c.render("Notes/Trash", { user, notes: trashed });
   })
   .get("/settings", (c) => {
     const user = c.get("user");
@@ -441,7 +459,44 @@ const routes = app
 
     return c.redirect(`/notes/${id}/edit`, 303);
   })
+  .post("/notes/:id/trash", async (c) => {
+    // Soft delete: move to the trash (restorable). The main list hides it.
+    const user = c.get("user");
+    if (!user) return c.redirect("/");
+    const db = drizzle(c.env.DB);
+    const note = await db
+      .select()
+      .from(notes)
+      .where(eq(notes.id, c.req.param("id")))
+      .get();
+    if (note && note.userId === user.id) {
+      await db
+        .update(notes)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(eq(notes.id, note.id));
+    }
+    return c.redirect("/notes", 303);
+  })
+  .post("/notes/:id/restore", async (c) => {
+    // Bring a trashed note back to the main list.
+    const user = c.get("user");
+    if (!user) return c.redirect("/");
+    const db = drizzle(c.env.DB);
+    const note = await db
+      .select()
+      .from(notes)
+      .where(eq(notes.id, c.req.param("id")))
+      .get();
+    if (note && note.userId === user.id) {
+      await db
+        .update(notes)
+        .set({ deletedAt: null })
+        .where(eq(notes.id, note.id));
+    }
+    return c.redirect("/trash", 303);
+  })
   .delete("/notes/:id", async (c) => {
+    // Permanent delete (from the trash page). Irreversible.
     const user = c.get("user");
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
@@ -453,7 +508,7 @@ const routes = app
     if (note && note.userId === user.id) {
       await db.delete(notes).where(eq(notes.id, note.id));
     }
-    return c.redirect("/notes", 303);
+    return c.redirect("/trash", 303);
   })
   .post("/notes/:id/pin", async (c) => {
     const user = c.get("user");
@@ -482,7 +537,7 @@ const routes = app
       .from(notes)
       .where(eq(notes.id, c.req.param("id")))
       .get();
-    if (!note || note.userId !== user.id) return c.notFound();
+    if (!note || note.userId !== user.id || note.deletedAt) return c.notFound();
 
     let content = note.content;
     if (!note.isPublic && content && isEncrypted(content)) {
@@ -505,7 +560,7 @@ const routes = app
       .where(eq(notes.id, c.req.param("id")))
       .get();
     const user = c.get("user");
-    if (!note) return c.notFound();
+    if (!note || note.deletedAt) return c.notFound();
     if (!note.isPublic && (!user || note.userId !== user.id)) {
       return c.notFound();
     }

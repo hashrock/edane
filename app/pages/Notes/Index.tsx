@@ -1,6 +1,5 @@
 import { Head, Link, router } from "@inertiajs/react";
-import { useEffect, useState } from "react";
-import ConfirmDialog from "../../components/ConfirmDialog";
+import { useEffect, useMemo, useState } from "react";
 import ContextMenu from "../../components/ContextMenu";
 import {
   MoreVerticalIcon,
@@ -28,11 +27,18 @@ export default function NotesIndex({
   user: User;
   notes: Note[];
 }) {
-  const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
   const [menu, setMenu] = useState<{ note: Note; x: number; y: number } | null>(
     null
   );
   const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState("");
+
+  // Client-side title search over the already-loaded list (no API needed).
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return notes;
+    return notes.filter((n) => (n.title || "").toLowerCase().includes(q));
+  }, [notes, query]);
 
   const togglePin = (note: Note) => {
     router.post(
@@ -40,6 +46,10 @@ export default function NotesIndex({
       { pinned: !note.pinned },
       { preserveScroll: true }
     );
+  };
+
+  const trashNote = (note: Note) => {
+    router.post(`/notes/${note.id}/trash`, {}, { preserveScroll: true });
   };
 
   const openMenu = (note: Note, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -60,12 +70,6 @@ export default function NotesIndex({
       { onError: () => setImporting(false) }
     );
   }, [user]);
-
-  const confirmDelete = () => {
-    if (!deleteTarget) return;
-    router.delete(`/notes/${deleteTarget.id}`, { preserveScroll: true });
-    setDeleteTarget(null);
-  };
 
   return (
     <div
@@ -88,6 +92,12 @@ export default function NotesIndex({
                 />
               )}
               <span>{user.name}</span>
+              <Link
+                href="/trash"
+                className="text-slate-500 hover:text-slate-900 transition"
+              >
+                ゴミ箱
+              </Link>
               <Link
                 href="/settings"
                 className="text-slate-500 hover:text-slate-900 transition"
@@ -147,11 +157,24 @@ export default function NotesIndex({
               + 新規作成
             </Link>
           </div>
+          {notes.length > 0 && (
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="タイトルで検索"
+              className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            />
+          )}
           {notes.length === 0 ? (
             <p className="text-slate-500">ノートがありません。</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-slate-500">
+              「{query}」に一致するノートはありません。
+            </p>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              {notes.map((note, index) => (
+              {filtered.map((note, index) => (
                 <div
                   key={note.id}
                   style={{ animationDelay: `${index * 40}ms` }}
@@ -225,26 +248,11 @@ export default function NotesIndex({
               label: "ごみ箱にいれる",
               icon: <TrashIcon />,
               danger: true,
-              onSelect: () => setDeleteTarget(menu.note),
+              onSelect: () => trashNote(menu.note),
             },
           ]}
         />
       )}
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        variant="danger"
-        title="ノートを削除しますか？"
-        message={
-          deleteTarget
-            ? `「${deleteTarget.title || "無題"}」を削除します。この操作は取り消せません。`
-            : undefined
-        }
-        confirmLabel="削除"
-        cancelLabel="キャンセル"
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

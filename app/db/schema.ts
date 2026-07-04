@@ -30,6 +30,8 @@ export const notes = sqliteTable("notes", {
   isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
   /** Pinned notes sort to the top of the list. */
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  /** Soft-delete timestamp (ISO). Non-null = in trash, hidden from the list. */
+  deletedAt: text("deleted_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
