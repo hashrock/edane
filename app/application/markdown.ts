@@ -135,3 +135,35 @@ export function markdownToModel(md: string): MindMapModel {
 
   return root;
 }
+
+/** Render a single node's text as one Markdown list-item body. */
+function nodeToMarkdownText(node: MindMapModel): string {
+  const type = node.type ?? "text";
+  if (type === "image") return `![](${node.text})`;
+  if (type === "link") {
+    const label = node.linkTitle?.trim() || node.text;
+    return `[${label}](${node.text})`;
+  }
+  // A markdown node holds a raw blob; collapse newlines so it stays on the
+  // bullet line (a full re-embed would break the outline's list structure).
+  if (type === "markdown") return node.text.replace(/\n+/g, " ").trim();
+  const text = node.text;
+  return node.bold && text.trim() !== "" ? `**${text}**` : text;
+}
+
+/**
+ * Serialize a node and its descendants as a nested Markdown bullet list — the
+ * inverse direction of {@link markdownToModel}, used by "Markdownとしてコピー".
+ * The given node is the top-level item; children nest two spaces deeper per
+ * level. Text nodes honour their `bold` flag; image/link nodes become their
+ * Markdown image/link syntax.
+ */
+export function modelToMarkdown(node: MindMapModel): string {
+  const lines: string[] = [];
+  const walk = (n: MindMapModel, depth: number) => {
+    lines.push(`${"  ".repeat(depth)}- ${nodeToMarkdownText(n)}`);
+    for (const child of n.children) walk(child, depth + 1);
+  };
+  walk(node, 0);
+  return lines.join("\n");
+}

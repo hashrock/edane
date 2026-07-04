@@ -3,7 +3,11 @@ import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel } from "../domain/model";
 import { findNode, cloneWithNewIds, generateId } from "../domain/model";
-import { looksLikeMarkdown, markdownToModel } from "../application/markdown";
+import {
+  looksLikeMarkdown,
+  markdownToModel,
+  modelToMarkdown,
+} from "../application/markdown";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
@@ -686,6 +690,13 @@ export function MindmapEditorView({
     if (st.view.editing && hasTextRange(st)) return; // native text copy
     e.preventDefault();
     dispatch({ type: "copyBranch" });
+    // Keep the internal branch clipboard (for in-app paste) but also expose the
+    // selected subtree as a Markdown outline on the system clipboard, so Cmd+C
+    // pastes something meaningful into other apps.
+    const node = st.view.activeNodeId
+      ? findNode(st.document.model, st.view.activeNodeId)
+      : null;
+    if (node) e.clipboardData.setData("text/plain", modelToMarkdown(node));
   }, [dispatch]);
 
   const handleCut = useCallback(

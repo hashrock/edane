@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeMarkdown, markdownToModel } from "./markdown";
+import { looksLikeMarkdown, markdownToModel, modelToMarkdown } from "./markdown";
 import type { MindMapModel } from "../domain/model";
 
 /** Flatten a node's immediate child texts for concise assertions. */
@@ -70,5 +70,64 @@ describe("markdownToModel", () => {
     walk(root);
     // root + A + x + y = 4 distinct ids
     expect(ids.size).toBe(4);
+  });
+});
+
+describe("modelToMarkdown", () => {
+  const node = (
+    text: string,
+    children: MindMapModel[] = [],
+    extra: Partial<MindMapModel> = {}
+  ): MindMapModel => ({ id: text, text, children, ...extra });
+
+  it("renders a subtree as a nested bullet list", () => {
+    const tree = node("Root", [
+      node("A", [node("A1"), node("A2")]),
+      node("B"),
+    ]);
+    expect(modelToMarkdown(tree)).toBe(
+      ["- Root", "  - A", "    - A1", "    - A2", "  - B"].join("\n")
+    );
+  });
+
+  it("wraps bold text in **", () => {
+    const tree = node("Root", [node("strong", [], { bold: true })]);
+    expect(modelToMarkdown(tree)).toBe("- Root\n  - **strong**");
+  });
+
+  it("renders image and link nodes with Markdown syntax", () => {
+    const tree = node("Root", [
+      node("https://x.dev/a.png", [], { type: "image" }),
+      node("https://x.dev/", [], { type: "link", linkTitle: "Example" }),
+    ]);
+    expect(modelToMarkdown(tree)).toBe(
+      [
+        "- Root",
+        "  - ![](https://x.dev/a.png)",
+        "  - [Example](https://x.dev/)",
+      ].join("\n")
+    );
+  });
+
+  it("falls back to the raw URL when a link has no title", () => {
+    const tree = node("https://x.dev/", [], { type: "link" });
+    expect(modelToMarkdown(tree)).toBe("- [https://x.dev/](https://x.dev/)");
+  });
+
+  it("collapses newlines in a markdown node onto its bullet line", () => {
+    const tree = node("# Title\n\nbody", [], { type: "markdown" });
+    expect(modelToMarkdown(tree)).toBe("- # Title body");
+  });
+
+  it("round-trips the hierarchy back through markdownToModel", () => {
+    const tree = node("Root", [node("A", [node("A1")]), node("B")]);
+    const md = modelToMarkdown(tree);
+    const back = markdownToModel(md);
+    // markdownToModel returns a synthetic root whose children are the top items.
+    expect(back.children.map((c) => c.text)).toEqual(["Root"]);
+    expect(back.children[0].children.map((c) => c.text)).toEqual(["A", "B"]);
+    expect(back.children[0].children[0].children.map((c) => c.text)).toEqual([
+      "A1",
+    ]);
   });
 });
