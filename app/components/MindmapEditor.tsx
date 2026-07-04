@@ -1942,6 +1942,12 @@ export function MindmapEditorView({
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
+        // Only the primary (left) mouse button activates/drags a node. Middle
+        // and right clicks (button 1/2) must not start a node drag — they're
+        // reserved for panning / the context menu.
+        if (e.evt && typeof e.evt.button === "number" && e.evt.button !== 0) {
+          return;
+        }
         e.cancelBubble = true;
         const stage = konvaStageRef.current;
         if (!stage) return;
