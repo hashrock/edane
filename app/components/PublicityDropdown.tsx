@@ -75,7 +75,7 @@ export default function PublicityDropdown({ isPublic, onChange }: Props) {
         </span>
         {isPublic ? "公開" : "非公開"}
         <span
-          className={`text-[10px] text-slate-400 transition-transform ${
+          className={`text-xs text-slate-500 transition-transform ${
             open ? "rotate-180" : ""
           }`}
         >
