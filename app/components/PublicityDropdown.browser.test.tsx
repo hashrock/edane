@@ -50,13 +50,15 @@ describe("PublicityDropdown (browser e2e)", () => {
   it("shows the current state on the trigger", async () => {
     calls().length = 0;
     render(<Harness initial={true} />);
-    expect((await trigger()).textContent).toContain("みんなに公開中");
+    const label = (await trigger()).textContent ?? "";
+    expect(label).toContain("公開");
+    expect(label).not.toContain("非公開");
   });
 
-  it("shows 自分だけ when private", async () => {
+  it("shows 非公開 when private", async () => {
     calls().length = 0;
     render(<Harness initial={false} />);
-    expect((await trigger()).textContent).toContain("自分だけ");
+    expect((await trigger()).textContent).toContain("非公開");
   });
 
   it("renders the menu in the top layer (popover), not a z-indexed div", async () => {
@@ -77,8 +79,8 @@ describe("PublicityDropdown (browser e2e)", () => {
 
     const items = menuItems();
     expect(items.map((b) => b.textContent?.replace("✓", "").trim())).toEqual([
-      "自分だけ",
-      "みんなに公開",
+      "非公開",
+      "公開",
     ]);
     // The active (private) option carries the check mark.
     expect(items[0].textContent).toContain("✓");
@@ -88,7 +90,9 @@ describe("PublicityDropdown (browser e2e)", () => {
     expect(calls()).toEqual([true]);
     // Menu closes after selecting.
     await waitFor(() => !isOpen());
-    expect((await trigger()).textContent).toContain("みんなに公開中");
+    const label = (await trigger()).textContent ?? "";
+    expect(label).toContain("公開");
+    expect(label).not.toContain("非公開");
   });
 
   it("renders above a high z-index overlay (the reported bug)", async () => {
@@ -130,7 +134,7 @@ describe("PublicityDropdown (browser e2e)", () => {
     render(<Harness initial={true} />);
     await userEvent.click(await trigger());
     await waitFor(isOpen);
-    await userEvent.click(menuItems()[1]); // みんなに公開 (already active)
+    await userEvent.click(menuItems()[1]); // 公開 (already active)
     expect(calls()).toEqual([]);
   });
 });

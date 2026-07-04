@@ -7,8 +7,8 @@ interface Props {
 }
 
 const OPTIONS: { value: boolean; label: string }[] = [
-  { value: false, label: "自分だけ" },
-  { value: true, label: "みんなに公開" },
+  { value: false, label: "非公開" },
+  { value: true, label: "公開" },
 ];
 
 /**
@@ -65,7 +65,7 @@ export default function PublicityDropdown({ isPublic, onChange }: Props) {
         style={{ anchorName } as React.CSSProperties}
         className="flex items-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
-        {isPublic ? "みんなに公開中" : "自分だけ"}
+        {isPublic ? "公開" : "非公開"}
         <span
           className={`text-[10px] text-slate-400 transition-transform ${
             open ? "rotate-180" : ""
