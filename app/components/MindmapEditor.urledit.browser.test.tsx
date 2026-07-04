@@ -164,4 +164,26 @@ describe("MindmapEditor URL box editing for custom nodes (browser e2e)", () => {
     expect(api().getSelection().editing).toBe(true);
     expect(urlInput()).toBeNull();
   });
+
+  it("ArrowDown in the URL box moves to the next node instead of trapping", async () => {
+    // Order: root, l, i(image), t. From the image node's URL box, Down → t.
+    await editNode("i");
+    await waitFor(urlInput);
+
+    await userEvent.keyboard("{ArrowDown}");
+    await waitFor(() => api().getActiveNodeId() === "t");
+    // t is plain text → the URL box is gone.
+    await waitFor(() => urlInput() === null);
+  });
+
+  it("ArrowUp in the URL box moves to the previous node", async () => {
+    // From the image node's URL box, Up → the link node l (also custom), so the
+    // URL box follows to l's URL rather than staying stuck on i.
+    await editNode("i");
+    await waitFor(urlInput);
+
+    await userEvent.keyboard("{ArrowUp}");
+    await waitFor(() => api().getActiveNodeId() === "l");
+    await waitFor(() => urlInput()?.value === "https://example.com/");
+  });
 });

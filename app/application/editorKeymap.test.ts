@@ -162,6 +162,40 @@ describe("selection-mode collapse / navigate", () => {
     run(deps, state(model(), "a1", false), { key: "ArrowLeft" });
     expect(dispatched).toEqual([{ type: "moveToParent" }]);
   });
+});
+
+describe("cross-mode collapse chord (Cmd/Ctrl + .)", () => {
+  it("toggles collapse while editing a parent node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", true, "A"), {
+      key: ".",
+      metaKey: true,
+    });
+    expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("toggles collapse in selection mode too", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: ".", ctrlKey: true });
+    expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
+  });
+
+  it("is swallowed on a leaf node (handled, no dispatch)", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "b", true, "B"), {
+      key: ".",
+      metaKey: true,
+    });
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("saves after a successful toggle", () => {
+    const { deps } = makeDeps();
+    run(deps, state(model(), "a", true, "A"), { key: ".", metaKey: true });
+    expect(deps.saveNote).toHaveBeenCalled();
+  });
 
   it("Enter inserts a sibling after the selected node", () => {
     const { deps, dispatched } = makeDeps();

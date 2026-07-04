@@ -1794,15 +1794,18 @@ export function MindmapEditorView({
               : isEmpty
                 ? "#f8fafc"
                 : "#ffffff",
-        stroke:
-          isEditing || isSelected
+        // Editing gets the emerald accent so "I'm typing here" reads distinctly
+        // from a mere selection (black); everything else keeps its resting edge.
+        stroke: isEditing
+          ? "#10b981"
+          : isSelected
             ? "#000000"
             : isRoot
               ? "#0f172a"
               : asMarkdown
                 ? "#d8b4fe"
                 : "#e2e8f0",
-        strokeWidth: isEditing || isSelected ? 2 : 1,
+        strokeWidth: isEditing ? 2.5 : isSelected ? 2 : 1,
         // Shadow blur is the dominant raster cost; keep the soft shadow only on
         // the single root node and drop the near-invisible one on every other.
         shadowColor: "#0f172a",
@@ -2517,6 +2520,19 @@ export function MindmapEditorView({
               if (e.key === "Enter" || e.key === "Escape") {
                 e.preventDefault();
                 dispatch({ type: "exitEditing" });
+                return;
+              }
+              // The URL box owns the keyboard while an image/link node is being
+              // edited, so the hidden-textarea keymap never sees Up/Down. Route
+              // them here so vertical arrows still move between nodes instead of
+              // being trapped in this single-line field. Left/Right stay native
+              // (caret movement within the URL).
+              if (e.key === "ArrowUp" && !e.altKey) {
+                e.preventDefault();
+                dispatch({ type: "moveUp" });
+              } else if (e.key === "ArrowDown" && !e.altKey) {
+                e.preventDefault();
+                dispatch({ type: "moveDown" });
               }
             }}
             placeholder={
