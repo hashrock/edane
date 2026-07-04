@@ -382,11 +382,14 @@ const routes = app
         id: notes.id,
         title: notes.title,
         isPublic: notes.isPublic,
+        pinned: notes.pinned,
         updatedAt: notes.updatedAt,
       })
       .from(notes)
       .where(eq(notes.userId, user.id))
-      .orderBy(desc(notes.updatedAt));
+      // Pinned notes float to the top; ties (and everything else) fall back to
+      // most-recently-updated.
+      .orderBy(desc(notes.pinned), desc(notes.updatedAt));
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/settings", (c) => {
@@ -449,6 +452,24 @@ const routes = app
       .get();
     if (note && note.userId === user.id) {
       await db.delete(notes).where(eq(notes.id, note.id));
+    }
+    return c.redirect("/notes", 303);
+  })
+  .post("/notes/:id/pin", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/");
+    const db = drizzle(c.env.DB);
+    const note = await db
+      .select()
+      .from(notes)
+      .where(eq(notes.id, c.req.param("id")))
+      .get();
+    if (note && note.userId === user.id) {
+      const body = await c.req
+        .json<{ pinned?: boolean }>()
+        .catch(() => ({}) as { pinned?: boolean });
+      const pinned = body.pinned ?? !note.pinned;
+      await db.update(notes).set({ pinned }).where(eq(notes.id, note.id));
     }
     return c.redirect("/notes", 303);
   })

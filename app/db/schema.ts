@@ -28,6 +28,8 @@ export const notes = sqliteTable("notes", {
   title: text("title").notNull().default("Untitled"),
   content: text("content").notNull().default(""),
   isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
+  /** Pinned notes sort to the top of the list. */
+  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

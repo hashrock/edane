@@ -1,7 +1,13 @@
 import { Head, Link, router } from "@inertiajs/react";
 import { useEffect, useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
-import { TrashIcon } from "../../components/icons";
+import ContextMenu from "../../components/ContextMenu";
+import {
+  MoreVerticalIcon,
+  PencilIcon,
+  PinIcon,
+  TrashIcon,
+} from "../../components/icons";
 import { takePendingNote } from "../../lib/guestNote";
 import type { SessionUser } from "../../utils/session";
 
@@ -9,6 +15,7 @@ type Note = {
   id: string;
   title: string;
   isPublic: boolean;
+  pinned: boolean;
   updatedAt: string;
 };
 
@@ -22,7 +29,23 @@ export default function NotesIndex({
   notes: Note[];
 }) {
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
+  const [menu, setMenu] = useState<{ note: Note; x: number; y: number } | null>(
+    null
+  );
   const [importing, setImporting] = useState(false);
+
+  const togglePin = (note: Note) => {
+    router.post(
+      `/notes/${note.id}/pin`,
+      { pinned: !note.pinned },
+      { preserveScroll: true }
+    );
+  };
+
+  const openMenu = (note: Note, e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ note, x: r.right - 200, y: r.bottom + 4 });
+  };
 
   // Just signed in with a stashed guest note? Import it into a real note and
   // jump straight to its editor. Consume-once, so a reload won't re-import.
@@ -138,8 +161,15 @@ export default function NotesIndex({
                     href={`/notes/${note.id}/edit`}
                     className="flex-1 min-w-0 px-5 py-4"
                   >
-                    <div className="text-[15px] font-semibold text-slate-950 truncate">
-                      {note.title}
+                    <div className="flex items-center gap-1.5 text-[15px] font-semibold text-slate-950">
+                      {note.pinned && (
+                        <PinIcon
+                          width="14"
+                          height="14"
+                          className="shrink-0 text-slate-400"
+                        />
+                      )}
+                      <span className="truncate">{note.title}</span>
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
                       {new Date(note.updatedAt).toLocaleDateString("ja-JP")}
@@ -152,11 +182,12 @@ export default function NotesIndex({
                       {note.isPublic ? "公開" : "非公開"}
                     </span>
                     <button
-                      onClick={() => setDeleteTarget(note)}
-                      className="p-2 text-slate-400 opacity-70 hover:text-red-500 group-hover:opacity-100 transition"
-                      title="削除"
+                      onClick={(e) => openMenu(note, e)}
+                      className="p-2 text-slate-400 opacity-70 hover:text-slate-700 group-hover:opacity-100 transition"
+                      title="メニュー"
+                      aria-label="メニュー"
                     >
-                      <TrashIcon />
+                      <MoreVerticalIcon />
                     </button>
                   </div>
                 </div>
@@ -172,6 +203,32 @@ export default function NotesIndex({
             ノートを保存しています...
           </p>
         </div>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: "編集する",
+              icon: <PencilIcon />,
+              onSelect: () => router.visit(`/notes/${menu.note.id}/edit`),
+            },
+            {
+              label: menu.note.pinned ? "固定を解除" : "先頭に固定して表示",
+              icon: <PinIcon />,
+              onSelect: () => togglePin(menu.note),
+            },
+            {
+              label: "ごみ箱にいれる",
+              icon: <TrashIcon />,
+              danger: true,
+              onSelect: () => setDeleteTarget(menu.note),
+            },
+          ]}
+        />
       )}
 
       <ConfirmDialog

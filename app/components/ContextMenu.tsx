@@ -5,6 +5,8 @@ export interface ContextMenuItem {
   onSelect: () => void;
   /** Render in a destructive (red) style. */
   danger?: boolean;
+  /** Optional leading icon. */
+  icon?: React.ReactNode;
 }
 
 interface Props {
@@ -63,7 +65,7 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
         <button
           key={i}
           type="button"
-          className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 ${
+          className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-100 ${
             item.danger ? "text-red-600" : "text-slate-700"
           }`}
           onClick={() => {
@@ -71,6 +73,9 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
             onClose();
           }}
         >
+          {item.icon && (
+            <span className="flex w-4 shrink-0 justify-center">{item.icon}</span>
+          )}
           {item.label}
         </button>
       ))}
