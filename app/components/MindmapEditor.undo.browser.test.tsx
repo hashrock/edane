@@ -99,11 +99,13 @@ describe("MindmapEditor undo/redo", () => {
     await waitFor(() => api().getModel().children[0].text.includes("X"));
   });
 
-  it("undoing a pasted branch falls the active node back to root (regression)", async () => {
+  it("undoing a pasted branch lands the active node on the nearest surviving neighbour (regression)", async () => {
     // Undo only restores the document (see UndoManager); if the active node
     // was part of what got undone, activeNodeId used to keep pointing at a
     // node that no longer exists — silently swallowing every subsequent
-    // keyboard action until the user undid again.
+    // keyboard action until the user undid again. reconcileView now refocuses
+    // onto the nearest surviving node in flat order (predecessor preferred),
+    // mirroring deleteNode, instead of jumping all the way to the root.
     const model: MindMapModel = {
       id: "root",
       text: "Root",
@@ -166,12 +168,16 @@ describe("MindmapEditor undo/redo", () => {
       return b != null && b.children.length === 0;
     });
 
-    // ...and activeNodeId must not still point at the now-deleted node.
-    await waitFor(() => api().getActiveNodeId() === "root");
+    // ...and activeNodeId must not still point at the now-deleted node. The
+    // pasted branch sat right after "b" in flat order, so its predecessor "b"
+    // is the nearest survivor and takes focus.
+    await waitFor(() => api().getActiveNodeId() === "b");
 
     // A follow-up keyboard action must actually take effect (previously it
     // silently no-op'd because activeNodeId pointed nowhere).
-    const before = api().getModel().children.length;
+    const bChildrenBefore = () =>
+      api().getModel().children.find((c) => c.id === "b")!.children.length;
+    const before = bChildrenBefore();
     document
       .querySelector("textarea")!
       .dispatchEvent(
@@ -181,8 +187,8 @@ describe("MindmapEditor undo/redo", () => {
           cancelable: true,
         })
       );
-    // pasteBranch keeps the clipboard, so pasting again onto root (still
-    // holding "Alpha" with its child) should add a child to root.
-    await waitFor(() => api().getModel().children.length > before);
+    // pasteBranch keeps the clipboard, so pasting again onto the now-active
+    // "b" (still holding "Alpha" with its child) should add a child to "b".
+    await waitFor(() => bChildrenBefore() > before);
   });
 });

@@ -1239,4 +1239,51 @@ describe("reconcileView", () => {
     const reconciled = reconcileView(view, document);
     expect(reconciled.activeNodeId).toBe(model.id);
   });
+
+  it("lands on the previous node when the active node vanishes and prevDocument is given", () => {
+    // Flat order in prevDocument: root, a, a1, b. The restored document has
+    // "b" removed, so the previously-active "b" must refocus onto its
+    // predecessor "a1" rather than jumping all the way to the root.
+    const prev = sampleModel();
+    const prevDocument: DocumentState = { model: prev, clipboard: null };
+    const restored: MindMapModel = {
+      ...prev,
+      children: prev.children.filter((c) => c.id !== "b"),
+    };
+    const document: DocumentState = { model: restored, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "b",
+      editing: true,
+      editingText: "B",
+      cursorPos: 1,
+      selectionEnd: 1,
+    };
+    const reconciled = reconcileView(view, document, prevDocument);
+    expect(reconciled.activeNodeId).toBe("a1");
+    expect(reconciled.editing).toBe(false);
+    expect(reconciled.editingText).toBe("A1");
+    expect(reconciled.cursorPos).toBe(0);
+  });
+
+  it("falls back to the next node when no previous neighbour survives", () => {
+    // Restored document drops the whole "a" branch (a, a1). The vanished "a1"
+    // has no surviving predecessor except the root, but the next node "b"
+    // survives and sits closer, so it wins.
+    const prev = sampleModel();
+    const prevDocument: DocumentState = { model: prev, clipboard: null };
+    const restored: MindMapModel = {
+      ...prev,
+      children: prev.children.filter((c) => c.id !== "a"),
+    };
+    const document: DocumentState = { model: restored, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a1",
+      editing: false,
+      editingText: "A1",
+      cursorPos: 0,
+      selectionEnd: 0,
+    };
+    const reconciled = reconcileView(view, document, prevDocument);
+    expect(reconciled.activeNodeId).toBe("b");
+  });
 });

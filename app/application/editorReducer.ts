@@ -790,25 +790,59 @@ function viewReducer(
  * Reconciles a ViewState against a DocumentState it wasn't derived from —
  * needed after undo/redo, which restores only the document (see
  * UndoManager). If the active node no longer exists in the restored
- * document (it was created/removed by the undone/redone edit), falls back
- * to the document root instead of leaving activeNodeId dangling, which
- * would silently no-op every subsequent keyboard action.
+ * document (it was created/removed by the undone/redone edit), the active
+ * id would dangle and silently no-op every subsequent keyboard action.
+ *
+ * `prevDocument` is the document the stale view *was* derived from (i.e. the
+ * pre-undo/redo document). When given, we locate the vanished node in its
+ * flat order and land on the nearest surviving neighbour — preferring the
+ * previous node, then the next — mirroring deleteNode's refocus behaviour so
+ * selection stays close to where the user was. Without it (or when no
+ * neighbour survives) we fall back to the document root.
  */
 export function reconcileView(
   view: ViewState,
-  document: DocumentState
+  document: DocumentState,
+  prevDocument?: DocumentState
 ): ViewState {
   if (view.activeNodeId && findNode(document.model, view.activeNodeId)) {
     return view;
   }
-  const root = document.model;
-  return {
-    activeNodeId: root.id,
-    editing: false,
-    editingText: root.text,
-    cursorPos: 0,
-    selectionEnd: 0,
-  };
+  const landId = findNearestSurvivor(view.activeNodeId, document, prevDocument);
+  return focusView(
+    { ...view, editing: false },
+    document.model,
+    landId,
+    0,
+    0
+  );
+}
+
+/**
+ * Given a node that vanished from `document`, find the nearest node in
+ * `prevDocument`'s flat order that still exists in `document`. Walks outward
+ * from the vanished node's position, previous side first. Returns the
+ * document root when there's no prior order or no neighbour survives.
+ */
+function findNearestSurvivor(
+  vanishedId: string | null,
+  document: DocumentState,
+  prevDocument?: DocumentState
+): string {
+  const rootId = document.model.id;
+  if (!vanishedId || !prevDocument) return rootId;
+  const order = getFlatOrder(prevDocument.model);
+  const idx = order.indexOf(vanishedId);
+  if (idx === -1) return rootId;
+  // Expand outward: idx-1, idx+1, idx-2, idx+2, … so the previous node wins
+  // ties, matching deleteNode's "land on the predecessor" preference.
+  for (let step = 1; step < order.length; step++) {
+    const prev = order[idx - step];
+    if (prev && findNode(document.model, prev)) return prev;
+    const next = order[idx + step];
+    if (next && findNode(document.model, next)) return next;
+  }
+  return rootId;
 }
 
 // --- Reducer ---
@@ -823,7 +857,11 @@ export function editorReducer(
     // "the active node always exists" is enforced by the reducer itself —
     // never left as a rule each caller must remember to apply. Idempotent: a
     // view that already points to a live node is returned unchanged.
-    const view = reconcileView(action.state.view, action.state.document);
+    const view = reconcileView(
+      action.state.view,
+      action.state.document,
+      state.document
+    );
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
   }
