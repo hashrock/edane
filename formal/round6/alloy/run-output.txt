@@ -1,0 +1,17 @@
+Alloy module: TreeLayout.als
+commands: 3
+======================================================================
+RecurrenceEstablishesFit     [check]  ->  UNSAT (none)
+----------------------------------------------------------------------
+WellSizedTallParentExists    [run]  ->  SATISFIABLE (instance found)
+    nodes: 2
+    own: {Node$0->1, Node$1->4}
+    kids: {Node$1->Node$0}
+    sh: {Node$0->1, Node$1->4}
+----------------------------------------------------------------------
+OverflowWithoutMax           [run]  ->  SATISFIABLE (instance found)
+    nodes: 2
+    own: {Node$0->1, Node$1->2}
+    kids: {Node$1->Node$0}
+    sh: {Node$0->1, Node$1->1}
+----------------------------------------------------------------------
