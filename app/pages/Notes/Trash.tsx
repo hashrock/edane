@@ -2,7 +2,7 @@ import { Head, Link, router } from "@inertiajs/react";
 import { useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TrashIcon } from "../../components/icons";
-import type { SessionUser } from "../../utils/session";
+import type { SessionUser } from "../../user";
 
 type TrashedNote = {
   id: string;

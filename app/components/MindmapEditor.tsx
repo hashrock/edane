@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel } from "../domain/model";
-import { findNode, cloneWithNewIds } from "../domain/model";
+import { findNode, cloneWithNewIds, generateId } from "../domain/model";
+import { looksLikeMarkdown, markdownToModel } from "../application/markdown";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
@@ -20,6 +21,7 @@ import {
   NODE_PADDING,
   nodeBoxWidth,
   nodeBoxHeight,
+  markdownPreview,
 } from "../application/nodeUtils";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
@@ -33,6 +35,7 @@ import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
+import MarkdownPasteDialog from "./MarkdownPasteDialog";
 import type { EditorState } from "../application/editorReducer";
 import {
   buildKeymap,
@@ -373,6 +376,11 @@ export function MindmapEditorView({
     y: number;
     nodeId: string;
   } | null>(null);
+  // Pending Markdown paste awaiting a strategy choice (null = dialog closed).
+  const [mdPaste, setMdPaste] = useState<{
+    text: string;
+    targetId: string;
+  } | null>(null);
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -690,6 +698,18 @@ export function MindmapEditorView({
       }
 
       const st = stateRef.current;
+      const text = e.clipboardData.getData("text");
+
+      // External Markdown → open the choice dialog (decompose / markdown node /
+      // plain text). The internal branch clipboard carries no text, so a
+      // cut/copied branch still pastes as a branch below.
+      if (looksLikeMarkdown(text)) {
+        e.preventDefault();
+        const targetId = st.view.activeNodeId || st.document.model.id;
+        setMdPaste({ text, targetId });
+        return;
+      }
+
       if (!st.view.editing) {
         // Selection mode: paste the internal branch clipboard as a child, or
         // fall back to external indented text → nodes.
@@ -701,7 +721,6 @@ export function MindmapEditorView({
             saveNote(next.document.model);
           return;
         }
-        const text = e.clipboardData.getData("text");
         if (!text) return;
         e.preventDefault();
         pasteTextAsNodes(text);
@@ -710,12 +729,46 @@ export function MindmapEditorView({
 
       // Editing mode: multi-line external text becomes nodes; single-line text
       // is left to the native textarea.
-      const text = e.clipboardData.getData("text");
       if (!text || !text.includes("\n")) return;
       e.preventDefault();
       pasteTextAsNodes(text);
     },
     [dispatch, pasteTextAsNodes, flashNodes, noteId, saveNote]
+  );
+
+  // Resolve the Markdown paste dialog with one of the three strategies.
+  const applyMarkdownPaste = useCallback(
+    (mode: "decompose" | "node" | "plain") => {
+      const pending = mdPaste;
+      if (!pending) return;
+      const { text, targetId } = pending;
+      setMdPaste(null);
+      const collectIds = (n: MindMapModel): string[] => [
+        n.id,
+        ...n.children.flatMap(collectIds),
+      ];
+      const insert = (children: MindMapModel[]) => {
+        const fresh = children.map(cloneWithNewIds);
+        if (fresh.length === 0) return;
+        const next = dispatch(
+          { type: "insertNodes", targetId, nodes: fresh },
+          "paste"
+        );
+        flashNodes(fresh.flatMap(collectIds));
+        if (noteId) saveNote(next.document.model);
+      };
+      if (mode === "decompose") {
+        insert(markdownToModel(text).children);
+      } else if (mode === "node") {
+        insert([
+          { id: generateId(), text: text.trim(), type: "markdown", children: [] },
+        ]);
+      } else {
+        insert(textToModel("_", text).children);
+      }
+      setTimeout(() => inputRef.current?.focus(), 0);
+    },
+    [mdPaste, dispatch, flashNodes, noteId, saveNote]
   );
 
   // --- Link preview: fetch <title> + favicon for a link node's URL ---
@@ -829,7 +882,7 @@ export function MindmapEditorView({
 
     // Kind conversion (root excluded — it's the note title).
     if (!isRoot) {
-      const setType = (nodeType: "text" | "image" | "link") => () => {
+      const setType = (nodeType: "text" | "image" | "link" | "markdown") => () => {
         const next = dispatch(
           { type: "setNodeType", nodeId, nodeType },
           "set-type"
@@ -840,6 +893,7 @@ export function MindmapEditorView({
       if (type !== "text") items.push({ label: "テキストにする", onSelect: setType("text") });
       if (type !== "image") items.push({ label: "画像にする（URL）", onSelect: setType("image") });
       if (type !== "link") items.push({ label: "リンクにする（URL）", onSelect: setType("link") });
+      if (type !== "markdown") items.push({ label: "Markdownにする", onSelect: setType("markdown") });
     }
 
     // Text formatting (font size / bold).
@@ -1516,8 +1570,16 @@ export function MindmapEditorView({
 
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      // For active node during editing, use editingText
-      const displayRaw = activeNodeId === node.id ? editingText : node.text;
+      // For active node during editing, use editingText. A markdown node draws
+      // its bounded preview (except while actually being edited), so its line
+      // data must be built from that same preview or blockHeight/caret geometry
+      // would follow the full source and mis-place the text.
+      const displayRaw =
+        node.type === "markdown" && !(activeNodeId === node.id && editing)
+          ? markdownPreview(node.text)
+          : activeNodeId === node.id
+            ? editingText
+            : node.text;
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
@@ -1575,17 +1637,23 @@ export function MindmapEditorView({
       const isSelected = !editing && activeNodeId === node.id;
       // Image/link nodes keep their rendered preview even while editing — the
       // URL is edited in the visible box below the node — so only TEXT nodes
-      // swap to raw-text (live buffer) editing on the canvas.
+      // swap to raw-text (live buffer) editing on the canvas. Markdown edits as
+      // raw multi-line text in place, so it is NOT a custom (URL-box) node.
       const isCustom = node.type === "image" || node.type === "link";
       const isTextEditing = isEditing && !isCustom;
       const asImage = node.type === "image";
       const asLink = node.type === "link";
+      // A markdown node renders a bounded preview of its source (full text is
+      // shown only while editing); it's tinted and tagged with an "MD" label.
+      const asMarkdown = !isEditing && node.type === "markdown";
       // Links display their fetched title (falling back to the raw URL).
       const displayRaw = isTextEditing
         ? editingText
         : asLink
           ? node.linkTitle || node.text
-          : node.text;
+          : asMarkdown
+            ? markdownPreview(node.text)
+            : node.text;
       const isEmpty = displayRaw === "";
       const displayText = isEmpty ? "empty" : displayRaw;
       const fontSize = node.fontSize ?? DEFAULT_FONT_SIZE;
@@ -1633,15 +1701,19 @@ export function MindmapEditorView({
             : "#f1f5f9"
           : isRoot
             ? "#0f172a"
-            : isEmpty
-              ? "#f8fafc"
-              : "#ffffff",
+            : asMarkdown
+              ? "#faf5ff"
+              : isEmpty
+                ? "#f8fafc"
+                : "#ffffff",
         stroke:
           isEditing || isSelected
             ? "#000000"
             : isRoot
               ? "#0f172a"
-              : "#e2e8f0",
+              : asMarkdown
+                ? "#d8b4fe"
+                : "#e2e8f0",
         strokeWidth: isEditing || isSelected ? 2 : 1,
         // Shadow blur is the dominant raster cost; keep the soft shadow only on
         // the single root node and drop the near-invisible one on every other.
@@ -1708,14 +1780,50 @@ export function MindmapEditorView({
             ? "#2563eb"
             : isRoot
               ? "#ffffff"
-              : isEmpty
-                ? "#94a3b8"
-                : "#0f172a",
+              : asMarkdown
+                ? "#6b21a8"
+                : isEmpty
+                  ? "#94a3b8"
+                  : "#0f172a",
           fontStyle: isEmpty ? "italic" : bold ? "bold" : "normal",
           textDecoration: asLink ? "underline" : "",
           listening: false,
         });
         group.add(textNode);
+      }
+
+      // Markdown tag: a small "MD" tab riding the top-left edge of the box.
+      if (asMarkdown) {
+        const tabW = 30;
+        const tabH = 16;
+        const tabX = node.x + 8;
+        const tabY = node.y - rectHeight / 2 - tabH + 3;
+        group.add(
+          new Konva.Rect({
+            x: tabX,
+            y: tabY,
+            width: tabW,
+            height: tabH,
+            cornerRadius: 5,
+            fill: "#9333ea",
+            listening: false,
+            perfectDrawEnabled: false,
+          })
+        );
+        group.add(
+          new Konva.Text({
+            x: tabX,
+            y: tabY + 3,
+            width: tabW,
+            align: "center",
+            text: "MD",
+            fontSize: 10,
+            fontStyle: "bold",
+            fontFamily: "sans-serif",
+            fill: "#ffffff",
+            listening: false,
+          })
+        );
       }
 
       // Collapsed indicator: a small pill on the right showing hidden child count.
@@ -1759,7 +1867,7 @@ export function MindmapEditorView({
         // Find the clicked caret position: line by Y, column by X. Image/link
         // nodes don't render their text, so caret to the end of the URL/label.
         let charIdx: number;
-        if (asImage || asLink) {
+        if (asImage || asLink || asMarkdown) {
           charIdx = node.text.length;
         } else {
           const relY = worldY - (node.y - blockHeight / 2);
@@ -2077,6 +2185,17 @@ export function MindmapEditorView({
         onClose={() => {
           setHelpOpen(false);
           focusEditorSoon();
+        }}
+      />
+      <MarkdownPasteDialog
+        open={mdPaste !== null}
+        preview={mdPaste ? markdownPreview(mdPaste.text, 6) : undefined}
+        onDecompose={() => applyMarkdownPaste("decompose")}
+        onAsNode={() => applyMarkdownPaste("node")}
+        onPlain={() => applyMarkdownPaste("plain")}
+        onCancel={() => {
+          setMdPaste(null);
+          setTimeout(() => inputRef.current?.focus(), 0);
         }}
       />
       <ConfirmDialog

@@ -41,6 +41,22 @@ export const FAVICON_GAP = 6;
 export const NODE_PADDING = 20;
 
 /**
+ * A markdown node holds a whole document in `text`; render only a bounded
+ * preview so a large paste can't produce a giant unusable box. Caps both the
+ * number of lines and each line's length, appending an ellipsis when clipped.
+ * Both the layout measurement and the canvas draw read the same preview so the
+ * box always matches what is shown.
+ */
+export function markdownPreview(text: string, maxLines = 14): string {
+  const lines = text.replace(/\r/g, "").split("\n");
+  const clipped = lines
+    .slice(0, maxLines)
+    .map((l) => (l.length > 80 ? l.slice(0, 80) + "…" : l));
+  if (lines.length > maxLines) clipped.push("…");
+  return clipped.join("\n");
+}
+
+/**
  * Visual box width for a measured text/content width: add horizontal padding,
  * then floor (roots a little wider). Keeps every node-box width derivation in
  * one place — the canvas draw and the drag-drop hit test must agree — so
@@ -94,6 +110,14 @@ export function measureModelNode(
       width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
       height: box.height,
     };
+  }
+  if (m.type === "markdown") {
+    // Sized from the bounded preview (the same string the canvas renders).
+    const box = measureNodeBox(markdownPreview(m.text), {
+      fontSize: m.fontSize,
+      bold: m.bold,
+    });
+    return { width: box.width, height: box.height };
   }
   const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
   return { width: box.width, height: box.height };
