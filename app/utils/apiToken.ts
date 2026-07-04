@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { apiTokens, users } from "../db/schema";
 import { eq } from "drizzle-orm";
-import type { SessionUser } from "./session";
+import type { SessionUser } from "../user";
 
 /** SHA-256 hash of a token string, returned as hex. */
 export async function hashToken(token: string): Promise<string> {

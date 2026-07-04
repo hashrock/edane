@@ -1,7 +1,7 @@
 import { Head } from "@inertiajs/react";
 import MindmapEditor from "../components/MindmapEditor";
 import { stashPendingNote, type PendingNote } from "../lib/guestNote";
-import type { SessionUser } from "../utils/session";
+import type { SessionUser } from "../user";
 
 export default function Guest({
   user,
