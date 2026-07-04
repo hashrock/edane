@@ -77,9 +77,8 @@ export default function NotesIndex({
     >
       <Head title="Edane" />
       <header className="anim-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
-        <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
-          <img src="/logo.svg" alt="" className="w-7 h-7" />
-          Edane
+        <h1 className="text-xl font-bold tracking-tight">
+          <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {user ? (

@@ -19,9 +19,8 @@ export default function NotesNew({ user }: { user: User }) {
     <div className="max-w-3xl mx-auto px-6 py-7 md:py-9">
       <Head title="新規ノート" />
       <header className="anim-header mb-10 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
-          <img src="/logo.svg" alt="" className="w-7 h-7" />
-          Edane
+        <h1 className="text-xl font-bold tracking-tight">
+          <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
         {user && (
           <Link

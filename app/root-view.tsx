@@ -8,7 +8,7 @@ const Document = ({ page }: { page: PageObject }) => (
       <meta charSet="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>Edane</title>
-      <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+      <link rel="icon" href="/icon.svg" type="image/svg+xml" />
       <ViteClient />
       <Script src="/app/client.tsx" />
       <Link href="/app/styles.css" rel="stylesheet" />

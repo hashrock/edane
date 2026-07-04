@@ -35,9 +35,8 @@ export default function NotesTrash({
     <div className="mx-auto max-w-3xl px-6 py-7 md:py-9">
       <Head title="ゴミ箱 - Edane" />
       <header className="anim-header mb-10 flex items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <img src="/logo.svg" alt="" className="h-7 w-7" />
-          Edane
+        <h1 className="text-xl font-bold tracking-tight">
+          <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
         {user.name && (
           <span className="text-sm text-slate-500">{user.name}</span>
