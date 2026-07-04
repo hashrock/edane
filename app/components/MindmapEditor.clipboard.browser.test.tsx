@@ -132,4 +132,25 @@ describe("MindmapEditor clipboard", () => {
       .children.find((c) => c.text === "Alpha")!;
     expect(pasted.id).not.toBe("a"); // fresh id on paste
   });
+
+  it("copies the selected subtree to the system clipboard as Markdown", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+
+    // Root is selected on load; copy its whole subtree.
+    const dt = new DataTransfer();
+    hiddenInput().dispatchEvent(
+      new ClipboardEvent("copy", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    expect(dt.getData("text/plain")).toBe(
+      ["- Root", "  - Alpha", "  - Bravo"].join("\n")
+    );
+  });
 });
