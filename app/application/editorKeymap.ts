@@ -157,6 +157,27 @@ export function buildKeymap(deps: KeymapDeps): KeyBinding[] {
       },
     },
 
+    {
+      id: "toggle-collapse",
+      label: "折りたたみ / 展開",
+      keys: "⌘/Ctrl + .",
+      when: "both",
+      // Selection mode already collapses with ←/→, but those are the caret keys
+      // while editing. This chord toggles collapse in either mode so you never
+      // have to leave edit mode to fold a subtree.
+      match: (e) => mod(e) && e.key === ".",
+      run: (ctx) => {
+        const n = ctx.node;
+        if (!n || n.children.length === 0) return "handled";
+        const next = deps.dispatch(
+          { type: "toggleCollapse", nodeId: n.id },
+          "collapse"
+        );
+        if (next !== ctx.state) deps.saveNote(next.document.model);
+        return "handled";
+      },
+    },
+
     // ---- Selection mode ----
     // No Escape binding here: the editor keeps exactly one node selected at all
     // times (see the empty-space click handler), so leaving selection mode would
