@@ -8,7 +8,7 @@ import {
   TrashIcon,
 } from "../../components/icons";
 import { takePendingNote } from "../../lib/guestNote";
-import type { SessionUser } from "../../utils/session";
+import type { SessionUser } from "../../user";
 
 type Note = {
   id: string;
