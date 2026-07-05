@@ -9,6 +9,11 @@ import {
   modelToMarkdown,
 } from "../application/markdown";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
+import {
+  BRANCH_MIME,
+  serializeBranch,
+  parseBranch,
+} from "../application/branchClipboard";
 import MarkdownPanel from "./MarkdownPanel";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
@@ -806,12 +811,16 @@ export function MindmapEditorView({
     e.preventDefault();
     dispatch({ type: "copyBranch" });
     // Keep the internal branch clipboard (for in-app paste) but also expose the
-    // selected subtree as a Markdown outline on the system clipboard, so Cmd+C
-    // pastes something meaningful into other apps.
+    // selected subtree on the system clipboard: a Markdown outline as text/plain
+    // (so Cmd+C pastes meaningfully into other apps) plus a full-fidelity JSON
+    // payload (so pasting back into edane restores node kinds/formatting).
     const node = st.view.activeNodeId
       ? findNode(st.document.model, st.view.activeNodeId)
       : null;
-    if (node) e.clipboardData.setData("text/plain", modelToMarkdown(node));
+    if (node) {
+      e.clipboardData.setData("text/plain", modelToMarkdown(node));
+      e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+    }
   }, [dispatch]);
 
   const handleCut = useCallback(
@@ -819,6 +828,16 @@ export function MindmapEditorView({
       const st = stateRef.current;
       if (st.view.editing && hasTextRange(st)) return; // native text cut
       e.preventDefault();
+      // Mirror copy's system-clipboard payload before the branch leaves the tree
+      // (root can't be cut, so skip it — cutBranch would no-op anyway).
+      const node =
+        st.view.activeNodeId && st.view.activeNodeId !== st.document.model.id
+          ? findNode(st.document.model, st.view.activeNodeId)
+          : null;
+      if (node) {
+        e.clipboardData.setData("text/plain", modelToMarkdown(node));
+        e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+      }
       const next = dispatch({ type: "cutBranch" }, "cut-branch");
       if (noteId && next.document.model !== st.document.model)
         saveNote(next.document.model);
@@ -845,6 +864,24 @@ export function MindmapEditorView({
 
       const st = stateRef.current;
       const text = e.clipboardData.getData("text");
+
+      // An edane branch on the system clipboard carries full-fidelity JSON in a
+      // custom MIME alongside its Markdown text/plain. Since both ride the same
+      // clipboard, the JSON's presence means "this is our own branch" — paste it
+      // as a child (node kinds/formatting intact) ahead of the Markdown path,
+      // even across tabs. In editing mode fall through to native text paste.
+      const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
+      if (jsonBranch && !st.view.editing) {
+        e.preventDefault();
+        const next = dispatch(
+          { type: "pasteBranch", node: jsonBranch },
+          "paste-branch"
+        );
+        flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
+        if (noteId && next.document.model !== st.document.model)
+          saveNote(next.document.model);
+        return;
+      }
 
       // External Markdown → open the choice dialog (decompose / markdown node /
       // plain text). The internal branch clipboard carries no text, so a

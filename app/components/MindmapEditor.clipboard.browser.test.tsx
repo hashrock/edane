@@ -133,6 +133,64 @@ describe("MindmapEditor clipboard", () => {
     expect(pasted.id).not.toBe("a"); // fresh id on paste
   });
 
+  it("copies the selected subtree as a JSON branch and pastes it back with node kinds intact", async () => {
+    // A branch with a non-text (link) child: Markdown would flatten the kind,
+    // JSON must round-trip it.
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "https://example.com",
+          type: "link",
+          linkTitle: "Example",
+          children: [],
+        },
+      ],
+    };
+    render(
+      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+    );
+    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+
+    // Copy root's whole subtree; the JSON payload lands in the custom MIME.
+    const copyDt = new DataTransfer();
+    hiddenInput().dispatchEvent(
+      new ClipboardEvent("copy", {
+        clipboardData: copyDt,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    const json = copyDt.getData("application/x-edane-branch");
+    expect(json).not.toBe("");
+    expect(JSON.parse(json).children[0].type).toBe("link");
+
+    // Paste it back onto the selected root: it pastes as a child branch with
+    // fresh ids and the link kind preserved — no Markdown dialog / decompose.
+    const pasteDt = new DataTransfer();
+    pasteDt.setData("application/x-edane-branch", json);
+    pasteDt.setData("text/plain", "- Root\n  - Example"); // would look like markdown
+    hiddenInput().dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: pasteDt,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+
+    const pastedRoot = await waitFor(() =>
+      api()
+        .getModel()
+        .children.find((c) => c.text === "Root")
+    );
+    expect(pastedRoot.id).not.toBe("root"); // fresh id
+    expect(pastedRoot.children[0]?.type).toBe("link"); // kind survived
+    expect(pastedRoot.children[0]?.linkTitle).toBe("Example");
+  });
+
   it("copies the selected subtree to the system clipboard as Markdown", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />

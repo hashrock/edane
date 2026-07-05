@@ -109,7 +109,11 @@ export type EditorAction =
   // --- branch clipboard ---
   | { type: "copyBranch" }
   | { type: "cutBranch" }
-  | { type: "pasteBranch" }
+  // Paste a branch as a child of the active node. Without `node`, the internal
+  // clipboard (set by copyBranch/cutBranch) is used; with `node`, that explicit
+  // subtree is pasted instead (an external branch decoded from the system
+  // clipboard) and the internal clipboard is left untouched.
+  | { type: "pasteBranch"; node?: MindMapModel }
   // --- pointer ---
   | {
       type: "activateNode";
@@ -342,10 +346,13 @@ function documentReducer(
 
     case "pasteBranch": {
       const { model, clipboard } = document;
-      if (!activeNodeId || !clipboard) return { document };
+      // An explicit `node` (external clipboard) takes priority; otherwise fall
+      // back to the internal branch clipboard.
+      const source = action.node ?? clipboard;
+      if (!activeNodeId || !source) return { document };
       const target = findNode(model, activeNodeId);
       if (!target) return { document };
-      const fresh = cloneWithNewIds(clipboard);
+      const fresh = cloneWithNewIds(source);
       // Expand the target so the pasted child is visible, then append it.
       let newModel = toggleCollapse(model, activeNodeId, false);
       newModel = addChildToNode(newModel, activeNodeId, fresh);
