@@ -23,9 +23,11 @@
     "@hono/oauth-providers": "^0.8.5",
     "@inertiajs/core": "^3.0.3",
     "@inertiajs/react": "^3.3.0",
+    "dompurify": "^3.4.11",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.12.21",
     "konva": "^10.2.3",
+    "marked": "^18.0.5",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

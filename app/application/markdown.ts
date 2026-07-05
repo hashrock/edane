@@ -13,15 +13,12 @@
 import type { MindMapModel } from "../domain/model";
 import { generateId } from "../domain/model";
 
-// Shared block-level line patterns (also imported by markdownLayout.ts so the
-// two Markdown consumers can't drift). ORDERED stays local because its callers
-// disagree on the capture groups they need.
-export const HEADING = /^(#{1,6})\s+(.*)$/;
-export const UNORDERED = /^(\s*)[-*+]\s+(.*)$/;
-export const BLOCKQUOTE = /^\s*>\s?(.*)$/;
-export const HR = /^\s*([-*_])\1{2,}\s*$/;
-export const FENCE = /^\s*(```|~~~)/;
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const UNORDERED = /^(\s*)[-*+]\s+(.*)$/;
 const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/;
+const BLOCKQUOTE = /^\s*>\s?(.*)$/;
+const HR = /^\s*([-*_])\1{2,}\s*$/;
+const FENCE = /^\s*(```|~~~)/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const INLINE_LINK = /\[[^\]]+\]\([^)]+\)/;
 const INLINE_BOLD = /(\*\*|__)[^\s](?:.*?[^\s])?\1/;
@@ -45,7 +42,7 @@ export function looksLikeMarkdown(text: string): boolean {
 }
 
 /** Strip the most common inline Markdown decorations for readable node text. */
-export function stripInline(s: string): string {
+function stripInline(s: string): string {
   return s
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) → text
     .replace(/`([^`]+)`/g, "$1") // `code` → code

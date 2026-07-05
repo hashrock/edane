@@ -8,7 +8,8 @@ import {
   markdownToModel,
   modelToMarkdown,
 } from "../application/markdown";
-import { layoutMarkdown } from "../application/markdownLayout";
+import { markdownTitle, markdownLineCount } from "../application/markdownCard";
+import MarkdownPanel from "./MarkdownPanel";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
@@ -27,6 +28,8 @@ import {
   nodeBoxWidth,
   nodeBoxHeight,
   markdownPreview,
+  MD_CARD_LEAD,
+  MD_CARD_BADGE,
 } from "../application/nodeUtils";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import {
@@ -369,6 +372,9 @@ export function MindmapEditorView({
   const [konvaReady, setKonvaReady] = useState(false);
   // True while an image file is being dragged over the canvas (drop-to-upload).
   const [dropActive, setDropActive] = useState(false);
+  // The markdown node whose full document is open in the side panel (null =
+  // closed). Markdown nodes edit/preview here rather than expanding on-canvas.
+  const [mdPanelNodeId, setMdPanelNodeId] = useState<string | null>(null);
   // Bumped whenever the stage is panned or zoomed so the (viewport-culled)
   // redraw effect re-runs and refills the newly-visible area. See the redraw
   // effect below — only nodes intersecting the visible viewport are built.
@@ -721,6 +727,34 @@ export function MindmapEditorView({
       })();
     },
     [dispatch, nodeIdAtClientPoint, stateRef, uploadAndSetImage]
+  );
+
+  // Markdown nodes don't edit on the canvas — any edit intent (Space / typing /
+  // double-click all flip `editing` on) instead opens the full document in the
+  // side panel and leaves the canvas in selection mode. An empty markdown node
+  // is let go (exitEditing deletes it) rather than opening an empty panel.
+  useEffect(() => {
+    if (!editing || !activeNodeId) return;
+    const node = findNode(model, activeNodeId);
+    if (node?.type !== "markdown") return;
+    if (node.text.trim() !== "") setMdPanelNodeId(activeNodeId);
+    dispatch({ type: "exitEditing" });
+  }, [editing, activeNodeId, model, dispatch]);
+
+  // Close the panel if its node is gone (deleted / undo).
+  useEffect(() => {
+    if (mdPanelNodeId && !findNode(model, mdPanelNodeId)) setMdPanelNodeId(null);
+  }, [mdPanelNodeId, model]);
+
+  // Panel edits go through the same reducer as canvas edits; the debounced
+  // autosave effect (keyed on the model) persists them, and handleTextChange
+  // batches them into one undo step like typing does.
+  const handleMarkdownEdit = useCallback(
+    (nodeId: string, text: string) => {
+      undoManagerRef.current.handleTextChange(stateRef.current.document);
+      dispatch({ type: "setNodeContent", nodeId, text, nodeType: "markdown" });
+    },
+    [dispatch, undoManagerRef, stateRef]
   );
 
   const triggerImageUpload = useCallback((nodeId: string) => {
@@ -1941,86 +1975,47 @@ export function MindmapEditorView({
           );
         }
       } else if (asMarkdown) {
-        // Styled block-level Markdown: draw each parsed line with its own font.
-        const md = layoutMarkdown(node.text, fontSize);
-        const contentTop = node.y - md.height / 2;
-        const leftX = node.x + nodePadding;
-        const contentRight = node.x + rectWidth - nodePadding;
-        for (const ln of md.lines) {
-          const lineTop = contentTop + ln.y;
-          // Vertical centre of the glyph within its line box (shared by the
-          // bullet and the text).
-          const textY = lineTop + (ln.height - ln.fontSize) / 2 - 1;
-          if (ln.rule) {
-            const ry = Math.round(lineTop + ln.height / 2) + 0.5;
-            group.add(
-              new Konva.Line({
-                points: [leftX, ry, contentRight, ry],
-                stroke: "#cbd5e1",
-                strokeWidth: 1,
-                listening: false,
-              })
-            );
-            continue;
-          }
-          if (ln.codeBg) {
-            group.add(
-              new Konva.Rect({
-                x: leftX - 4,
-                y: lineTop,
-                width: contentRight - leftX + 8,
-                height: ln.height,
-                fill: "#f1f5f9",
-                cornerRadius: 3,
-                listening: false,
-                perfectDrawEnabled: false,
-              })
-            );
-          }
-          if (ln.gutter) {
-            group.add(
-              new Konva.Rect({
-                x: leftX,
-                y: lineTop + 2,
-                width: 3,
-                height: ln.height - 4,
-                fill: "#cbd5e1",
-                cornerRadius: 1.5,
-                listening: false,
-              })
-            );
-          }
-          if (ln.bullet) {
-            group.add(
-              new Konva.Text({
-                x: leftX + ln.indent,
-                y: textY,
-                text: ln.bullet,
-                fontSize: ln.fontSize,
-                fontFamily: "sans-serif",
-                fill: ln.color,
-                listening: false,
-              })
-            );
-          }
-          if (ln.text !== "") {
-            group.add(
-              new Konva.Text({
-                x: leftX + ln.textOffset,
-                y: textY,
-                text: ln.text,
-                fontSize: ln.fontSize,
-                fontFamily: ln.mono ? "monospace" : "sans-serif",
-                fill: ln.color,
-                fontStyle:
-                  [ln.bold && "bold", ln.italic && "italic"]
-                    .filter(Boolean)
-                    .join(" ") || "normal",
-                listening: false,
-              })
-            );
-          }
-        }
+        // Compact card: a document glyph, the derived title, and a line-count
+        // badge — one line. The full document opens in the side panel; the card
+        // never grows to the document's size on the canvas.
+        const glyphX = node.x + nodePadding;
+        group.add(
+          new Konva.Text({
+            x: glyphX,
+            y: node.y - fontSize / 2 - 1,
+            text: "📄",
+            fontSize,
+            fontFamily: "sans-serif",
+            listening: false,
+          })
+        );
+        group.add(
+          new Konva.Text({
+            x: glyphX + MD_CARD_LEAD,
+            y: node.y - fontSize / 2 - 1,
+            text: markdownTitle(node.text),
+            fontSize,
+            fontFamily: "sans-serif",
+            fill: "#6b21a8",
+            fontStyle: bold ? "bold" : "normal",
+            listening: false,
+          })
+        );
+        // Line-count badge pinned to the card's right edge.
+        const badgeText = `${markdownLineCount(node.text)}行`;
+        group.add(
+          new Konva.Text({
+            x: node.x + rectWidth - MD_CARD_BADGE + 2,
+            y: node.y - 6,
+            width: MD_CARD_BADGE - 6,
+            align: "right",
+            text: badgeText,
+            fontSize: 10,
+            fontFamily: "sans-serif",
+            fill: "#a855f7",
+            listening: false,
+          })
+        );
       } else {
         // Favicon before the link title (when fetched + loaded).
         if (asLink && favLoaded) {
@@ -2056,40 +2051,6 @@ export function MindmapEditorView({
           listening: false,
         });
         group.add(textNode);
-      }
-
-      // Markdown tag: a small "MD" tab riding the top-left edge of the box.
-      if (asMarkdown) {
-        const tabW = 30;
-        const tabH = 16;
-        const tabX = node.x + 8;
-        const tabY = node.y - rectHeight / 2 - tabH + 3;
-        group.add(
-          new Konva.Rect({
-            x: tabX,
-            y: tabY,
-            width: tabW,
-            height: tabH,
-            cornerRadius: 5,
-            fill: "#9333ea",
-            listening: false,
-            perfectDrawEnabled: false,
-          })
-        );
-        group.add(
-          new Konva.Text({
-            x: tabX,
-            y: tabY + 3,
-            width: tabW,
-            align: "center",
-            text: "MD",
-            fontSize: 10,
-            fontStyle: "bold",
-            fontFamily: "sans-serif",
-            fill: "#ffffff",
-            listening: false,
-          })
-        );
       }
 
       // Collapsed indicator: a small pill on the right showing hidden child count.
@@ -2660,6 +2621,17 @@ export function MindmapEditorView({
             </span>
           </div>
         )}
+        {(() => {
+          const n = mdPanelNodeId ? findNode(model, mdPanelNodeId) : null;
+          if (!n) return null;
+          return (
+            <MarkdownPanel
+              source={n.text}
+              onChange={(text) => handleMarkdownEdit(n.id, text)}
+              onClose={() => setMdPanelNodeId(null)}
+            />
+          );
+        })()}
         <textarea
           ref={inputRef}
           value={editingText}
