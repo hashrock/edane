@@ -1784,10 +1784,10 @@ export function MindmapEditorView({
 
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      // A markdown node that isn't being edited is drawn as styled block-level
-      // Markdown (see the draw loop), so its connection-start width comes from
-      // the measured render box, not a raw-text line measurement.
-      if (node.type === "markdown" && !(activeNodeId === node.id && editing)) {
+      // A markdown node is always drawn as its compact card (it never edits on
+      // the canvas — edit intent opens the side panel), so its connection-start
+      // width comes from the measured render box, not a raw-text line measurement.
+      if (node.type === "markdown") {
         lineDataMap.set(
           node.id,
           buildLineData("", node.fontSize ?? DEFAULT_FONT_SIZE, !!node.bold)
@@ -1850,8 +1850,14 @@ export function MindmapEditorView({
       // isEditing = caret/text-input active; isSelected = node highlighted but
       // not being edited (single click). A selected node renders like any other
       // (link title, stored format) with just an accent outline.
-      const isEditing = editing && activeNodeId === node.id;
-      const isSelected = !editing && activeNodeId === node.id;
+      // A markdown node never enters the on-canvas editing state: any edit
+      // intent opens the side panel (see the mdPanel effect) and leaves the
+      // canvas in selection mode. Excluding it from isEditing here keeps it on
+      // its compact card for the transient frame between `editing` flipping on
+      // and the effect running — otherwise it flashes the raw-text edit card.
+      const isMarkdown = node.type === "markdown";
+      const isEditing = editing && activeNodeId === node.id && !isMarkdown;
+      const isSelected = activeNodeId === node.id && !isEditing;
       // Image/link nodes keep their rendered preview even while editing — the
       // URL is edited in the visible box below the node — so only TEXT nodes
       // swap to raw-text (live buffer) editing on the canvas. Markdown edits as
@@ -1863,7 +1869,7 @@ export function MindmapEditorView({
       // A markdown node draws its styled block-level render (see the asMarkdown
       // branch below); it's tinted and tagged with an "MD" label. Its raw text is
       // never used for the single-Text path, so displayRaw ignores it here.
-      const asMarkdown = !isEditing && node.type === "markdown";
+      const asMarkdown = isMarkdown;
       // Links display their fetched title (falling back to the raw URL).
       const displayRaw = isTextEditing
         ? editingText
