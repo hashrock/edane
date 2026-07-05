@@ -4,6 +4,7 @@
 
 import type { MindMapModel, NodeType } from "../domain/model";
 import { measureNodeBox } from "../lib/measureText";
+import { layoutMarkdown } from "./markdownLayout";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
 
 /** Flat node for rendering (computed from domain model via layout). */
@@ -112,12 +113,11 @@ export function measureModelNode(
     };
   }
   if (m.type === "markdown") {
-    // Sized from the bounded preview (the same string the canvas renders).
-    const box = measureNodeBox(markdownPreview(m.text), {
-      fontSize: m.fontSize,
-      bold: m.bold,
-    });
-    return { width: box.width, height: box.height };
+    // Rendered as styled block-level Markdown; both the box and the canvas draw
+    // read the same layout so they never drift. 14px vertical padding + the
+    // 32px floor mirror measureNodeBox's own box maths.
+    const md = layoutMarkdown(m.text, m.fontSize);
+    return { width: md.width, height: Math.max(32, md.height + 14) };
   }
   const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
   return { width: box.width, height: box.height };

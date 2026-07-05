@@ -42,7 +42,7 @@ export function looksLikeMarkdown(text: string): boolean {
 }
 
 /** Strip the most common inline Markdown decorations for readable node text. */
-function stripInline(s: string): string {
+export function stripInline(s: string): string {
   return s
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) → text
     .replace(/`([^`]+)`/g, "$1") // `code` → code

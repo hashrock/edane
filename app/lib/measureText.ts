@@ -36,8 +36,13 @@ export function lineHeightFor(fontSize: number): number {
 }
 
 /** Canvas/Konva font shorthand for a node's size + weight. */
-export function nodeFontString(fontSize: number, bold: boolean): string {
-  return `${bold ? "bold " : ""}${fontSize}px sans-serif`;
+export function nodeFontString(
+  fontSize: number,
+  bold: boolean,
+  mono = false
+): string {
+  const family = mono ? "monospace" : "sans-serif";
+  return `${bold ? "bold " : ""}${fontSize}px ${family}`;
 }
 
 export interface MeasureOpts {
@@ -45,6 +50,8 @@ export interface MeasureOpts {
   fontSize?: number;
   /** Bold weight (default false). */
   bold?: boolean;
+  /** Monospace family (default false) — for rendered code. */
+  mono?: boolean;
 }
 /** Vertical padding added around the text block to form the node box. */
 const BOX_V_PAD = 14;
@@ -93,8 +100,9 @@ function estimateBox(text: string, fontSize: number, lineHeight: number): NodeBo
 export function measureNodeBox(text: string, opts?: MeasureOpts): NodeBox {
   const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
   const bold = opts?.bold ?? false;
+  const mono = opts?.mono ?? false;
   const lineHeight = lineHeightFor(fontSize);
-  const key = `${fontSize}|${bold ? 1 : 0}|${text}`;
+  const key = `${fontSize}|${bold ? 1 : 0}|${mono ? 1 : 0}|${text}`;
   const cached = _boxCache.get(key);
   if (cached) return cached;
 
@@ -102,9 +110,11 @@ export function measureNodeBox(text: string, opts?: MeasureOpts): NodeBox {
   if (!canMeasure()) {
     box = estimateBox(text, fontSize, lineHeight);
   } else {
-    const prepared = prepareWithSegments(text, nodeFontString(fontSize, bold), {
-      whiteSpace: "pre-wrap",
-    });
+    const prepared = prepareWithSegments(
+      text,
+      nodeFontString(fontSize, bold, mono),
+      { whiteSpace: "pre-wrap" }
+    );
     const { lineCount } = layout(prepared, NO_WRAP_WIDTH, lineHeight);
     const lines = Math.max(1, lineCount);
     box = {

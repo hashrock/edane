@@ -8,6 +8,7 @@ import {
   markdownToModel,
   modelToMarkdown,
 } from "../application/markdown";
+import { layoutMarkdown } from "../application/markdownLayout";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
@@ -1749,16 +1750,19 @@ export function MindmapEditorView({
 
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      // For active node during editing, use editingText. A markdown node draws
-      // its bounded preview (except while actually being edited), so its line
-      // data must be built from that same preview or blockHeight/caret geometry
-      // would follow the full source and mis-place the text.
-      const displayRaw =
-        node.type === "markdown" && !(activeNodeId === node.id && editing)
-          ? markdownPreview(node.text)
-          : activeNodeId === node.id
-            ? editingText
-            : node.text;
+      // A markdown node that isn't being edited is drawn as styled block-level
+      // Markdown (see the draw loop), so its connection-start width comes from
+      // the measured render box, not a raw-text line measurement.
+      if (node.type === "markdown" && !(activeNodeId === node.id && editing)) {
+        lineDataMap.set(
+          node.id,
+          buildLineData("", node.fontSize ?? DEFAULT_FONT_SIZE, !!node.bold)
+        );
+        textWidths.set(node.id, node.width);
+        return;
+      }
+      // For active node during editing, use editingText.
+      const displayRaw = activeNodeId === node.id ? editingText : node.text;
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
@@ -1936,6 +1940,87 @@ export function MindmapEditorView({
               listening: false,
             })
           );
+        }
+      } else if (asMarkdown) {
+        // Styled block-level Markdown: draw each parsed line with its own font.
+        const md = layoutMarkdown(node.text, fontSize);
+        const contentTop = node.y - md.height / 2;
+        const leftX = node.x + nodePadding;
+        const contentRight = node.x + rectWidth - nodePadding;
+        for (const ln of md.lines) {
+          const lineTop = contentTop + ln.y;
+          if (ln.rule) {
+            const ry = Math.round(lineTop + ln.height / 2) + 0.5;
+            group.add(
+              new Konva.Line({
+                points: [leftX, ry, contentRight, ry],
+                stroke: "#cbd5e1",
+                strokeWidth: 1,
+                listening: false,
+              })
+            );
+            continue;
+          }
+          if (ln.codeBg) {
+            group.add(
+              new Konva.Rect({
+                x: leftX - 4,
+                y: lineTop,
+                width: contentRight - leftX + 8,
+                height: ln.height,
+                fill: "#f1f5f9",
+                cornerRadius: 3,
+                listening: false,
+                perfectDrawEnabled: false,
+              })
+            );
+          }
+          if (ln.gutter) {
+            group.add(
+              new Konva.Rect({
+                x: leftX,
+                y: lineTop + 2,
+                width: 3,
+                height: ln.height - 4,
+                fill: "#cbd5e1",
+                cornerRadius: 1.5,
+                listening: false,
+              })
+            );
+          }
+          if (ln.bullet) {
+            group.add(
+              new Konva.Text({
+                x: leftX + ln.indent,
+                y: lineTop + (ln.height - ln.fontSize) / 2 - 1,
+                text: ln.bullet,
+                fontSize: ln.fontSize,
+                fontFamily: "sans-serif",
+                fill: ln.color,
+                listening: false,
+              })
+            );
+          }
+          if (ln.text !== "") {
+            group.add(
+              new Konva.Text({
+                x: leftX + ln.textOffset,
+                y: lineTop + (ln.height - ln.fontSize) / 2 - 1,
+                text: ln.text,
+                fontSize: ln.fontSize,
+                fontFamily: ln.mono ? "monospace" : "sans-serif",
+                fill: ln.color,
+                fontStyle: ln.bold
+                  ? ln.italic
+                    ? "bold italic"
+                    : "bold"
+                  : ln.italic
+                    ? "italic"
+                    : "normal",
+                listening: false,
+              })
+            );
+          }
         }
       } else {
         // Favicon before the link title (when fetched + loaded).
