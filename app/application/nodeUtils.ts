@@ -4,7 +4,12 @@
 
 import type { MindMapModel, NodeType } from "../domain/model";
 import { measureNodeBox } from "../lib/measureText";
+import { markdownTitle } from "./markdownCard";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
+
+/** Extra card width (px) for a markdown node: doc glyph + line-count badge. */
+export const MD_CARD_LEAD = 24;
+export const MD_CARD_BADGE = 34;
 
 /** Flat node for rendering (computed from domain model via layout). */
 export interface MindMapNode {
@@ -112,12 +117,11 @@ export function measureModelNode(
     };
   }
   if (m.type === "markdown") {
-    // Sized from the bounded preview (the same string the canvas renders).
-    const box = measureNodeBox(markdownPreview(m.text), {
-      fontSize: m.fontSize,
-      bold: m.bold,
-    });
-    return { width: box.width, height: box.height };
+    // Shown as a COMPACT single-line card (doc glyph + title + line-count
+    // badge); the full document renders in the HTML side panel on demand. The
+    // box measures the (clipped) title plus fixed room for the glyph and badge.
+    const box = measureNodeBox(markdownTitle(m.text), { fontSize: m.fontSize });
+    return { width: box.width + MD_CARD_LEAD + MD_CARD_BADGE, height: box.height };
   }
   const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
   return { width: box.width, height: box.height };
