@@ -1826,17 +1826,16 @@ export function MindmapEditorView({
       const isTextEditing = isEditing && !isCustom;
       const asImage = node.type === "image";
       const asLink = node.type === "link";
-      // A markdown node renders a bounded preview of its source (full text is
-      // shown only while editing); it's tinted and tagged with an "MD" label.
+      // A markdown node draws its styled block-level render (see the asMarkdown
+      // branch below); it's tinted and tagged with an "MD" label. Its raw text is
+      // never used for the single-Text path, so displayRaw ignores it here.
       const asMarkdown = !isEditing && node.type === "markdown";
       // Links display their fetched title (falling back to the raw URL).
       const displayRaw = isTextEditing
         ? editingText
         : asLink
           ? node.linkTitle || node.text
-          : asMarkdown
-            ? markdownPreview(node.text)
-            : node.text;
+          : node.text;
       const isEmpty = displayRaw === "";
       const displayText = isEmpty ? "empty" : displayRaw;
       const fontSize = node.fontSize ?? DEFAULT_FONT_SIZE;
@@ -1949,6 +1948,9 @@ export function MindmapEditorView({
         const contentRight = node.x + rectWidth - nodePadding;
         for (const ln of md.lines) {
           const lineTop = contentTop + ln.y;
+          // Vertical centre of the glyph within its line box (shared by the
+          // bullet and the text).
+          const textY = lineTop + (ln.height - ln.fontSize) / 2 - 1;
           if (ln.rule) {
             const ry = Math.round(lineTop + ln.height / 2) + 0.5;
             group.add(
@@ -1992,7 +1994,7 @@ export function MindmapEditorView({
             group.add(
               new Konva.Text({
                 x: leftX + ln.indent,
-                y: lineTop + (ln.height - ln.fontSize) / 2 - 1,
+                y: textY,
                 text: ln.bullet,
                 fontSize: ln.fontSize,
                 fontFamily: "sans-serif",
@@ -2005,18 +2007,15 @@ export function MindmapEditorView({
             group.add(
               new Konva.Text({
                 x: leftX + ln.textOffset,
-                y: lineTop + (ln.height - ln.fontSize) / 2 - 1,
+                y: textY,
                 text: ln.text,
                 fontSize: ln.fontSize,
                 fontFamily: ln.mono ? "monospace" : "sans-serif",
                 fill: ln.color,
-                fontStyle: ln.bold
-                  ? ln.italic
-                    ? "bold italic"
-                    : "bold"
-                  : ln.italic
-                    ? "italic"
-                    : "normal",
+                fontStyle:
+                  [ln.bold && "bold", ln.italic && "italic"]
+                    .filter(Boolean)
+                    .join(" ") || "normal",
                 listening: false,
               })
             );

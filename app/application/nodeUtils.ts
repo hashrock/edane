@@ -3,7 +3,7 @@
  */
 
 import type { MindMapModel, NodeType } from "../domain/model";
-import { measureNodeBox } from "../lib/measureText";
+import { measureNodeBox, BOX_V_PAD, MIN_BOX_HEIGHT } from "../lib/measureText";
 import { layoutMarkdown } from "./markdownLayout";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
 
@@ -114,10 +114,11 @@ export function measureModelNode(
   }
   if (m.type === "markdown") {
     // Rendered as styled block-level Markdown; both the box and the canvas draw
-    // read the same layout so they never drift. 14px vertical padding + the
-    // 32px floor mirror measureNodeBox's own box maths.
+    // read the same layout so they never drift. The vertical padding + height
+    // floor reuse measureNodeBox's own box constants (below), matching how text
+    // nodes are sized.
     const md = layoutMarkdown(m.text, m.fontSize);
-    return { width: md.width, height: Math.max(32, md.height + 14) };
+    return { width: md.width, height: Math.max(MIN_BOX_HEIGHT, md.height + BOX_V_PAD) };
   }
   const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
   return { width: box.width, height: box.height };

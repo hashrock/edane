@@ -54,9 +54,9 @@ export interface MeasureOpts {
   mono?: boolean;
 }
 /** Vertical padding added around the text block to form the node box. */
-const BOX_V_PAD = 14;
+export const BOX_V_PAD = 14;
 /** Minimum node box height (keeps single-line nodes at their original size). */
-const MIN_BOX_HEIGHT = 32;
+export const MIN_BOX_HEIGHT = 32;
 /** Effectively-unbounded width so wrapping only happens on hard `\n` breaks. */
 const NO_WRAP_WIDTH = 100000;
 
