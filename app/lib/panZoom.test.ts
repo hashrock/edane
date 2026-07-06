@@ -42,6 +42,21 @@ describe("createWheelGestureRecognizer", () => {
     ).toEqual({ type: "zoom", factor: WHEEL_ZOOM_STEP });
   });
 
+  it("mouse wheel spun fast (fractional deltaY, 120-multiple wheelDeltaY) still zooms", () => {
+    const recognize = createWheelGestureRecognizer();
+    // Observed on macOS Chrome: OS scroll acceleration makes deltaY fractional
+    // while wheelDeltaY stays a clean 120 multiple. The sub-pixel value must NOT
+    // flip this into a trackpad pan — that was the pan/zoom mixup bug.
+    expect(
+      recognize(wheel({ deltaY: -124.1241455078125, wheelDeltaY: 360 }))
+    ).toEqual({ type: "zoom", factor: WHEEL_ZOOM_STEP });
+    expect(
+      recognize(
+        wheel({ deltaY: 208.441162109375, wheelDeltaY: -600, timeStamp: 16 })
+      )
+    ).toEqual({ type: "zoom", factor: 1 / WHEEL_ZOOM_STEP });
+  });
+
   it("line-mode deltas (Firefox mouse) zoom", () => {
     const recognize = createWheelGestureRecognizer();
     expect(recognize(wheel({ deltaY: 3, deltaMode: 1 }))).toEqual({
@@ -110,6 +125,20 @@ describe("createWheelGestureRecognizer", () => {
     expect(action).toEqual({
       type: "zoom",
       factor: Math.exp(5.5 * PINCH_ZOOM_SPEED),
+    });
+  });
+
+  it("real macOS pinch (wheelDeltaY pinned at ±120, fractional deltaY) zooms smoothly", () => {
+    const recognize = createWheelGestureRecognizer();
+    // Observed: pinch keeps |wheelDeltaY| = 120 while deltaY stays fractional.
+    // The absolute-value guard must NOT treat this as a mouse notch, else the
+    // zoom degrades from smooth exp to the chunky ×1.05 step.
+    const action = recognize(
+      wheel({ deltaY: 7.2004475593566895, wheelDeltaY: -120, ctrlKey: true })
+    );
+    expect(action).toEqual({
+      type: "zoom",
+      factor: Math.exp(-7.2004475593566895 * PINCH_ZOOM_SPEED),
     });
   });
 

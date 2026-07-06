@@ -84,18 +84,33 @@ type Device = "mouse" | "trackpad";
 function detectDevice(e: WheelInput): Device | null {
   // Line/page deltas only ever come from real wheels (e.g. Firefox mice).
   if (e.deltaMode !== 0) return "mouse";
+
+  // wheelDeltaY (WebKit/Chrome), when present, is the most reliable signal and
+  // must be consulted BEFORE the delta shape, because OS scroll acceleration
+  // makes deltaY fractional on both devices (so the sub-pixel test alone would
+  // mislabel a fast mouse spin as a trackpad). All values below are observed on
+  // macOS Chrome:
+  //   - mouse wheel:     wheelDeltaY = 3 * (notches * ±120); a fast spin stacks
+  //                      notches, so |wheelDeltaY| climbs (360, 480, 600, …).
+  //   - trackpad pinch:  wheelDeltaY pinned at ±120, deltaY fractional.
+  //   - trackpad scroll: wheelDeltaY = -3 * deltaY, rarely a 120 multiple.
+  if (e.wheelDeltaY !== undefined && e.wheelDeltaY !== 0) {
+    // A non-120 multiple is a firm trackpad signal.
+    if (e.wheelDeltaY % 120 !== 0) return "trackpad";
+    // Multiple notches at once — only a real wheel accelerates like that (a
+    // pinch stays pinned at ±120), so it's a mouse even when acceleration made
+    // deltaY fractional. This is what keeps a fast mouse spin zooming.
+    if (Math.abs(e.wheelDeltaY) > 120) return "mouse";
+    // Exactly ±120: a single mouse notch AND a trackpad pinch both look like
+    // this. Sub-pixel deltaY betrays the pinch (→ smooth zoom); an integer
+    // delta is an ambiguous single notch — fall through to burst / mouse.
+    if (!Number.isInteger(e.deltaY)) return "trackpad";
+    return null;
+  }
+
+  // No wheelDeltaY (e.g. Firefox): fall back to the delta shape.
   // Sub-pixel precision only comes from trackpads.
   if (!Number.isInteger(e.deltaX) || !Number.isInteger(e.deltaY)) {
-    return "trackpad";
-  }
-  // Legacy wheelDeltaY: mouse notches are ±120 multiples; a trackpad reports
-  // -3 * deltaY, which is a 120 multiple only when deltaY happens to be a
-  // multiple of 40 (the burst memory covers those moments mid-stream).
-  if (
-    e.wheelDeltaY !== undefined &&
-    e.wheelDeltaY !== 0 &&
-    e.wheelDeltaY % 120 !== 0
-  ) {
     return "trackpad";
   }
   // A horizontal component means a trackpad — or shift+wheel on a mouse, where
