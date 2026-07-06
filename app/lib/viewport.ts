@@ -17,7 +17,7 @@
  * No Konva / DOM dependency, so every function is unit-testable in node.
  */
 
-import { nodeBoxWidth, nodeBoxHeight } from "../application/nodeUtils";
+import { nodeBoxWidth, nodeBoxHeight } from "./measureText";
 
 export interface Vec {
   x: number;

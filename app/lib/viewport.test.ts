@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nodeBoxWidth, nodeBoxHeight } from "../application/nodeUtils";
+import { nodeBoxWidth, nodeBoxHeight } from "./measureText";
 import {
   nodeRect,
   rectCenter,
