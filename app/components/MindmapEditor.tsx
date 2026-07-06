@@ -15,6 +15,7 @@ import {
   parseBranch,
 } from "../application/branchClipboard";
 import MarkdownPanel from "./MarkdownPanel";
+import { attachStagePanZoom } from "./stagePanZoom";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
@@ -1258,6 +1259,7 @@ export function MindmapEditorView({
     if (!canvasRef.current) return;
     const container = canvasRef.current;
     let removeWindowMouseUp: (() => void) | null = null;
+    let detachPanZoom: (() => void) | null = null;
 
     import("konva").then((mod) => {
       const Konva = mod.default;
@@ -1444,31 +1446,15 @@ export function MindmapEditorView({
       // margin covers the movement, so we only redraw on release.
       stage.on("dragend", () => setViewportTick((t) => t + 1));
 
-      // Zoom
-      stage.on("wheel", (e: any) => {
-        e.evt.preventDefault();
-        const oldScale = stage.scaleX();
-        const pointer = stage.getPointerPosition();
-        if (!pointer) return;
-        const mousePointTo = {
-          x: (pointer.x - stage.x()) / oldScale,
-          y: (pointer.y - stage.y()) / oldScale,
-        };
-        const scaleBy = 1.05;
-        const newScale =
-          e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-        const limitedScale = Math.max(0.2, Math.min(3, newScale));
-        stage.scale({ x: limitedScale, y: limitedScale });
-        stage.position({
-          x: pointer.x - mousePointTo.x * limitedScale,
-          y: pointer.y - mousePointTo.y * limitedScale,
-        });
+      // Wheel: mouse wheel zooms (fixed steps), trackpad 2-finger scroll pans,
+      // pinch zooms smoothly — see stagePanZoom / lib/panZoom.
+      detachPanZoom = attachStagePanZoom(stage, () => {
         // Immediate feedback at the new transform; the effect below then
-        // refills any nodes the zoom brought into view.
+        // refills any nodes the pan/zoom brought into view.
         layer.batchDraw();
         updateGrid();
-        // Zoom changes which nodes fall inside the viewport (zooming out reveals
-        // more) — re-run the culled redraw instead of just translating.
+        // Pan/zoom changes which nodes fall inside the viewport (zooming out
+        // reveals more) — re-run the culled redraw instead of just translating.
         setViewportTick((t) => t + 1);
       });
 
@@ -1622,6 +1608,7 @@ export function MindmapEditorView({
 
     return () => {
       removeWindowMouseUp?.();
+      detachPanZoom?.();
       if (konvaStageRef.current) {
         konvaStageRef.current.destroy();
         konvaStageRef.current = null;

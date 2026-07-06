@@ -5,6 +5,7 @@ import { LINE_HEIGHT, KONVA_LINE_HEIGHT } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
 import { parseContent } from "../application/persistence";
 import { flattenToNodes } from "../application/nodeUtils";
+import { attachStagePanZoom } from "./stagePanZoom";
 
 const PADDING = 20;
 
@@ -30,6 +31,7 @@ export default function MindmapViewer({ initialContent, title }: Props) {
 
   useEffect(() => {
     if (!canvasRef.current || nodes.length === 0) return;
+    let detachPanZoom: (() => void) | null = null;
 
     import("konva").then((KonvaModule) => {
       const Konva = KonvaModule.default;
@@ -179,26 +181,9 @@ export default function MindmapViewer({ initialContent, title }: Props) {
 
       layer.draw();
 
-      stage.on("wheel", (e: any) => {
-        e.evt.preventDefault();
-        const oldScale = stage.scaleX();
-        const pointer = stage.getPointerPosition();
-        if (!pointer) return;
-        const mousePointTo = {
-          x: (pointer.x - stage.x()) / oldScale,
-          y: (pointer.y - stage.y()) / oldScale,
-        };
-        const scaleBy = 1.05;
-        const newScale =
-          e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-        const limitedScale = Math.max(0.2, Math.min(3, newScale));
-        stage.scale({ x: limitedScale, y: limitedScale });
-        stage.position({
-          x: pointer.x - mousePointTo.x * limitedScale,
-          y: pointer.y - mousePointTo.y * limitedScale,
-        });
-        layer.draw();
-      });
+      // Wheel: mouse wheel zooms (fixed steps), trackpad 2-finger scroll pans,
+      // pinch zooms smoothly — see stagePanZoom / lib/panZoom.
+      detachPanZoom = attachStagePanZoom(stage, () => layer.draw());
 
       const resizeObserver = new ResizeObserver(() => {
         stage.width(container.clientWidth);
@@ -209,6 +194,7 @@ export default function MindmapViewer({ initialContent, title }: Props) {
     });
 
     return () => {
+      detachPanZoom?.();
       if (konvaStageRef.current) {
         konvaStageRef.current.destroy();
         konvaStageRef.current = null;
