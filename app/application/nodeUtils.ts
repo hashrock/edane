@@ -3,9 +3,16 @@
  */
 
 import type { MindMapModel, NodeType } from "../domain/model";
-import { measureNodeBox } from "../lib/measureText";
+import { measureNodeBox, NODE_PADDING, nodeBoxWidth, nodeBoxHeight } from "../lib/measureText";
 import { markdownTitle } from "./markdownCard";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
+
+/**
+ * Box sizing (nodeBoxWidth/nodeBoxHeight/NODE_PADDING) lives in lib/measureText
+ * — it's pure geometry with no domain dependency, shared by lib/viewport too.
+ * Re-exported here so existing application/component call sites are unaffected.
+ */
+export { NODE_PADDING, nodeBoxWidth, nodeBoxHeight };
 
 /** Extra card width (px) for a markdown node: doc glyph + line-count badge. */
 export const MD_CARD_LEAD = 24;
@@ -42,9 +49,6 @@ export interface MindMapNode {
 export const FAVICON_SIZE = 16;
 export const FAVICON_GAP = 6;
 
-/** Horizontal padding between a node's box edge and its content (px). */
-export const NODE_PADDING = 20;
-
 /**
  * A markdown node holds a whole document in `text`; render only a bounded
  * preview so a large paste can't produce a giant unusable box. Caps both the
@@ -59,21 +63,6 @@ export function markdownPreview(text: string, maxLines = 14): string {
     .map((l) => (l.length > 80 ? l.slice(0, 80) + "…" : l));
   if (lines.length > maxLines) clipped.push("…");
   return clipped.join("\n");
-}
-
-/**
- * Visual box width for a measured text/content width: add horizontal padding,
- * then floor (roots a little wider). Keeps every node-box width derivation in
- * one place — the canvas draw and the drag-drop hit test must agree — so
- * neither ever re-implements per-kind sizing.
- */
-export function nodeBoxWidth(measuredWidth: number, isRoot: boolean): number {
-  return Math.max(measuredWidth + NODE_PADDING * 2, isRoot ? 100 : 80);
-}
-
-/** Visual box height for a measured content height (px), with the 32px floor. */
-export function nodeBoxHeight(measuredHeight: number): number {
-  return Math.max(32, measuredHeight);
 }
 
 /** The node currently being edited (rendered as text regardless of its kind). */
