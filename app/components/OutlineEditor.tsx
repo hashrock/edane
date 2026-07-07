@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Link, router } from "@inertiajs/react";
 import { findNode, cloneWithNewIds } from "../domain/model";
+import type { UndoType } from "../application/editorReducer";
 import { textToModel } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
 import {
@@ -266,7 +267,7 @@ export default function OutlineEditor({
 
   // --- Toolbar actions (structural edits available without a hardware kbd) ---
   const withSave = useCallback(
-    (undoType: string, action: Parameters<typeof dispatch>[0]) => {
+    (undoType: UndoType, action: Parameters<typeof dispatch>[0]) => {
       const prev = stateRef.current;
       const next = dispatch(action, undoType);
       if (noteId && next.document !== prev.document) saveNote(next.document.model);

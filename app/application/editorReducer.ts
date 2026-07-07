@@ -71,6 +71,30 @@ export interface EditorState {
   view: ViewState;
 }
 
+// The undo-entry label passed as dispatch()'s second argument. Purely
+// descriptive (UndoManager stores it but doesn't yet branch on it) — this
+// union exists so a typo or a new label collides at compile time instead of
+// silently producing an inconsistent entry (e.g. "delete" vs "delete-node"
+// for what is otherwise the same kind of edit).
+export type UndoType =
+  | "add-child"
+  | "cut-branch"
+  | "paste-branch"
+  | "collapse"
+  | "delete"
+  | "delete-node"
+  | "reorder"
+  | "insert-sibling"
+  | "indent"
+  | "backspace"
+  | "enter"
+  | "image-upload"
+  | "style"
+  | "move-branch"
+  | "paste"
+  | "link-meta"
+  | "set-type";
+
 export type EditorAction =
   // --- structural keyboard edits ---
   | { type: "enter"; pos: number }
