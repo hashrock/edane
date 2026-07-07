@@ -20,7 +20,7 @@
  */
 
 import type { KeyboardEvent } from "react";
-import type { EditorAction, EditorState } from "./editorReducer";
+import type { EditorAction, EditorState, UndoType } from "./editorReducer";
 import type { MindMapModel } from "../domain/model";
 import { findNode } from "../domain/model";
 
@@ -39,7 +39,7 @@ export interface KeyContext {
 
 /** Component-provided callbacks the bindings dispatch into. */
 export interface KeymapDeps {
-  dispatch: (action: EditorAction, undoType?: string) => EditorState;
+  dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved). */
   saveNote: (model: MindMapModel) => void;
   openPalette: () => void;

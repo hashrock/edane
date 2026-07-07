@@ -17,6 +17,7 @@ import {
   editorReducer,
   type EditorState,
   type EditorAction,
+  type UndoType,
 } from "../application/editorReducer";
 import {
   parseContent,
@@ -45,7 +46,7 @@ export interface NoteEditorEngine {
   model: MindMapModel;
   modelRef: React.MutableRefObject<MindMapModel>;
   /** Central dispatch: pure reducer + undo bookkeeping. Returns next state. */
-  dispatch: (action: EditorAction, undoType?: string) => EditorState;
+  dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved / guest mode). */
   saveNote: (currentModel: MindMapModel, pub?: boolean) => Promise<boolean>;
   updateSaveStatus: (status: string) => void;
@@ -117,7 +118,7 @@ export function useNoteEditor({
   // Pure reducer computes the complete next state; a no-op returns the same
   // reference so we skip re-render and undo bookkeeping.
   const dispatch = useCallback(
-    (action: EditorAction, undoType?: string): EditorState => {
+    (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
       const next = editorReducer(prev, action);
       if (next === prev) return prev;
