@@ -45,21 +45,26 @@ export function textToModel(title: string, content: string): MindMapModel {
  * Validate and normalize an arbitrary parsed value into a well-formed
  * MindMapModel *tree with unique ids*.
  *
- * Note content is external data (it comes from the DB / `PUT /api/notes/:id`),
- * but the whole domain layer assumes IDs uniquely identify a node —
- * `findNode` / `findParentAndIndex` / `removeNode` all act on the *first*
- * match, so a duplicated id silently makes edits, deletes and publish/upload
- * targeting hit (or leave behind) the wrong node. JSON already guarantees a
- * tree (no shared references → no shared child, no cycles), so the one hazard
- * it can carry is a duplicated — or missing / malformed — id.
+ * The value is untrusted external data — it comes from the DB / `PUT
+ * /api/notes/:id`, or (via {@link "./branchClipboard".parseBranch}) from
+ * whatever a paste event's clipboard happens to carry — but the whole domain
+ * layer assumes IDs uniquely identify a node — `findNode` / `findParentAndIndex`
+ * / `removeNode` all act on the *first* match, so a duplicated id silently
+ * makes edits, deletes and publish/upload targeting hit (or leave behind) the
+ * wrong node. JSON already guarantees a tree (no shared references → no shared
+ * child, no cycles), so the one hazard it can carry is a duplicated — or
+ * missing / malformed — id, or a field whose value falls outside its known
+ * enum/type.
  *
  * This walks the value depth-first, dropping malformed children (anything that
- * is not a `{text, children[]}` shape) and reassigning any id that is missing,
- * non-string or already seen, so the returned model is a genuine unique-id
- * tree. Returns null when the value isn't a usable node at all (caller then
- * falls back to the legacy text parser).
+ * is not a `{text, children[]}` shape), reassigning any id that is missing,
+ * non-string or already seen, and dropping (rather than passing through) any
+ * optional field whose value doesn't match its declared type, so the returned
+ * model is a genuine well-formed, unique-id tree. Returns null when the value
+ * isn't a usable node at all (caller then falls back to the legacy text
+ * parser).
  */
-function normalizeTree(
+export function normalizeTree(
   value: unknown,
   seen: Set<string>
 ): MindMapModel | null {
