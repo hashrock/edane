@@ -14,6 +14,7 @@
  */
 
 import type { MindMapModel } from "../domain/model";
+import { normalizeTree } from "./persistence";
 
 /** Custom clipboard MIME carrying the JSON branch. Only edane reads it. */
 export const BRANCH_MIME = "application/x-edane-branch";
@@ -27,6 +28,13 @@ export function serializeBranch(node: MindMapModel): string {
  * Parse a branch payload from the clipboard. Returns null unless the string is
  * a well-formed node tree, so a foreign or corrupt payload is ignored rather
  * than pasted as garbage.
+ *
+ * Shares {@link normalizeTree} with the note-loading path (parseContent) so a
+ * clipboard payload is held to the same invariant as one loaded from the DB:
+ * every node gets a unique id and any optional field (`type`, `fontSize`, ...)
+ * outside its declared type is dropped rather than smuggled into the model —
+ * a hand-edited or foreign payload under this MIME could otherwise carry
+ * anything.
  */
 export function parseBranch(text: string): MindMapModel | null {
   if (!text) return null;
@@ -36,16 +44,5 @@ export function parseBranch(text: string): MindMapModel | null {
   } catch {
     return null;
   }
-  return isMindMapModel(data) ? data : null;
-}
-
-function isMindMapModel(v: unknown): v is MindMapModel {
-  if (typeof v !== "object" || v === null) return false;
-  const o = v as Record<string, unknown>;
-  return (
-    typeof o.id === "string" &&
-    typeof o.text === "string" &&
-    Array.isArray(o.children) &&
-    o.children.every(isMindMapModel)
-  );
+  return normalizeTree(data, new Set());
 }
