@@ -1,6 +1,6 @@
 import { Head } from "@inertiajs/react";
 import NoteEditor from "../components/NoteEditor";
-import { stashPendingNote, type PendingNote } from "../lib/guestNote";
+import { stashPendingNote, type PendingNote } from "../application/guestNote";
 import type { SessionUser } from "../user";
 
 export default function Guest({
