@@ -17,6 +17,7 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
+import { handleAuxInputKeys } from "../application/editSurface";
 import { DEFAULT_FONT_SIZE } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
@@ -502,12 +503,7 @@ export default function OutlineEditor({
                           value={editingText}
                           onClick={(e) => e.stopPropagation()}
                           onChange={handleUrlChange}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === "Escape") {
-                              e.preventDefault();
-                              dispatch({ type: "exitEditing" });
-                            }
-                          }}
+                          onKeyDown={(e) => handleAuxInputKeys(e, dispatch)}
                           placeholder={
                             type === "image" ? "画像のURL" : "リンクのURL"
                           }
