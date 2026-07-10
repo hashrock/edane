@@ -8,6 +8,10 @@ import {
   type KeymapDeps,
   type KeyContext,
 } from "./editorKeymap";
+import {
+  DEFAULT_PREFERENCES,
+  type EditorPreferences,
+} from "./editorPreferences";
 
 /** Root → A(children: A1) , B */
 function model(): MindMapModel {
@@ -80,7 +84,8 @@ function run(
   deps: KeymapDeps,
   st: EditorState,
   fake: FakeKey,
-  ctxPatch: Partial<KeyContext> = {}
+  ctxPatch: Partial<KeyContext> = {},
+  prefs: EditorPreferences = DEFAULT_PREFERENCES
 ) {
   const preventDefault = vi.fn();
   const e = { preventDefault, ...fake } as unknown as KeyContext["e"];
@@ -92,7 +97,7 @@ function run(
     selEnd: 0,
     ...ctxPatch,
   };
-  runKeymap(buildKeymap(deps), ctx);
+  runKeymap(buildKeymap(deps, prefs), ctx, prefs);
   return { preventDefault };
 }
 
@@ -292,5 +297,177 @@ describe("editing-mode passes vs handles", () => {
     });
     expect(dispatched).toEqual([]);
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe("preference: tabBehavior = insert-child", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    tabBehavior: "insert-child",
+  };
+
+  it("Tab inserts a child and starts editing it", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "Tab" }, {}, prefs);
+    expect(dispatched).toEqual([
+      { type: "addChild", nodeId: "a" },
+      { type: "startEditing" },
+    ]);
+    expect(deps.saveNote).toHaveBeenCalled();
+  });
+
+  it("Shift+Tab still outdents", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a1", false),
+      { key: "Tab", shiftKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "tab", shift: true }]);
+  });
+
+  it("Tab is swallowed on a row of an object card (its subtree is hidden)", () => {
+    const m = model();
+    m.children[0].type = "object"; // "a" is a card; "a1" is one of its rows
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(
+      deps,
+      state(m, "a1", false),
+      { key: "Tab" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Tab in editing mode keeps indenting regardless of the preference", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", true, "A"),
+      { key: "Tab", shiftKey: false },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "tab", shift: false }]);
+  });
+});
+
+describe("preference: arrowBehavior = navigate", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    arrowBehavior: "navigate",
+  };
+
+  it("Right moves into the first child of an expanded parent", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
+    expect(dispatched).toEqual([{ type: "moveDown" }]);
+  });
+
+  it("Right auto-expands a collapsed parent before moving in", () => {
+    const m = model();
+    m.children[0].collapsed = true;
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
+    expect(dispatched).toEqual([
+      { type: "toggleCollapse", nodeId: "a" },
+      { type: "moveDown" },
+    ]);
+  });
+
+  it("Right on a leaf is swallowed", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(
+      deps,
+      state(model(), "b", false),
+      { key: "ArrowRight" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Left always moves to the parent, never collapses", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "ArrowLeft" }, {}, prefs);
+    expect(dispatched).toEqual([{ type: "moveToParent" }]);
+  });
+});
+
+describe("preference: selectionMode = false (always edit)", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    selectionMode: false,
+  };
+
+  it("editing bindings fire even when view.editing is false (forced mode)", () => {
+    const { deps, dispatched } = makeDeps();
+    // Enter with view.editing=false would insert a sibling in selection mode;
+    // always-edit must route it to the editing split instead.
+    run(deps, state(model(), "a", false, "A"), { key: "Enter" }, { pos: 1 }, prefs);
+    expect(dispatched).toEqual([{ type: "enter", pos: 1 }]);
+  });
+
+  it("Escape does nothing (falls through to native)", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(
+      deps,
+      state(model(), "a", true, "A"),
+      { key: "Escape" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("Cmd+Shift+Backspace deletes the branch", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", true, "A"),
+      { key: "Backspace", metaKey: true, shiftKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "deleteNode", nodeId: "a" }]);
+  });
+
+  it("plain Backspace at caret 0 still merges instead of deleting", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", true, "A"), { key: "Backspace" }, {}, prefs);
+    expect(dispatched).toEqual([{ type: "backspaceAtStart" }]);
+  });
+
+  it("selection-only bindings are absent from the keymap (help stays truthful)", () => {
+    const { deps } = makeDeps();
+    const bindings = buildKeymap(deps, prefs);
+    expect(bindings.some((b) => b.when === "selection")).toBe(false);
+    expect(bindings.some((b) => b.id === "edit-escape")).toBe(false);
+  });
+});
+
+describe("help chord (Cmd/Ctrl + /)", () => {
+  it("opens help while editing, with default preferences", () => {
+    const { deps } = makeDeps();
+    run(deps, state(model(), "a", true, "A"), { key: "/", metaKey: true });
+    expect(deps.openHelp).toHaveBeenCalled();
+  });
+
+  it("opens help in always-edit mode", () => {
+    const { deps } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", true, "A"),
+      { key: "/", ctrlKey: true },
+      {},
+      { ...DEFAULT_PREFERENCES, selectionMode: false }
+    );
+    expect(deps.openHelp).toHaveBeenCalled();
   });
 });

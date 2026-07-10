@@ -84,6 +84,12 @@ import {
   type KeyBinding,
 } from "../application/editorKeymap";
 import { handleAuxInputKeys } from "../application/editSurface";
+import {
+  loadPreferences,
+  savePreferences,
+  type EditorPreferences,
+} from "../application/editorPreferences";
+import EditorSettingsDialog from "./EditorSettingsDialog";
 
 // --- Text measurement (cached) ---
 // The canvas redraw needs each node's width and per-character cursor offsets.
@@ -400,6 +406,13 @@ export function MindmapEditorView({
   // --- UI-only state (not part of the editing document) ---
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Per-device keyboard preferences (see editorPreferences.ts). The ref keeps
+  // the Konva event handlers — which are rebuilt on unrelated schedules — on
+  // the current value without adding it to their dependency lists.
+  const [prefs, setPrefs] = useState<EditorPreferences>(() => loadPreferences());
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   const [editingTitle, setEditingTitle] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -1092,6 +1105,7 @@ export function MindmapEditorView({
       { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
       { id: "shortcuts", label: "キーボードショートカット一覧", action: () => setHelpOpen(true) },
+      { id: "settings", label: "エディタ設定", action: () => setSettingsOpen(true) },
     ];
   }, [pasteTextAsNodes]);
 
@@ -1301,34 +1315,42 @@ export function MindmapEditorView({
   // from the same source.
   const keymap = useMemo<KeyBinding[]>(
     () =>
-      buildKeymap({
-        dispatch,
-        saveNote: (m) => saveNote(m),
-        openPalette: () => setCmdPaletteOpen(true),
-        openHelp: () => setHelpOpen(true),
-        undo,
-        redo,
-        verticalMove,
-      }),
-    [dispatch, saveNote, undo, redo]
+      buildKeymap(
+        {
+          dispatch,
+          saveNote: (m) => saveNote(m),
+          openPalette: () => setCmdPaletteOpen(true),
+          openHelp: () => setHelpOpen(true),
+          undo,
+          redo,
+          verticalMove,
+        },
+        prefs
+      ),
+    [dispatch, saveNote, undo, redo, prefs]
   );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isComposing) return;
-      // The help overlay doesn't grab focus, so the textarea still receives
-      // keys while it's open; let ShortcutHelp handle Escape and ignore the rest.
-      if (helpOpen) return;
+      // The help / settings overlays don't grab focus, so the textarea still
+      // receives keys while they're open; they handle Escape themselves —
+      // ignore the rest.
+      if (helpOpen || settingsOpen) return;
       const state = stateRef.current;
-      runKeymap(keymap, {
-        e,
-        state,
-        node: activeNode(state),
-        pos: inputRef.current?.selectionStart || 0,
-        selEnd: inputRef.current?.selectionEnd || 0,
-      });
+      runKeymap(
+        keymap,
+        {
+          e,
+          state,
+          node: activeNode(state),
+          pos: inputRef.current?.selectionStart || 0,
+          selEnd: inputRef.current?.selectionEnd || 0,
+        },
+        prefs
+      );
     },
-    [isComposing, keymap, helpOpen]
+    [isComposing, keymap, helpOpen, settingsOpen, prefs]
   );
 
   // --- Guest mode: hand the current document off to be saved to an account ---
@@ -2479,7 +2501,9 @@ export function MindmapEditorView({
         const cur = stateRef.current;
         const editingThis =
           cur.view.editing && cur.view.activeNodeId === node.id;
-        if (editingThis) {
+        if (editingThis || !prefsRef.current.selectionMode) {
+          // Always-edit preference: any click lands the caret at the clicked
+          // position instead of passing through a select-first step.
           dispatch({
             type: "activateNode",
             nodeId: node.id,
@@ -2846,6 +2870,18 @@ export function MindmapEditorView({
         open={helpOpen}
         onClose={() => {
           setHelpOpen(false);
+          focusEditorSoon();
+        }}
+      />
+      <EditorSettingsDialog
+        open={settingsOpen}
+        prefs={prefs}
+        onChange={(next) => {
+          setPrefs(next);
+          savePreferences(next);
+        }}
+        onClose={() => {
+          setSettingsOpen(false);
           focusEditorSoon();
         }}
       />
