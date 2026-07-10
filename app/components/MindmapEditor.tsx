@@ -46,8 +46,10 @@ import {
 import {
   KEY_FONT_SIZE,
   KEY_GAP,
-  ROW_V_PAD,
-  CARD_HINT_TEXT,
+  CARD_HINT_H,
+  ADD_FIELD_LABEL,
+  ADD_FIELD_FONT_SIZE,
+  addFieldButtonWidth,
 } from "../application/objectCard";
 import { parseField, inferValueKind } from "../application/objectField";
 import type { NumFormat } from "../domain/model";
@@ -93,6 +95,17 @@ const NODE_FONT_ITALIC = `italic ${NODE_FONT}`;
 let _measureCtx: CanvasRenderingContext2D | null | undefined;
 const _offsetCache = new Map<string, number[]>();
 let _emptyWidth = -1;
+
+/**
+ * True for middle/right mouse buttons. Only the primary (left) button may
+ * activate or drag canvas targets — the others are reserved for panning and
+ * the context menu.
+ */
+function isNonPrimaryButton(e: { evt?: { button?: unknown } }): boolean {
+  return (
+    !!e.evt && typeof e.evt.button === "number" && e.evt.button !== 0
+  );
+}
 
 function getMeasureCtx(): CanvasRenderingContext2D | null {
   if (_measureCtx === undefined) {
@@ -632,6 +645,21 @@ export function MindmapEditorView({
       }
     }, 0);
   }, []);
+
+  // Append a first field to an (empty) object card. Backs the on-canvas
+  // "＋ フィールドを追加" button drawn inside an empty card — same effect as the
+  // context menu's "子ノードを追加", but reachable without opening the menu.
+  const addFieldToCard = useCallback(
+    (cardId: string) => {
+      const next = dispatch({ type: "addChild", nodeId: cardId }, "add-child");
+      if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+      if (noteId) saveNote(next.document.model);
+      focusEditorSoon();
+    },
+    [dispatch, flashNodes, noteId, saveNote, focusEditorSoon]
+  );
+  const addFieldToCardRef = useRef(addFieldToCard);
+  addFieldToCardRef.current = addFieldToCard;
 
   // --- Image upload: push a file to R2 and turn the node into an image ---
   const uploadAndSetImage = useCallback(
@@ -1897,10 +1925,15 @@ export function MindmapEditorView({
       }
       // For active node during editing, use editingText.
       const displayRaw = activeNodeId === node.id ? editingText : node.text;
+      // A card's title is ALWAYS drawn bold (see the isCard draw branch), so its
+      // caret/line measurement must be bold too — otherwise the caret drifts by
+      // the bold weight's extra width, since objectCardGeom already sizes the
+      // box with bold:true.
+      const measuredBold = !!(node.card || node.bold);
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
-        !!node.bold
+        measuredBold
       );
       lineDataMap.set(node.id, data);
       textWidths.set(
@@ -2088,16 +2121,20 @@ export function MindmapEditorView({
         // being text-edited it falls through to the generic raw-text path
         // below, so the caret math and the drawn text always agree.
         const r = node.cardRow!;
-        const contentTop = node.y - rectHeight / 2 + ROW_V_PAD / 2;
         if (r.key !== null) {
+          // The key sits in the SAME single-line box as the value (a taller
+          // lineHeight scales its 12px glyph into the 18px value line), so both
+          // share one vertical centre — the smaller key no longer floats above
+          // the value's baseline the way top-anchoring made it.
           group.add(
             new Konva.Text({
               x: node.x + nodePadding,
-              y: contentTop + 3,
+              y: node.y - lineHeightPx / 2 + 2,
               width: r.keyColW,
               text: r.key,
               fontSize: KEY_FONT_SIZE,
               fontFamily: "sans-serif",
+              lineHeight: lineHeightPx / KEY_FONT_SIZE,
               fill: "#64748b",
               wrap: "none",
               ellipsis: true,
@@ -2244,18 +2281,59 @@ export function MindmapEditorView({
           })
         );
         if (node.childCount === 0) {
-          group.add(
+          // Empty card: an inline "add field" button in place of the hint text.
+          // Clicking it appends the first field row (see addFieldToCard); the
+          // handler stops bubbling so the card's own mousedown doesn't also
+          // activate the title for editing.
+          const btnH = CARD_HINT_H - 2;
+          const btnY = sepY + 6;
+          const btnX = node.x + nodePadding;
+          const btnW = Math.min(
+            rectWidth - nodePadding * 2,
+            addFieldButtonWidth()
+          );
+          const addBtn = new Konva.Group();
+          addBtn.add(
+            new Konva.Rect({
+              x: btnX,
+              y: btnY,
+              width: btnW,
+              height: btnH,
+              cornerRadius: 6,
+              fill: "#e0f2fe",
+              stroke: "#7dd3fc",
+              strokeWidth: 1,
+            })
+          );
+          addBtn.add(
             new Konva.Text({
-              x: node.x + nodePadding,
-              y: sepY + 7,
-              text: CARD_HINT_TEXT,
-              fontSize: 11,
+              x: btnX,
+              y: btnY,
+              width: btnW,
+              height: btnH,
+              align: "center",
+              verticalAlign: "middle",
+              text: ADD_FIELD_LABEL,
+              fontSize: ADD_FIELD_FONT_SIZE,
               fontFamily: "sans-serif",
-              fontStyle: "italic",
-              fill: "#94a3b8",
+              fill: "#0369a1",
               listening: false,
             })
           );
+          addBtn.on("mousedown touchstart", (e: any) => {
+            if (isNonPrimaryButton(e)) return;
+            e.cancelBubble = true;
+            addFieldToCardRef.current(node.id);
+          });
+          addBtn.on("mouseenter", () => {
+            const st = konvaStageRef.current;
+            if (st) st.container().style.cursor = "pointer";
+          });
+          addBtn.on("mouseleave", () => {
+            const st = konvaStageRef.current;
+            if (st) st.container().style.cursor = "";
+          });
+          group.add(addBtn);
         }
       } else if (asMarkdown) {
         // Compact card: a document glyph, the derived title, and a line-count
@@ -2364,12 +2442,7 @@ export function MindmapEditorView({
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
-        // Only the primary (left) mouse button activates/drags a node. Middle
-        // and right clicks (button 1/2) must not start a node drag — they're
-        // reserved for panning / the context menu.
-        if (e.evt && typeof e.evt.button === "number" && e.evt.button !== 0) {
-          return;
-        }
+        if (isNonPrimaryButton(e)) return;
         e.cancelBubble = true;
         const stage = konvaStageRef.current;
         if (!stage) return;
