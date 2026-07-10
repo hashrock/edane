@@ -143,3 +143,66 @@ describe("resolveDropTarget", () => {
     });
   });
 });
+
+describe("resolveDropTarget: cards can't be dropped inside cards", () => {
+  // root ── card (object, expanded with one row) , dcard (object, dragged)
+  function cardNodes(): MindMapNode[] {
+    return [
+      { ...node("root", 100, 300, ["card", "dcard"]) },
+      { ...node("card", 300, 250, []), type: "object" },
+      // A field row belonging to the card (layout leaf, not in card.children).
+      // Parked away from the card box so this hit exercises the cardRow branch
+      // rather than the card body's child branch.
+      {
+        ...node("row0", 300, 450, []),
+        cardRow: {
+          cardId: "card",
+          index: 0,
+          top: 0,
+          key: "k",
+          display: "v",
+          kind: "text",
+          keyColW: 20,
+        },
+      },
+      // The dragged card, parked off-screen so it's never a hit itself.
+      { ...node("dcard", 900, 900, []), type: "object" },
+    ];
+  }
+
+  function resolveIn(
+    nodes: MindMapNode[],
+    draggedId: string,
+    worldX: number,
+    worldY: number
+  ) {
+    return resolveDropTarget(
+      nodes,
+      draggedId,
+      new Set([draggedId]),
+      parentMap(nodes),
+      worldX,
+      worldY
+    );
+  }
+
+  it("blocks dropping a card onto a card's body (would-be child)", () => {
+    const nodes = cardNodes();
+    // Body hit on the card box → normally a child drop; blocked for a card.
+    expect(resolveIn(nodes, "dcard", 300 + W / 2, 250)).toBeNull();
+  });
+
+  it("blocks dropping a card onto a card's field row (would-be child slot)", () => {
+    const nodes = cardNodes();
+    expect(resolveIn(nodes, "dcard", 300 + W / 2, 450)).toBeNull();
+  });
+
+  it("still allows dropping a non-card node into a card", () => {
+    const nodes = cardNodes();
+    nodes[0].children.push("t");
+    nodes.push({ ...node("t", 900, 100, []) }); // a plain text node, dragged
+    expect(resolveIn(nodes, "t", 300 + W / 2, 250)).toMatchObject({
+      parentId: "card",
+    });
+  });
+});

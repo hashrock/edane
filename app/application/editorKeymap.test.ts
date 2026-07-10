@@ -219,6 +219,15 @@ describe("cross-mode collapse chord (Cmd/Ctrl + .)", () => {
     expect(dispatched).toEqual([{ type: "startEditing" }]);
     expect(preventDefault).toHaveBeenCalled();
   });
+
+  it("F2 also starts editing the selected node", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "F2",
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
 });
 
 describe("reorder and bold (cross-mode)", () => {
@@ -316,6 +325,21 @@ describe("preference: tabBehavior = insert-child", () => {
     expect(deps.saveNote).toHaveBeenCalled();
   });
 
+  it("Tab is swallowed on an empty node (no empty-under-empty)", () => {
+    const m = model();
+    m.children[0].text = ""; // "a" is now blank
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(
+      deps,
+      state(m, "a", false),
+      { key: "Tab" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
   it("Shift+Tab still outdents", () => {
     const { deps, dispatched } = makeDeps();
     run(
@@ -343,7 +367,7 @@ describe("preference: tabBehavior = insert-child", () => {
     expect(preventDefault).toHaveBeenCalled();
   });
 
-  it("Tab in editing mode keeps indenting regardless of the preference", () => {
+  it("Tab in editing mode also inserts a child and starts editing it", () => {
     const { deps, dispatched } = makeDeps();
     run(
       deps,
@@ -352,7 +376,52 @@ describe("preference: tabBehavior = insert-child", () => {
       {},
       prefs
     );
-    expect(dispatched).toEqual([{ type: "tab", shift: false }]);
+    expect(dispatched).toEqual([
+      { type: "addChild", nodeId: "a" },
+      { type: "startEditing" },
+    ]);
+    expect(deps.saveNote).toHaveBeenCalled();
+  });
+
+  it("Tab in editing mode is swallowed when the live text is blank", () => {
+    const { deps, dispatched } = makeDeps();
+    // editingText === "" → the node being edited is still empty.
+    const { preventDefault } = run(
+      deps,
+      state(model(), "a", true, ""),
+      { key: "Tab" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Shift+Tab in editing mode still outdents", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a1", true, "A1"),
+      { key: "Tab", shiftKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "tab", shift: true }]);
+  });
+
+  it("Tab in editing mode is swallowed on an object-card row", () => {
+    const m = model();
+    m.children[0].type = "object"; // "a" is a card; "a1" is one of its rows
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(
+      deps,
+      state(m, "a1", true, "A1"),
+      { key: "Tab" },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).toHaveBeenCalled();
   });
 });
 
