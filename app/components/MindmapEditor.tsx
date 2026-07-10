@@ -29,7 +29,6 @@ import {
   nodeFontString,
   DEFAULT_FONT_SIZE,
   NODE_FONT,
-  measureNodeBox,
 } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
@@ -49,7 +48,8 @@ import {
   KEY_GAP,
   CARD_HINT_H,
   ADD_FIELD_LABEL,
-  ADD_FIELD_BTN_PAD,
+  ADD_FIELD_FONT_SIZE,
+  addFieldButtonWidth,
 } from "../application/objectCard";
 import { parseField, inferValueKind } from "../application/objectField";
 import type { NumFormat } from "../domain/model";
@@ -94,6 +94,17 @@ const NODE_FONT_ITALIC = `italic ${NODE_FONT}`;
 let _measureCtx: CanvasRenderingContext2D | null | undefined;
 const _offsetCache = new Map<string, number[]>();
 let _emptyWidth = -1;
+
+/**
+ * True for middle/right mouse buttons. Only the primary (left) button may
+ * activate or drag canvas targets — the others are reserved for panning and
+ * the context menu.
+ */
+function isNonPrimaryButton(e: { evt?: { button?: unknown } }): boolean {
+  return (
+    !!e.evt && typeof e.evt.button === "number" && e.evt.button !== 0
+  );
+}
 
 function getMeasureCtx(): CanvasRenderingContext2D | null {
   if (_measureCtx === undefined) {
@@ -1917,7 +1928,7 @@ export function MindmapEditorView({
       // caret/line measurement must be bold too — otherwise the caret drifts by
       // the bold weight's extra width, since objectCardGeom already sizes the
       // box with bold:true.
-      const measuredBold = node.card ? true : !!node.bold;
+      const measuredBold = !!(node.card || node.bold);
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
@@ -2273,13 +2284,12 @@ export function MindmapEditorView({
           // Clicking it appends the first field row (see addFieldToCard); the
           // handler stops bubbling so the card's own mousedown doesn't also
           // activate the title for editing.
-          const btnLabel = ADD_FIELD_LABEL;
           const btnH = CARD_HINT_H - 2;
           const btnY = sepY + 6;
           const btnX = node.x + nodePadding;
           const btnW = Math.min(
             rectWidth - nodePadding * 2,
-            measureNodeBox(btnLabel, { fontSize: 11 }).width + ADD_FIELD_BTN_PAD
+            addFieldButtonWidth()
           );
           const addBtn = new Konva.Group();
           addBtn.add(
@@ -2302,17 +2312,15 @@ export function MindmapEditorView({
               height: btnH,
               align: "center",
               verticalAlign: "middle",
-              text: btnLabel,
-              fontSize: 11,
+              text: ADD_FIELD_LABEL,
+              fontSize: ADD_FIELD_FONT_SIZE,
               fontFamily: "sans-serif",
               fill: "#0369a1",
               listening: false,
             })
           );
           addBtn.on("mousedown touchstart", (e: any) => {
-            if (e.evt && typeof e.evt.button === "number" && e.evt.button !== 0) {
-              return;
-            }
+            if (isNonPrimaryButton(e)) return;
             e.cancelBubble = true;
             addFieldToCardRef.current(node.id);
           });
@@ -2433,12 +2441,7 @@ export function MindmapEditorView({
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
-        // Only the primary (left) mouse button activates/drags a node. Middle
-        // and right clicks (button 1/2) must not start a node drag — they're
-        // reserved for panning / the context menu.
-        if (e.evt && typeof e.evt.button === "number" && e.evt.button !== 0) {
-          return;
-        }
+        if (isNonPrimaryButton(e)) return;
         e.cancelBubble = true;
         const stage = konvaStageRef.current;
         if (!stage) return;

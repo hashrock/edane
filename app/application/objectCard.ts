@@ -51,8 +51,21 @@ export const ROW_BADGE_W = 26;
 export const CARD_HINT_H = 22;
 /** Label of the empty-card "add field" button (also the width-reservation basis). */
 export const ADD_FIELD_LABEL = "＋ フィールドを追加";
+/** Font size of the "add field" button label. */
+export const ADD_FIELD_FONT_SIZE = 11;
 /** Horizontal padding inside the "add field" button (both sides combined). */
-export const ADD_FIELD_BTN_PAD = 20;
+const ADD_FIELD_BTN_PAD = 20;
+
+/**
+ * Full width of the empty-card "add field" button. Single source for both the
+ * width reservation in objectCardGeom and the drawn button, so they can't drift.
+ */
+export function addFieldButtonWidth(): number {
+  return (
+    measureNodeBox(ADD_FIELD_LABEL, { fontSize: ADD_FIELD_FONT_SIZE }).width +
+    ADD_FIELD_BTN_PAD
+  );
+}
 
 export interface CardRowGeom {
   /** The row's node id (== the model child's id). */
@@ -209,10 +222,7 @@ export function objectCardGeom(
   if (rows.length === 0) {
     top += CARD_HINT_H;
     // The "add field" button must fit inside the card too.
-    width = Math.max(
-      width,
-      measureNodeBox(ADD_FIELD_LABEL, { fontSize: 11 }).width + ADD_FIELD_BTN_PAD
-    );
+    width = Math.max(width, addFieldButtonWidth());
   }
 
   return { width, height: top + CARD_BOTTOM, titleCenterY, sepY, keyColW, rows };
