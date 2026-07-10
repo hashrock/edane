@@ -47,9 +47,12 @@ export const ROW_THUMB_MAX_W = 160;
 export const ROW_THUMB_MAX_H = 72;
 /** Width reserved at a row's right edge for the hidden-children pill. */
 export const ROW_BADGE_W = 26;
-/** Height of the "add children" hint shown inside an empty card. */
+/** Height of the "add field" affordance shown inside an empty card. */
 export const CARD_HINT_H = 22;
-export const CARD_HINT_TEXT = "子ノードを追加するとフィールドになります";
+/** Label of the empty-card "add field" button (also the width-reservation basis). */
+export const ADD_FIELD_LABEL = "＋ フィールドを追加";
+/** Horizontal padding inside the "add field" button (both sides combined). */
+export const ADD_FIELD_BTN_PAD = 20;
 
 export interface CardRowGeom {
   /** The row's node id (== the model child's id). */
@@ -205,10 +208,10 @@ export function objectCardGeom(
   });
   if (rows.length === 0) {
     top += CARD_HINT_H;
-    // The hint line must fit inside the card too.
+    // The "add field" button must fit inside the card too.
     width = Math.max(
       width,
-      measureNodeBox(CARD_HINT_TEXT, { fontSize: 11 }).width
+      measureNodeBox(ADD_FIELD_LABEL, { fontSize: 11 }).width + ADD_FIELD_BTN_PAD
     );
   }
 
