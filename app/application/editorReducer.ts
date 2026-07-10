@@ -22,7 +22,7 @@
  * selectionEnd. There is no multi-node selection.
  */
 
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { MindMapModel, NodeType, NumFormat } from "../domain/model";
 import {
   findNode,
   findParentAndIndex,
@@ -43,10 +43,12 @@ import {
   setNodeType,
   setNodeStyle,
   setLinkMeta,
+  setNumFormat,
   moveNodeUp,
   moveNodeDown,
   moveBranch,
 } from "../domain/model";
+import { objectSiblingTemplate } from "./objectField";
 
 export interface DocumentState {
   model: MindMapModel;
@@ -187,6 +189,13 @@ export type EditorAction =
       linkTitle?: string;
       favicon?: string | null;
     }
+  // Object-card field rows: numeric display format (null clears the field).
+  | {
+      type: "setNumFormat";
+      nodeId: string;
+      numFormat?: NumFormat | null;
+      decimals?: number | null;
+    }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -221,6 +230,21 @@ function documentReducer(
       const { model } = document;
       const currentNode = findNode(model, activeNodeId);
       if (!currentNode) return { document };
+
+      if (currentNode.type === "object") {
+        // Enter on a card never splits its title — it creates the next card,
+        // prefilled with this card's keys ("schema by example").
+        const newNode = objectSiblingTemplate(currentNode);
+        return {
+          document: {
+            ...document,
+            model: addSiblingAfter(model, activeNodeId, newNode),
+          },
+          focusId: newNode.id,
+          focusCursorPos: 0,
+          focusSelectionEnd: 0,
+        };
+      }
 
       if (action.pos >= currentNode.text.length) {
         const newId = generateId();
@@ -260,6 +284,14 @@ function documentReducer(
 
     case "tab": {
       if (!activeNodeId) return { document };
+      if (!action.shift) {
+        // Indenting a card row would nest it under the previous row, where the
+        // card hides it (row subtrees don't render) — the caret would land on
+        // an invisible node. Block the footgun; Shift+Tab (out of the card)
+        // stays allowed.
+        const info = findParentAndIndex(document.model, activeNodeId);
+        if (info?.parent.type === "object") return { document };
+      }
       const newModel = action.shift
         ? dedentNode(document.model, activeNodeId)
         : indentNode(document.model, activeNodeId);
@@ -420,14 +452,20 @@ function documentReducer(
 
     case "insertSiblingAfter": {
       if (!activeNodeId) return { document };
-      const newId = generateId();
-      const newNode: MindMapModel = { id: newId, text: "", children: [] };
+      const current = findNode(document.model, activeNodeId);
+      // Sibling of an object card = the next card, keys prefilled (see enter).
+      const newNode: MindMapModel =
+        current?.type === "object"
+          ? objectSiblingTemplate(current)
+          : { id: generateId(), text: "", children: [] };
       return {
         document: {
           ...document,
           model: addSiblingAfter(document.model, activeNodeId, newNode),
         },
-        focusId: newId,
+        focusId: newNode.id,
+        focusCursorPos: 0,
+        focusSelectionEnd: 0,
       };
     }
 
@@ -505,6 +543,16 @@ function documentReducer(
       const newModel = setLinkMeta(document.model, action.nodeId, {
         linkTitle: action.linkTitle,
         favicon: action.favicon,
+      });
+      return { document: { ...document, model: newModel } };
+    }
+
+    case "setNumFormat": {
+      const node = findNode(document.model, action.nodeId);
+      if (!node) return { document };
+      const newModel = setNumFormat(document.model, action.nodeId, {
+        numFormat: action.numFormat,
+        decimals: action.decimals,
       });
       return { document: { ...document, model: newModel } };
     }
@@ -637,6 +685,7 @@ function viewReducer(
     case "tab":
     case "setNodeStyle":
     case "setLinkMeta":
+    case "setNumFormat":
     case "copyBranch":
       return view;
 

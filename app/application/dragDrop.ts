@@ -76,6 +76,23 @@ export function resolveDropTarget(
       continue;
     }
 
+    // A card field row is never a drop-INTO target (its subtree is hidden by
+    // the card — the branch would vanish); the whole row resolves to a
+    // sibling slot among the card's children instead. The card node itself
+    // isn't the row's flat parent (rows are layout leaves), so the slot comes
+    // from the row's own child index rather than siblingTarget's parent scan.
+    if (node.cardRow) {
+      const after = worldY > node.y;
+      const target: DropTarget = {
+        kind: "sibling",
+        parentId: node.cardRow.cardId,
+        index: node.cardRow.index + (after ? 1 : 0),
+        targetId: node.id,
+        position: after ? "after" : "before",
+      };
+      return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
+    }
+
     // Root has no siblings — its whole box is a child drop.
     const zone = isRoot ? 0 : Math.min(h * 0.3, SIBLING_ZONE_MAX);
     let target: DropTarget;
@@ -121,7 +138,13 @@ function isNoopFor(
   if (curParentId !== target.parentId) return false;
   const parent = nodes.find((n) => n.id === curParentId);
   if (!parent) return false;
-  const curIndex = parent.children.indexOf(draggedId);
+  // A card row isn't in its card's flat `children` (rows are layout leaves);
+  // its slot comes from cardRow.index instead.
+  const dragged = nodes.find((n) => n.id === draggedId);
+  const curIndex =
+    dragged?.cardRow && dragged.cardRow.cardId === curParentId
+      ? dragged.cardRow.index
+      : parent.children.indexOf(draggedId);
   if (target.kind === "child") {
     return curIndex === parent.children.length - 1;
   }

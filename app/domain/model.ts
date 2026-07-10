@@ -5,9 +5,19 @@
 
 /**
  * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
- * `markdown` stores a raw Markdown blob in `text` (rendered as a source card).
+ * `markdown` stores a raw Markdown blob in `text` (rendered as a source card);
+ * `object` renders as a card whose direct children are its `key: value` field
+ * rows (the children stay plain nodes — the card is a VIEW of the subtree, not
+ * a separate data structure, so converting back to `text` loses nothing).
  */
-export type NodeType = "text" | "image" | "link" | "markdown";
+export type NodeType = "text" | "image" | "link" | "markdown" | "object";
+
+/**
+ * Display format for a numeric field-row value inside an object card. This is
+ * Excel's value/display split: the node's `text` keeps the raw value, only the
+ * card rendering changes.
+ */
+export type NumFormat = "comma" | "currency" | "percent";
 
 /**
  * Node kind as stored in JSON. `"text"` is represented by absence so that
@@ -32,6 +42,10 @@ export interface MindMapModel {
   linkTitle?: string;
   /** Link nodes: favicon URL (rendered before the title). */
   favicon?: string;
+  /** Object-card field rows: numeric display format (absent = raw). */
+  numFormat?: NumFormat;
+  /** Object-card field rows: fixed fraction digits (absent = as typed). */
+  decimals?: number;
 }
 
 // --- ID generation ---
@@ -74,13 +88,19 @@ export function findParentAndIndex(
 
 /**
  * DFS order of node IDs (navigation order). Descendants of a collapsed node are
- * skipped so keyboard navigation never lands on a hidden node.
+ * skipped so keyboard navigation never lands on a hidden node. An object node's
+ * direct children are its visible card rows, but their own subtrees are hidden
+ * inside the card — navigation stops at the rows for the same reason.
  */
 export function getFlatOrder(model: MindMapModel): string[] {
   const result: string[] = [];
   function walk(node: MindMapModel) {
     result.push(node.id);
     if (node.collapsed) return;
+    if (node.type === "object") {
+      for (const child of node.children) result.push(child.id);
+      return;
+    }
     for (const child of node.children) walk(child);
   }
   walk(model);
@@ -155,6 +175,30 @@ export function setNodeStyle(
     if (style.bold !== undefined) {
       if (style.bold) node.bold = true;
       else delete node.bold;
+    }
+  }
+  return cloned;
+}
+
+/**
+ * Set a field row's numeric display format (`null` clears back to absent, like
+ * setNodeStyle's fontSize). Returns a new model.
+ */
+export function setNumFormat(
+  model: MindMapModel,
+  nodeId: string,
+  patch: { numFormat?: NumFormat | null; decimals?: number | null }
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) {
+    if (patch.numFormat !== undefined) {
+      if (patch.numFormat === null) delete node.numFormat;
+      else node.numFormat = patch.numFormat;
+    }
+    if (patch.decimals !== undefined) {
+      if (patch.decimals === null) delete node.decimals;
+      else node.decimals = patch.decimals;
     }
   }
   return cloned;

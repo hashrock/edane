@@ -2,7 +2,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel, NodeType } from "../domain/model";
-import { findNode, cloneWithNewIds, generateId } from "../domain/model";
+import {
+  findNode,
+  findParentAndIndex,
+  cloneWithNewIds,
+  generateId,
+} from "../domain/model";
 import {
   looksLikeMarkdown,
   markdownToModel,
@@ -28,6 +33,7 @@ import {
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
   flattenToNodes,
+  layoutObjectRows,
   FAVICON_SIZE,
   FAVICON_GAP,
   NODE_PADDING,
@@ -37,6 +43,14 @@ import {
   MD_CARD_LEAD,
   MD_CARD_BADGE,
 } from "../application/nodeUtils";
+import {
+  KEY_FONT_SIZE,
+  KEY_GAP,
+  ROW_V_PAD,
+  CARD_HINT_TEXT,
+} from "../application/objectCard";
+import { parseField, inferValueKind } from "../application/objectField";
+import type { NumFormat } from "../domain/model";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import {
   nodeRect,
@@ -491,7 +505,11 @@ export function MindmapEditorView({
         ? { id: activeNodeId, text: editingText }
         : undefined
     );
-    if (flat.length > 0) layoutMindMap(flat);
+    if (flat.length > 0) {
+      layoutMindMap(flat);
+      // Object-card field rows are layout leaves; anchor them in their card.
+      layoutObjectRows(flat);
+    }
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, editing, activeNodeId, activeIsCustom, editingText, imageVersion]);
@@ -1114,12 +1132,56 @@ export function MindmapEditorView({
       if (type !== "image") typeGroup.push({ label: "画像にする（URL）", onSelect: setType("image") });
       if (type !== "link") typeGroup.push({ label: "リンクにする（URL）", onSelect: setType("link") });
       if (type !== "markdown") typeGroup.push({ label: "Markdownにする", onSelect: setType("markdown") });
+      if (type !== "object")
+        typeGroup.push({ label: "オブジェクトカードにする", onSelect: setType("object") });
     }
     groups.push(typeGroup);
 
+    // --- Numeric display format (field rows of an object card only) ---
+    // The raw value stays on the node; only the card's rendering changes.
+    const numGroup: ContextMenuAction[] = [];
+    const parentInfo = findParentAndIndex(modelRef.current, nodeId);
+    if (parentInfo?.parent.type === "object" && type === "text") {
+      const { value } = parseField(node.text);
+      if (inferValueKind(value) === "number") {
+        const applyNum = (patch: {
+          numFormat?: NumFormat | null;
+          decimals?: number | null;
+        }) => {
+          const next = dispatch({ type: "setNumFormat", nodeId, ...patch }, "style");
+          if (noteId) saveNote(next.document.model);
+        };
+        const fmtItem = (fmt: NumFormat, label: string): ContextMenuAction => ({
+          label: `${node.numFormat === fmt ? "✓ " : ""}${label}`,
+          onSelect: () =>
+            applyNum({ numFormat: node.numFormat === fmt ? null : fmt }),
+        });
+        numGroup.push(fmtItem("comma", "カンマ区切り（1,234）"));
+        numGroup.push(fmtItem("currency", "通貨（¥1,234）"));
+        numGroup.push(fmtItem("percent", "パーセント（12%）"));
+        if ((node.decimals ?? 0) < 4)
+          numGroup.push({
+            label: "小数点桁数を増やす",
+            onSelect: () => applyNum({ decimals: (node.decimals ?? 0) + 1 }),
+          });
+        if (node.decimals !== undefined)
+          numGroup.push({
+            label:
+              node.decimals === 0 ? "小数点桁数を自動に戻す" : "小数点桁数を減らす",
+            onSelect: () =>
+              applyNum({
+                decimals: node.decimals! > 0 ? node.decimals! - 1 : null,
+              }),
+          });
+      }
+    }
+    groups.push(numGroup);
+
     // --- Text formatting (font size / bold) ---
+    // Card field rows render at the card's fixed rhythm, so per-node font
+    // styling is hidden for them (the numeric format group above applies).
     const formatGroup: ContextMenuAction[] = [];
-    if (type === "text") {
+    if (type === "text" && parentInfo?.parent.type !== "object") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
       const current = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bigger = SIZES.find((s) => s > current);
@@ -1500,11 +1562,19 @@ export function MindmapEditorView({
             const byId = new Map(flat.map((n) => [n.id, n]));
             const parentOf = new Map<string, string>();
             for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
+            // Card field rows aren't in their card's flat `children` (layout
+            // leaves) — wire their parenthood explicitly so drop resolution
+            // sees them as the card's children.
+            for (const n of flat) if (n.cardRow) parentOf.set(n.id, n.cardRow.cardId);
             const excluded = new Set<string>();
             (function collect(id: string) {
               excluded.add(id);
               byId.get(id)?.children.forEach(collect);
             })(drag.nodeId);
+            // Dragging a card must exclude its rows too (dropping a card onto
+            // its own row would be a cycle).
+            for (const n of flat)
+              if (n.cardRow && excluded.has(n.cardRow.cardId)) excluded.add(n.id);
             drag.excluded = excluded;
             drag.parentOf = parentOf;
             buildGhost(drag.nodeId, drag.descendants);
@@ -1536,7 +1606,10 @@ export function MindmapEditorView({
         let charIdx = 0;
         if (data) {
           const blockHeight = data.lines.length * data.lineHeight;
-          const relY = worldY - (node.y - blockHeight / 2);
+          // An object card's editable text (its title) sits at the top of the
+          // card, not the box centre — same offset the draw/caret paths use.
+          const textCenterY = node.y + (node.card?.titleOffsetY ?? 0);
+          const relY = worldY - (textCenterY - blockHeight / 2);
           const line = Math.max(
             0,
             Math.min(data.lines.length - 1, Math.floor(relY / data.lineHeight))
@@ -1712,7 +1785,9 @@ export function MindmapEditorView({
     }
 
     const screenX = (activeNode.x + NODE_PADDING + cursorX) * scale + stage.x();
-    const screenY = (activeNode.y + lineCenterOffset) * scale + stage.y();
+    // Object cards edit their title at the top of the card box.
+    const textCenterY = activeNode.y + (activeNode.card?.titleOffsetY ?? 0);
+    const screenY = (textCenterY + lineCenterOffset) * scale + stage.y();
     setInputPos({ x: screenX, y: screenY });
   }, [activeNodeId, nodes, cursorPos, editingText]);
 
@@ -1890,6 +1965,12 @@ export function MindmapEditorView({
       const isTextEditing = isEditing && !isCustom;
       const asImage = node.type === "image";
       const asLink = node.type === "link";
+      // Object card (expanded object node) and its field rows. The card's
+      // editable text (its title) sits at the top of the box, offset from the
+      // centre; rows are separate flat nodes positioned inside the card.
+      const isCard = !!node.card;
+      const isRow = !!node.cardRow;
+      const titleOffsetY = node.card?.titleOffsetY ?? 0;
       // A markdown node draws its styled block-level render (see the asMarkdown
       // branch below); it's tinted and tagged with an "MD" label. Its raw text is
       // never used for the single-Text path, so displayRaw ignores it here.
@@ -1924,7 +2005,10 @@ export function MindmapEditorView({
       // link and text are all sized there, so there's no per-kind branch here.
       let rectWidth: number;
       let rectHeight: number;
-      if (isTextEditing) {
+      // Cards and rows keep their measured card geometry even while text-
+      // editing — the geometry already tracks the live buffer (see the nodes
+      // memo), and re-deriving it here would tear the box from its rows.
+      if (isTextEditing && !isCard && !isRow) {
         const textWidth = textWidths.get(node.id) || 100;
         rectWidth = nodeBoxWidth(textWidth, isRoot);
         rectHeight = Math.max(32, blockHeight + 14);
@@ -1935,47 +2019,174 @@ export function MindmapEditorView({
 
       const group = new Konva.Group();
 
-      const rect = new Konva.Rect({
-        x: node.x,
-        y: node.y - rectHeight / 2,
-        width: rectWidth,
-        height: rectHeight,
-        cornerRadius: 12,
-        fill: isEditing
-          ? isRoot
-            ? "#1e293b"
-            : "#f1f5f9"
-          : isRoot
-            ? "#0f172a"
-            : asMarkdown
-              ? "#faf5ff"
-              : isEmpty
-                ? "#f8fafc"
-                : "#ffffff",
-        // Editing gets the emerald accent so "I'm typing here" reads distinctly
-        // from a mere selection (black); everything else keeps its resting edge.
-        stroke: isEditing
-          ? "#10b981"
-          : isSelected
-            ? "#000000"
-            : isRoot
-              ? "#0f172a"
-              : asMarkdown
-                ? "#d8b4fe"
-                : "#e2e8f0",
-        strokeWidth: isEditing ? 2.5 : isSelected ? 2 : 1,
-        // Shadow blur is the dominant raster cost; keep the soft shadow only on
-        // the single root node and drop the near-invisible one on every other.
-        shadowColor: "#0f172a",
-        shadowBlur: isRoot ? 16 : 0,
-        shadowOpacity: isRoot ? 0.18 : 0,
-        shadowOffsetY: isRoot ? 6 : 0,
-        // Skip Konva's extra offscreen buffer for fill+stroke shapes.
-        perfectDrawEnabled: false,
-      });
-      group.add(rect);
+      if (isRow) {
+        // A field row draws no box of its own — just a highlight when active.
+        // The fill stays set even when transparent so the rect keeps a Konva
+        // hit region (the row is the click/drag target for its node).
+        group.add(
+          new Konva.Rect({
+            x: node.x + 6,
+            y: node.y - rectHeight / 2 + 1,
+            width: rectWidth - 12,
+            height: rectHeight - 2,
+            cornerRadius: 8,
+            fill: isEditing ? "#f8fafc" : isSelected ? "#f1f5f9" : "transparent",
+            stroke: isEditing ? "#10b981" : isSelected ? "#000000" : undefined,
+            strokeWidth: isEditing ? 2 : isSelected ? 1.5 : 0,
+            perfectDrawEnabled: false,
+          })
+        );
+      } else {
+        const rect = new Konva.Rect({
+          x: node.x,
+          y: node.y - rectHeight / 2,
+          width: rectWidth,
+          height: rectHeight,
+          cornerRadius: 12,
+          fill: isCard
+            ? "#ffffff"
+            : isEditing
+              ? isRoot
+                ? "#1e293b"
+                : "#f1f5f9"
+              : isRoot
+                ? "#0f172a"
+                : asMarkdown
+                  ? "#faf5ff"
+                  : isEmpty
+                    ? "#f8fafc"
+                    : "#ffffff",
+          // Editing gets the emerald accent so "I'm typing here" reads distinctly
+          // from a mere selection (black); everything else keeps its resting edge.
+          stroke: isEditing
+            ? "#10b981"
+            : isSelected
+              ? "#000000"
+              : isRoot
+                ? "#0f172a"
+                : isCard
+                  ? "#7dd3fc"
+                  : asMarkdown
+                    ? "#d8b4fe"
+                    : "#e2e8f0",
+          strokeWidth: isEditing ? 2.5 : isSelected ? 2 : isCard ? 1.5 : 1,
+          // Shadow blur is the dominant raster cost; keep the soft shadow only on
+          // the single root node and drop the near-invisible one on every other.
+          shadowColor: "#0f172a",
+          shadowBlur: isRoot ? 16 : 0,
+          shadowOpacity: isRoot ? 0.18 : 0,
+          shadowOffsetY: isRoot ? 6 : 0,
+          // Skip Konva's extra offscreen buffer for fill+stroke shapes.
+          perfectDrawEnabled: false,
+        });
+        group.add(rect);
+      }
 
-      if (asImage) {
+      if (isRow && !isTextEditing) {
+        // Field row: gray key column + kind-styled value. While the row is
+        // being text-edited it falls through to the generic raw-text path
+        // below, so the caret math and the drawn text always agree.
+        const r = node.cardRow!;
+        const contentTop = node.y - rectHeight / 2 + ROW_V_PAD / 2;
+        if (r.key !== null) {
+          group.add(
+            new Konva.Text({
+              x: node.x + nodePadding,
+              y: contentTop + 3,
+              width: r.keyColW,
+              text: r.key,
+              fontSize: KEY_FONT_SIZE,
+              fontFamily: "sans-serif",
+              fill: "#64748b",
+              wrap: "none",
+              ellipsis: true,
+              listening: false,
+            })
+          );
+        }
+        const valueX =
+          node.x + nodePadding + (r.key !== null ? r.keyColW + KEY_GAP : 0);
+        if (r.kind === "image") {
+          const d = imageDisplaySize(node.text);
+          if (d.status === "loaded" && d.img && r.thumbW && r.thumbH) {
+            group.add(
+              new Konva.Image({
+                image: d.img,
+                x: valueX,
+                y: node.y - r.thumbH / 2,
+                width: r.thumbW,
+                height: r.thumbH,
+                cornerRadius: 6,
+                listening: false,
+              })
+            );
+          } else {
+            group.add(
+              new Konva.Text({
+                x: valueX,
+                y: node.y - 6,
+                text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
+                fontSize: 11,
+                fontFamily: "sans-serif",
+                fill: "#94a3b8",
+                listening: false,
+              })
+            );
+          }
+        } else {
+          const placeholder =
+            r.display === "" ? (r.key !== null ? "—" : "empty") : null;
+          const displayLines = (placeholder ?? r.display).split("\n").length;
+          group.add(
+            new Konva.Text({
+              x: valueX,
+              y: node.y - (displayLines * lineHeightPx) / 2 + 2,
+              text: placeholder ?? r.display,
+              fontSize: DEFAULT_FONT_SIZE,
+              fontFamily: "sans-serif",
+              lineHeight: konvaLineHeight,
+              fill: placeholder
+                ? "#94a3b8"
+                : r.kind === "url"
+                  ? "#2563eb"
+                  : r.kind === "date"
+                    ? "#0f766e"
+                    : "#0f172a",
+              fontStyle: placeholder ? "italic" : "normal",
+              textDecoration: r.kind === "url" ? "underline" : "",
+              listening: false,
+            })
+          );
+        }
+        // Hidden-subtree pill: the card shows only direct children, so a row
+        // with children of its own surfaces the count (like a collapse badge).
+        if (node.childCount > 0) {
+          const badgeR = 8;
+          const badgeX = node.x + rectWidth - 12 - badgeR;
+          group.add(
+            new Konva.Circle({
+              x: badgeX,
+              y: node.y,
+              radius: badgeR,
+              fill: "#64748b",
+              listening: false,
+            })
+          );
+          group.add(
+            new Konva.Text({
+              x: badgeX - badgeR,
+              y: node.y - 5,
+              width: badgeR * 2,
+              align: "center",
+              text: `+${node.childCount}`,
+              fontSize: 9,
+              fontFamily: "sans-serif",
+              fill: "#ffffff",
+              listening: false,
+            })
+          );
+        }
+      } else if (asImage) {
         const d = imageDisplaySize(node.text);
         if (d.status === "loaded" && d.img) {
           group.add(
@@ -1999,6 +2210,47 @@ export function MindmapEditorView({
               text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
               fontSize: 12,
               fontFamily: "sans-serif",
+              fill: "#94a3b8",
+              listening: false,
+            })
+          );
+        }
+      } else if (isCard) {
+        // Card chrome: bold title at the top + separator above the rows (the
+        // rows themselves are separate flat nodes drawn right after this one).
+        // The title text doubles as the raw editing view — displayText is the
+        // live buffer while the title is being edited.
+        group.add(
+          new Konva.Text({
+            x: node.x + nodePadding,
+            y: node.y + titleOffsetY - blockHeight / 2 + 2,
+            text: displayText,
+            fontSize,
+            fontFamily: "sans-serif",
+            lineHeight: konvaLineHeight,
+            fill: isEmpty ? "#94a3b8" : "#0369a1",
+            fontStyle: isEmpty ? "italic" : "bold",
+            listening: false,
+          })
+        );
+        const sepY = node.y + (node.card?.sepOffsetY ?? 0);
+        group.add(
+          new Konva.Line({
+            points: [node.x + 10, sepY, node.x + rectWidth - 10, sepY],
+            stroke: "#bae6fd",
+            strokeWidth: 1,
+            listening: false,
+          })
+        );
+        if (node.childCount === 0) {
+          group.add(
+            new Konva.Text({
+              x: node.x + nodePadding,
+              y: sepY + 7,
+              text: CARD_HINT_TEXT,
+              fontSize: 11,
+              fontFamily: "sans-serif",
+              fontStyle: "italic",
               fill: "#94a3b8",
               listening: false,
             })
@@ -2133,7 +2385,8 @@ export function MindmapEditorView({
         if (asImage || asLink || asMarkdown) {
           charIdx = node.text.length;
         } else {
-          const relY = worldY - (node.y - blockHeight / 2);
+          // Cards edit their title at the top of the box (titleOffsetY).
+          const relY = worldY - (node.y + titleOffsetY - blockHeight / 2);
           const line = Math.max(
             0,
             Math.min(lineCount - 1, Math.floor(relY / data.lineHeight))
@@ -2270,7 +2523,9 @@ export function MindmapEditorView({
       const data = lineDataRef.current.get(activeNodeId);
       const lineHeight = data ? data.lineHeight : LINE_HEIGHT;
       const blockHeight = (data ? data.lines.length : 1) * lineHeight;
-      const textTop = activeNode.y - blockHeight / 2;
+      // Object cards edit their title at the top of the card box.
+      const textTop =
+        activeNode.y + (activeNode.card?.titleOffsetY ?? 0) - blockHeight / 2;
       // Selection / caret half-height scales with the node's font size
       // (10px at the 14px baseline).
       const caretHalf = Math.round(
@@ -2454,7 +2709,8 @@ export function MindmapEditorView({
         const data = lineDataRef.current.get(id);
         const textW = data ? lineDataWidth(data) || 40 : 40;
         const worldX = node.x + NODE_PADDING + textW / 2;
-        const worldY = node.y;
+        // A card's clickable text (its title) sits at the top of the box.
+        const worldY = node.y + (node.card?.titleOffsetY ?? 0);
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
       getNodeRect: (id: string) => {

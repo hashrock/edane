@@ -4,7 +4,8 @@ import { layoutMindMap } from "../lib/treeLayout";
 import { LINE_HEIGHT, KONVA_LINE_HEIGHT } from "../lib/measureText";
 import { subscribeImages, imageDisplaySize } from "../lib/imageCache";
 import { parseContent } from "../application/persistence";
-import { flattenToNodes } from "../application/nodeUtils";
+import { flattenToNodes, layoutObjectRows } from "../application/nodeUtils";
+import { KEY_FONT_SIZE, KEY_GAP, ROW_V_PAD } from "../application/objectCard";
 import { attachStagePanZoom } from "./stagePanZoom";
 
 const PADDING = 20;
@@ -24,7 +25,10 @@ export default function MindmapViewer({ initialContent, title }: Props) {
   const nodes = useMemo(() => {
     const model = parseContent(initialContent, title);
     const flat = flattenToNodes(model);
-    if (flat.length > 0) layoutMindMap(flat);
+    if (flat.length > 0) {
+      layoutMindMap(flat);
+      layoutObjectRows(flat);
+    }
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialContent, title, imageVersion]);
@@ -81,6 +85,8 @@ export default function MindmapViewer({ initialContent, title }: Props) {
         const displayText = isEmpty ? "empty" : node.text;
         const isImage = node.type === "image";
         const isLink = node.type === "link";
+        const isCard = !!node.card;
+        const isRow = !!node.cardRow;
         const lineCount = isEmpty ? 1 : node.text.split("\n").length;
         const blockHeight = lineCount * LINE_HEIGHT;
 
@@ -92,19 +98,102 @@ export default function MindmapViewer({ initialContent, title }: Props) {
           rectWidth = Math.max((node.width || 100) + PADDING * 2, isRoot ? 100 : 80);
         }
 
-        const rect = new Konva.Rect({
-          x: node.x,
-          y: node.y - rectHeight / 2,
-          width: rectWidth,
-          height: rectHeight,
-          cornerRadius: 4,
-          fill: isRoot ? "#000000" : isEmpty ? "#fafafa" : "#ffffff",
-          stroke: isRoot ? "#000000" : "#808080",
-          strokeWidth: 1,
-        });
-        layer.add(rect);
+        // Object-card field rows draw no box of their own (they live inside
+        // their card's box, drawn by the card node just before them).
+        if (!isRow) {
+          const rect = new Konva.Rect({
+            x: node.x,
+            y: node.y - rectHeight / 2,
+            width: rectWidth,
+            height: rectHeight,
+            cornerRadius: isCard ? 12 : 4,
+            fill: isRoot ? "#000000" : isEmpty && !isCard ? "#fafafa" : "#ffffff",
+            stroke: isRoot ? "#000000" : isCard ? "#7dd3fc" : "#808080",
+            strokeWidth: isCard ? 1.5 : 1,
+          });
+          layer.add(rect);
+        }
 
-        if (isImage) {
+        if (isRow) {
+          const r = node.cardRow!;
+          const contentTop = node.y - rectHeight / 2 + ROW_V_PAD / 2;
+          if (r.key !== null) {
+            layer.add(
+              new Konva.Text({
+                x: node.x + PADDING,
+                y: contentTop + 3,
+                width: r.keyColW,
+                text: r.key,
+                fontSize: KEY_FONT_SIZE,
+                fontFamily: "sans-serif",
+                fill: "#64748b",
+                wrap: "none",
+                ellipsis: true,
+              })
+            );
+          }
+          const valueX =
+            node.x + PADDING + (r.key !== null ? r.keyColW + KEY_GAP : 0);
+          if (r.kind === "image") {
+            const d = imageDisplaySize(node.text);
+            if (d.status === "loaded" && d.img && r.thumbW && r.thumbH) {
+              layer.add(
+                new Konva.Image({
+                  image: d.img,
+                  x: valueX,
+                  y: node.y - r.thumbH / 2,
+                  width: r.thumbW,
+                  height: r.thumbH,
+                  cornerRadius: 6,
+                })
+              );
+            }
+          } else {
+            const placeholder =
+              r.display === "" ? (r.key !== null ? "—" : "empty") : null;
+            const displayLines = (placeholder ?? r.display).split("\n").length;
+            layer.add(
+              new Konva.Text({
+                x: valueX,
+                y: node.y - (displayLines * LINE_HEIGHT) / 2 + 2,
+                text: placeholder ?? r.display,
+                fontSize: 14,
+                fontFamily: "sans-serif",
+                lineHeight: KONVA_LINE_HEIGHT,
+                fill: placeholder
+                  ? "#94a3b8"
+                  : r.kind === "url"
+                    ? "#2563eb"
+                    : r.kind === "date"
+                      ? "#0f766e"
+                      : "#0f172a",
+                fontStyle: placeholder ? "italic" : "normal",
+                textDecoration: r.kind === "url" ? "underline" : "",
+              })
+            );
+          }
+        } else if (isCard) {
+          layer.add(
+            new Konva.Text({
+              x: node.x + PADDING,
+              y: node.y + (node.card?.titleOffsetY ?? 0) - blockHeight / 2 + 2,
+              text: displayText,
+              fontSize: 14,
+              fontFamily: "sans-serif",
+              lineHeight: KONVA_LINE_HEIGHT,
+              fill: isEmpty ? "#94a3b8" : "#0369a1",
+              fontStyle: isEmpty ? "italic" : "bold",
+            })
+          );
+          const sepY = node.y + (node.card?.sepOffsetY ?? 0);
+          layer.add(
+            new Konva.Line({
+              points: [node.x + 10, sepY, node.x + rectWidth - 10, sepY],
+              stroke: "#bae6fd",
+              strokeWidth: 1,
+            })
+          );
+        } else if (isImage) {
           const d = imageDisplaySize(node.text);
           if (d.status === "loaded" && d.img) {
             layer.add(
