@@ -90,6 +90,7 @@ export function resolveDropTarget(
         targetId: node.id,
         position: after ? "after" : "before",
       };
+      if (isCardIntoCard(nodes, draggedId, target)) return null;
       return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
     }
 
@@ -103,9 +104,27 @@ export function resolveDropTarget(
     } else {
       target = { kind: "child", parentId: node.id, targetId: node.id };
     }
+    if (isCardIntoCard(nodes, draggedId, target)) return null;
     return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
   }
   return null;
+}
+
+/**
+ * A card (object node) can't be dropped inside another card: the card renders
+ * its children as key:value rows, so a nested card's own subtree would never
+ * be shown. Blocks any drop whose resolved parent is an object node when the
+ * dragged branch root is itself an object node.
+ */
+function isCardIntoCard(
+  nodes: MindMapNode[],
+  draggedId: string,
+  target: DropTarget
+): boolean {
+  const dragged = nodes.find((n) => n.id === draggedId);
+  if (dragged?.type !== "object") return false;
+  const parent = nodes.find((n) => n.id === target.parentId);
+  return parent?.type === "object";
 }
 
 /** Sibling insertion before/after `siblingId` under its parent. */

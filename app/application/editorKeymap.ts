@@ -78,6 +78,17 @@ export function buildKeymap(
   deps: KeymapDeps,
   prefs: EditorPreferences = DEFAULT_PREFERENCES
 ): KeyBinding[] {
+  // An empty node must not spawn another empty child — otherwise Tab-spam on a
+  // fresh (blank) node stacks up empties. The live text is editingText while
+  // editing (the node's stored text lags a keystroke), the stored text
+  // otherwise. Mirrors the blank-leaf test the reducer uses in exitEditing.
+  const activeIsBlank = (ctx: KeyContext): boolean => {
+    const text = ctx.state.view.editing
+      ? ctx.state.view.editingText
+      : ctx.node?.text ?? "";
+    return text.trim() === "";
+  };
+
   // ---- Selection mode ----
   // No Escape binding here: the editor keeps exactly one node selected at all
   // times (see the empty-space click handler), so leaving selection mode would
@@ -98,9 +109,9 @@ export function buildKeymap(
     {
       id: "sel-edit",
       label: "編集を開始",
-      keys: "Space",
+      keys: "Space / F2",
       when: "selection",
-      match: (e) => e.key === " ",
+      match: (e) => e.key === " " || e.key === "F2",
       run: () => {
         deps.dispatch({ type: "startEditing" });
         return "handled";
@@ -218,6 +229,8 @@ export function buildKeymap(
             run: (ctx) => {
               const n = ctx.node;
               if (!n) return "handled";
+              // Don't stack an empty child under an already-empty node.
+              if (activeIsBlank(ctx)) return "handled";
               // An object card's rows don't render their subtrees — a child
               // inserted under a row would strand the caret on an invisible
               // node. Same footgun the reducer blocks for indent.
@@ -304,6 +317,69 @@ export function buildKeymap(
       },
     },
   ];
+
+  // Tab while editing mirrors the selection-mode Tab behaviour, driven by the
+  // same `tabBehavior` preference: "indent" makes Tab/Shift+Tab indent/outdent,
+  // "insert-child" makes Tab insert a child (handed straight into edit mode,
+  // pairing with Enter's split) while Shift+Tab still outdents. Keeping the two
+  // modes in sync means Tab does the same thing whether or not the caret is in
+  // the textarea.
+  const editIndentBindings: KeyBinding[] =
+    prefs.tabBehavior === "insert-child"
+      ? [
+          {
+            id: "edit-insert-child",
+            label: "子ノードを挿入",
+            keys: "Tab",
+            when: "editing",
+            match: (e) => e.key === "Tab" && !e.shiftKey,
+            run: (ctx) => {
+              const n = ctx.node;
+              if (!n) return "handled";
+              // Don't stack an empty child under an already-empty node (the
+              // live editingText is what counts while editing).
+              if (activeIsBlank(ctx)) return "handled";
+              // Same object-card guard as selection mode: a card row's subtree
+              // isn't rendered, so a child there would strand the caret.
+              const info = findParentAndIndex(ctx.state.document.model, n.id);
+              if (info?.parent.type === "object") return "handled";
+              const next = deps.dispatch(
+                { type: "addChild", nodeId: n.id },
+                "add-child"
+              );
+              if (next !== ctx.state) {
+                deps.saveNote(next.document.model);
+                // Move edit focus to the empty child, matching Enter's split.
+                deps.dispatch({ type: "startEditing" });
+              }
+              return "handled";
+            },
+          },
+          {
+            id: "edit-outdent",
+            label: "アウトデント",
+            keys: "Shift + Tab",
+            when: "editing",
+            match: (e) => e.key === "Tab" && e.shiftKey,
+            run: () => {
+              deps.dispatch({ type: "tab", shift: true }, "indent");
+              return "handled";
+            },
+          },
+        ]
+      : [
+          {
+            id: "edit-indent",
+            label: "インデント / アウトデント",
+            keys: "Tab / Shift + Tab",
+            when: "editing",
+            match: (e) => e.key === "Tab",
+            run: (ctx) => {
+              deps.dispatch({ type: "tab", shift: ctx.e.shiftKey }, "indent");
+              return "handled";
+            },
+          },
+        ];
 
   // Escape returns from editing to selection mode; with selection mode
   // disabled there is nowhere to return to, so the binding is dropped and
@@ -471,17 +547,7 @@ export function buildKeymap(
         return "handled";
       },
     },
-    {
-      id: "edit-indent",
-      label: "インデント / アウトデント",
-      keys: "Tab / Shift + Tab",
-      when: "editing",
-      match: (e) => e.key === "Tab",
-      run: (ctx) => {
-        deps.dispatch({ type: "tab", shift: ctx.e.shiftKey }, "indent");
-        return "handled";
-      },
-    },
+    ...editIndentBindings,
     {
       id: "edit-backspace",
       label: "",
