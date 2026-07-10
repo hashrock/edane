@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapModel, NodeType } from "../domain/model";
 import { findNode, cloneWithNewIds, generateId } from "../domain/model";
 import {
   looksLikeMarkdown,
@@ -1102,7 +1102,7 @@ export function MindmapEditorView({
     // --- Kind conversion (root excluded — it's the note title) ---
     const typeGroup: ContextMenuAction[] = [];
     if (!isRoot) {
-      const setType = (nodeType: "text" | "image" | "link" | "markdown") => () => {
+      const setType = (nodeType: NodeType) => () => {
         const next = dispatch(
           { type: "setNodeType", nodeId, nodeType },
           "set-type"
