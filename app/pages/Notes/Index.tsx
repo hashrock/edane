@@ -7,7 +7,7 @@ import {
   PinIcon,
   TrashIcon,
 } from "../../components/icons";
-import { takePendingNote } from "../../lib/guestNote";
+import { takePendingNote } from "../../application/guestNote";
 import type { SessionUser } from "../../user";
 
 type Note = {
