@@ -80,12 +80,26 @@ export function normalizeTree(
 
   // Preserve the known optional fields, guarding each by type.
   if (v.collapsed === true) node.collapsed = true;
-  if (v.type === "image" || v.type === "link" || v.type === "markdown")
+  if (
+    v.type === "image" ||
+    v.type === "link" ||
+    v.type === "markdown" ||
+    v.type === "object"
+  )
     node.type = v.type;
   if (typeof v.fontSize === "number") node.fontSize = v.fontSize;
   if (v.bold === true) node.bold = true;
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
+  if (v.numFormat === "comma" || v.numFormat === "currency" || v.numFormat === "percent")
+    node.numFormat = v.numFormat;
+  if (
+    typeof v.decimals === "number" &&
+    Number.isInteger(v.decimals) &&
+    v.decimals >= 0 &&
+    v.decimals <= 6
+  )
+    node.decimals = v.decimals;
 
   for (const child of v.children) {
     const normalized = normalizeTree(child, seen);

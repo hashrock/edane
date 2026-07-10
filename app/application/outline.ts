@@ -35,6 +35,21 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
       collapsed: !!node.collapsed,
     });
     if (node.collapsed) return;
+    if (node.type === "object") {
+      // Mirror getFlatOrder: an object node's children are its visible card
+      // rows, but their own subtrees stay hidden — the outline must show the
+      // exact set of nodes the caret can reach. Rows with hidden children
+      // report `collapsed` so the count badge renders.
+      for (const c of node.children) {
+        rows.push({
+          node: c,
+          depth: depth + 1,
+          hasChildren: c.children.length > 0,
+          collapsed: c.children.length > 0,
+        });
+      }
+      return;
+    }
     for (const c of node.children) walk(c, depth + 1);
   }
   walk(model, 0);

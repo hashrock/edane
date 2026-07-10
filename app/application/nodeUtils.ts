@@ -5,6 +5,8 @@
 import type { MindMapModel, NodeType } from "../domain/model";
 import { measureNodeBox, NODE_PADDING, nodeBoxWidth, nodeBoxHeight } from "../lib/measureText";
 import { markdownTitle } from "./markdownCard";
+import { objectCardGeom } from "./objectCard";
+import type { ValueKind } from "./objectField";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
 
 /**
@@ -43,6 +45,22 @@ export interface MindMapNode {
   linkTitle?: string;
   /** Link nodes: favicon URL. */
   favicon?: string;
+  /** Expanded object node: card offsets (relative to the box CENTRE y). */
+  card?: { titleOffsetY: number; sepOffsetY: number; keyColW: number };
+  /** Field row rendered inside an object card (positioned after tree layout). */
+  cardRow?: {
+    cardId: string;
+    /** Index among the card's children (drop targets need the slot). */
+    index: number;
+    /** Row top relative to the card's TOP edge (px). */
+    top: number;
+    key: string | null;
+    display: string;
+    kind: ValueKind;
+    keyColW: number;
+    thumbW?: number;
+    thumbH?: number;
+  };
 }
 
 /** Rendered favicon size (px) + gap before the link title. */
@@ -89,6 +107,16 @@ export function measureModelNode(
   m: MindMapModel,
   editingText?: string
 ): { width: number; height: number } {
+  if (m.type === "object" && !m.collapsed) {
+    // An expanded object node keeps its CARD shape even while its title is
+    // being edited (the live buffer overrides the title measurement only).
+    // A collapsed one falls through to plain title-text sizing.
+    const geom = objectCardGeom(
+      m,
+      editingText != null ? { id: m.id, text: editingText } : undefined
+    );
+    return { width: geom.width, height: geom.height };
+  }
   if (editingText != null) {
     const box = measureNodeBox(editingText, { fontSize: m.fontSize, bold: m.bold });
     return { width: box.width, height: box.height };
@@ -132,6 +160,74 @@ export function flattenToNodes(
   function walk(m: MindMapModel) {
     const collapsed = !!m.collapsed;
     const type: NodeType = m.type ?? "text";
+
+    if (type === "object" && !collapsed) {
+      // Expanded object node: one card node (a layout LEAF — its flat
+      // `children` stay empty so the tree layout doesn't position the rows)
+      // plus one row node per direct child. Row world positions are derived
+      // from the card box after layout (see layoutObjectRows). Grandchildren
+      // are hidden inside the card, mirroring getFlatOrder.
+      const override =
+        editing != null &&
+        (editing.id === m.id || m.children.some((c) => c.id === editing.id))
+          ? editing
+          : undefined;
+      const geom = objectCardGeom(m, override);
+      nodes.push({
+        id: m.id,
+        text: m.text,
+        x: 0,
+        y: 0,
+        children: [],
+        width: geom.width,
+        height: geom.height,
+        collapsed: false,
+        childCount: m.children.length,
+        type,
+        fontSize: m.fontSize,
+        bold: m.bold,
+        linkTitle: m.linkTitle,
+        favicon: m.favicon,
+        card: {
+          titleOffsetY: geom.titleCenterY - geom.height / 2,
+          sepOffsetY: geom.sepY - geom.height / 2,
+          keyColW: geom.keyColW,
+        },
+      });
+      m.children.forEach((child, i) => {
+        const row = geom.rows[i];
+        nodes.push({
+          id: child.id,
+          text: child.text,
+          x: 0,
+          y: 0,
+          children: [],
+          // The hit box spans the card's width so the whole line activates.
+          width: geom.width,
+          height: row.height,
+          collapsed: false,
+          childCount: child.children.length,
+          type: child.type ?? "text",
+          // Rows render at the card's fixed 14px rhythm; per-node font
+          // styling stays on the model and reappears outside the card.
+          linkTitle: child.linkTitle,
+          favicon: child.favicon,
+          cardRow: {
+            cardId: m.id,
+            index: i,
+            top: row.top,
+            key: row.key,
+            display: row.display,
+            kind: row.kind,
+            keyColW: geom.keyColW,
+            thumbW: row.thumbW,
+            thumbH: row.thumbH,
+          },
+        });
+      });
+      return;
+    }
+
     const isEditing = editing != null && editing.id === m.id;
     const { width, height } = measureModelNode(
       m,
@@ -160,4 +256,30 @@ export function flattenToNodes(
   }
   walk(model);
   return nodes;
+}
+
+/**
+ * Assign world positions to object-card field rows. Rows are layout leaves
+ * (unreachable from the root through flat `children`), so the tree layout
+ * leaves them at 0,0 — this pass anchors each row inside its card's box.
+ * Call it right after layoutMindMap wherever flattenToNodes output is drawn.
+ */
+export function layoutObjectRows(nodes: MindMapNode[]): void {
+  let hasRows = false;
+  for (const n of nodes) {
+    if (n.cardRow) {
+      hasRows = true;
+      break;
+    }
+  }
+  if (!hasRows) return;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  for (const n of nodes) {
+    const r = n.cardRow;
+    if (!r) continue;
+    const card = byId.get(r.cardId);
+    if (!card) continue;
+    n.x = card.x;
+    n.y = card.y - nodeBoxHeight(card.height) / 2 + r.top + n.height / 2;
+  }
 }
