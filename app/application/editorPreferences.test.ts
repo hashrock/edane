@@ -51,7 +51,7 @@ describe("loadPreferences", () => {
     expect(loadPreferences()).toEqual({
       selectionMode: true,
       tabBehavior: "insert-child",
-      arrowBehavior: "collapse",
+      arrowBehavior: DEFAULT_PREFERENCES.arrowBehavior,
     });
   });
 
