@@ -23,6 +23,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
 import { TrashIcon } from "./icons";
 import type { NoteEditorEngine } from "./useNoteEditor";
+import { useTextInputHandlers } from "./useTextInputHandlers";
 
 interface Props {
   engine: NoteEditorEngine;
@@ -61,7 +62,6 @@ export default function OutlineEditor({
     saveStatusRef,
     isPublic,
     setIsPublic,
-    undoManagerRef,
     undo,
     redo,
     noteId,
@@ -87,12 +87,21 @@ export default function OutlineEditor({
   const activeIsCustom = activeType === "image" || activeType === "link";
   const bodyActive = editing && !!activeNodeId && !activeIsCustom;
 
+  // --- Shared text-input glue (input ref, IME state, typeText handlers) ---
+  const {
+    inputRef,
+    isComposing,
+    isComposingRef,
+    handleInputChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    handleSelect,
+    handleUrlChange,
+  } = useTextInputHandlers(engine);
+
   // --- Refs ---
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
-  const isComposingRef = useRef(false);
-  const [isComposing, setIsComposing] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [overlay, setOverlay] = useState<{
     top: number;
@@ -115,65 +124,6 @@ export default function OutlineEditor({
       }),
     [dispatch, saveNote, undo, redo]
   );
-
-  // --- Text input handlers (mirror the canvas view) ---
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const el = e.target;
-      undoManagerRef.current.handleTextChange(stateRef.current.document);
-      dispatch({
-        type: "typeText",
-        text: el.value,
-        cursorPos: el.selectionStart ?? 0,
-        selectionEnd: el.selectionEnd ?? 0,
-        commitModel: !isComposingRef.current,
-      });
-    },
-    [dispatch, stateRef, undoManagerRef]
-  );
-
-  // Inline URL editor (image / link nodes): edits the node's `text` (its URL)
-  // while the preview above stays rendered. Persists on change so the preview
-  // and any saved copy stay in sync.
-  const handleUrlChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      undoManagerRef.current.handleTextChange(stateRef.current.document);
-      const next = dispatch({
-        type: "typeText",
-        text: e.target.value,
-        cursorPos: e.target.selectionStart ?? e.target.value.length,
-        selectionEnd: e.target.selectionEnd ?? e.target.value.length,
-        commitModel: true,
-      });
-      if (noteId) saveNote(next.document.model);
-    },
-    [dispatch, noteId, saveNote, stateRef, undoManagerRef]
-  );
-
-  const handleCompositionEnd = useCallback(() => {
-    setIsComposing(false);
-    isComposingRef.current = false;
-    const el = inputRef.current;
-    if (!el || !stateRef.current.view.activeNodeId) return;
-    undoManagerRef.current.handleTextChange(stateRef.current.document);
-    dispatch({
-      type: "typeText",
-      text: el.value,
-      cursorPos: el.selectionStart ?? el.value.length,
-      selectionEnd: el.selectionEnd ?? el.value.length,
-      commitModel: true,
-    });
-  }, [dispatch, stateRef, undoManagerRef]);
-
-  const handleSelect = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    dispatch({
-      type: "setSelection",
-      cursorPos: el.selectionStart || 0,
-      selectionEnd: el.selectionEnd || 0,
-    });
-  }, [dispatch]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -548,10 +498,7 @@ export default function OutlineEditor({
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
             onPaste={handlePaste}
-            onCompositionStart={() => {
-              setIsComposing(true);
-              isComposingRef.current = true;
-            }}
+            onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             className="absolute resize-none overflow-hidden border-0 bg-transparent py-0.5 leading-6 text-slate-900 outline-none"
             style={{
