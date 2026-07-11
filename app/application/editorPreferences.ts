@@ -37,8 +37,8 @@ export interface EditorPreferences {
 
 export const DEFAULT_PREFERENCES: EditorPreferences = {
   selectionMode: true,
-  tabBehavior: "indent",
-  arrowBehavior: "collapse",
+  tabBehavior: "insert-child",
+  arrowBehavior: "navigate",
 };
 
 export const PREFERENCES_KEY = "edane:editor-preferences";
