@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { MindmapEditorView } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
 import { useNoteEditor } from "./useNoteEditor";
+import type { EditorLayout } from "../application/editSurface";
 
 interface Props {
   noteId?: string;
@@ -16,7 +17,7 @@ interface Props {
 // layout. Matches Tailwind's `md` so it lines up with the rest of the UI.
 const NARROW_QUERY = "(max-width: 767px)";
 
-type Layout = "canvas" | "outline";
+type Layout = EditorLayout;
 
 /**
  * Responsive note editor: renders the Konva mind map on wide viewports and the
@@ -24,8 +25,9 @@ type Layout = "canvas" | "outline";
  * breakpoint. Both views share a single {@link useNoteEditor} engine, so the
  * document, caret, selection and undo history survive the switch untouched.
  *
- * The layout follows the viewport width, but a hidden shortcut
- * (⌘/Ctrl+Shift+O) can force the outline on any width for those who prefer it.
+ * The layout follows the viewport width, but the header view controls and a
+ * hidden shortcut (⌘/Ctrl+Shift+O) can force either layout on any width for
+ * those who prefer it.
  */
 export default function NoteEditor(props: Props) {
   const engine = useNoteEditor(props);
@@ -61,7 +63,13 @@ export default function NoteEditor(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const layout: Layout = override ?? (mounted && narrow ? "outline" : "canvas");
+  const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
+  const layout: Layout = override ?? defaultLayout;
+
+  // Picking the viewport-driven default releases the override, so resizing
+  // across the breakpoint keeps switching layouts automatically again.
+  const changeLayout = (next: Layout) =>
+    setOverride(next === defaultLayout ? null : next);
 
   if (layout === "outline") {
     return (
@@ -69,6 +77,8 @@ export default function NoteEditor(props: Props) {
         engine={engine}
         embed={props.embed}
         onSaveToAccount={props.onSaveToAccount}
+        layout={layout}
+        onLayoutChange={changeLayout}
       />
     );
   }
@@ -77,6 +87,8 @@ export default function NoteEditor(props: Props) {
       engine={engine}
       embed={props.embed}
       onSaveToAccount={props.onSaveToAccount}
+      layout={layout}
+      onLayoutChange={changeLayout}
     />
   );
 }

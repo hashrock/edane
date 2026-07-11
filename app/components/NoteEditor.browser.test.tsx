@@ -27,8 +27,58 @@ beforeEach(() => {
     [data-testid="mm-canvas"] {
       position: absolute; left: 0; top: 0; width: 800px; height: 560px;
     }
+    /* Tailwind isn't loaded here, so the absolutely-positioned test canvas
+       above would cover the in-flow header controls — lift them by hand. */
+    [data-testid="view-controls"] {
+      position: relative; z-index: 50; background: #fff;
+    }
   `;
   document.head.appendChild(style);
+});
+
+describe("NoteEditor header view controls", () => {
+  it("switches Mindmap → Outline → Mindmap from the layout dropdown", async () => {
+    await page.viewport(1280, 800);
+    render(
+      <NoteEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await waitFor(() => canvas() !== null);
+
+    // Open the dropdown and pick Outline.
+    await page.getByTestId("view-layout-trigger").click();
+    await page.getByTestId("view-layout-outline").click();
+    await waitFor(() => outline() !== null);
+    expect(canvas()).toBeNull();
+
+    // The outline view shows the same controls; switch back to the mind map.
+    await page.getByTestId("view-layout-trigger").click();
+    await page.getByTestId("view-layout-canvas").click();
+    await waitFor(() => canvas() !== null);
+    expect(outline()).toBeNull();
+  });
+
+  it("zooms with the +/− buttons and resets from the percentage", async () => {
+    await page.viewport(1280, 800);
+    render(
+      <NoteEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await waitFor(() => canvas() !== null);
+    const percent = () =>
+      document.querySelector('[data-testid="view-zoom-percent"]')!.textContent;
+    expect(percent()).toBe("100%");
+
+    await page.getByLabelText("ズームイン").click();
+    await waitFor(() => percent() === "120%");
+    await page.getByLabelText("ズームアウト").click();
+    await waitFor(() => percent() === "100%");
+
+    // Reset: zoom out twice, then click the percentage to snap back to 100%.
+    await page.getByLabelText("ズームアウト").click();
+    await page.getByLabelText("ズームアウト").click();
+    await waitFor(() => percent() !== "100%");
+    await page.getByTestId("view-zoom-percent").click();
+    await waitFor(() => percent() === "100%");
+  });
 });
 
 describe("NoteEditor hidden outline shortcut (⌘/Ctrl+Shift+O)", () => {

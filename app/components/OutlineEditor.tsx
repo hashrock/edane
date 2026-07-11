@@ -17,10 +17,11 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
-import { handleAuxInputKeys } from "../application/editSurface";
+import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
 import { DEFAULT_FONT_SIZE } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
+import ViewControls from "./ViewControls";
 import { TrashIcon } from "./icons";
 import type { NoteEditorEngine } from "./useNoteEditor";
 import { useTextInputHandlers } from "./useTextInputHandlers";
@@ -31,6 +32,13 @@ interface Props {
   embed?: boolean;
   /** Guest mode: hand the current document off to be saved to an account. */
   onSaveToAccount?: (note: { title: string; content: string }) => void;
+  /**
+   * Current layout + switcher for the floating view controls. Provided by the
+   * responsive {@link NoteEditor} wrapper; absent when used standalone, which
+   * hides the switch.
+   */
+  layout?: EditorLayout;
+  onLayoutChange?: (layout: EditorLayout) => void;
 }
 
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
@@ -52,6 +60,8 @@ export default function OutlineEditor({
   engine,
   embed,
   onSaveToAccount,
+  layout,
+  onLayoutChange,
 }: Props) {
   const {
     state,
@@ -262,17 +272,17 @@ export default function OutlineEditor({
       />
 
       {/* Header */}
-      <header className="anim-header flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3">
+      <header className="anim-header flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3">
         {!embed && (
           <Link
             href="/notes"
             aria-label="一覧へ戻る"
             title="一覧へ戻る"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
           >
             <svg
-              width="20"
-              height="20"
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -299,7 +309,7 @@ export default function OutlineEditor({
               if (e.nativeEvent.isComposing) return;
               if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
             }}
-            className="h-9 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-base font-bold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            className="h-8 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             placeholder="タイトル"
           />
         ) : (
@@ -307,11 +317,17 @@ export default function OutlineEditor({
             onClick={() => setEditingTitle(true)}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1 py-1 text-left hover:bg-slate-100"
           >
-            <span className="truncate text-base font-bold tracking-tight">
+            <span className="truncate text-sm font-semibold tracking-tight">
               {title || "無題"}
             </span>
-            <span className="shrink-0 text-slate-400">✎</span>
+            <span className="shrink-0 text-sm text-slate-400">✎</span>
           </button>
+        )}
+        {onLayoutChange && (
+          <ViewControls
+            layout={layout ?? "outline"}
+            onLayoutChange={onLayoutChange}
+          />
         )}
         {noteId && (
           <span
@@ -336,7 +352,7 @@ export default function OutlineEditor({
                 content: JSON.stringify(model),
               })
             }
-            className="shrink-0 whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+            className="shrink-0 whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
           >
             保存
           </button>

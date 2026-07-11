@@ -83,3 +83,30 @@ export function LockIcon(props: React.SVGProps<SVGSVGElement>) {
     </IconSvg>
   );
 }
+
+/** Mind-map icon (root with branching nodes). */
+export function MindmapIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg {...props}>
+      <circle cx="5" cy="12" r="2.5" />
+      <circle cx="19" cy="5" r="2.5" />
+      <circle cx="19" cy="19" r="2.5" />
+      <path d="M7.5 11 16.6 6.2" />
+      <path d="M7.5 13 16.6 17.8" />
+    </IconSvg>
+  );
+}
+
+/** Outline / list icon (indented bullet rows). */
+export function OutlineIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg {...props}>
+      <path d="M9 6h12" />
+      <path d="M9 12h12" />
+      <path d="M9 18h12" />
+      <circle cx="4" cy="6" r="1" fill="currentColor" />
+      <circle cx="4" cy="12" r="1" fill="currentColor" />
+      <circle cx="4" cy="18" r="1" fill="currentColor" />
+    </IconSvg>
+  );
+}
