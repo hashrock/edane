@@ -22,6 +22,7 @@ import {
 import MarkdownPanel from "./MarkdownPanel";
 import { attachStagePanZoom } from "./stagePanZoom";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
+import { useTextInputHandlers } from "./useTextInputHandlers";
 import { layoutMindMap } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
@@ -262,6 +263,19 @@ export function MindmapEditorView({
     view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
   } = state;
 
+  // Shared text-input glue (input ref, IME state, typeText handlers) — the same
+  // machinery the outline view uses, so both stay in lock-step.
+  const {
+    inputRef,
+    isComposing,
+    isComposingRef,
+    handleInputChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    handleSelect,
+    handleUrlChange,
+  } = useTextInputHandlers(engine);
+
   // Custom nodes (image / link) keep their rendered preview while editing and
   // expose the URL in a visible input below the node — mirroring the outline
   // view — instead of swapping the canvas node to raw-text editing.
@@ -281,7 +295,6 @@ export function MindmapEditorView({
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const [editingTitle, setEditingTitle] = useState(false);
-  const [isComposing, setIsComposing] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [konvaReady, setKonvaReady] = useState(false);
   // True while an image file is being dragged over the canvas (drop-to-upload).
@@ -319,7 +332,6 @@ export function MindmapEditorView({
     targetId: string;
   } | null>(null);
   // Refs
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<string | null>(null);
@@ -335,7 +347,6 @@ export function MindmapEditorView({
   const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isComposingRef = useRef(false);
   // True once the view has been centred for the current note (see the
   // centre-on-open logic in the Konva setup). Reset when the note changes.
   const didCenterRef = useRef(false);
@@ -439,74 +450,6 @@ export function MindmapEditorView({
     if (urlEditing) urlInputRef.current?.focus();
     else if (activeNodeId) inputRef.current?.focus();
   }, [urlEditing, activeNodeId]);
-
-  // --- Input handling ---
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const el = e.target;
-      const newText = el.value;
-      const pos = el.selectionStart ?? 0;
-      const end = el.selectionEnd ?? 0;
-      // Snapshot the pre-typing state once per debounce batch
-      undoManagerRef.current.handleTextChange(stateRef.current.document);
-      dispatch({
-        type: "typeText",
-        text: newText,
-        cursorPos: pos,
-        selectionEnd: end,
-        // Don't commit to the model mid-IME-composition
-        commitModel: !isComposingRef.current,
-      });
-    },
-    [dispatch]
-  );
-
-  const handleCompositionEnd = useCallback(() => {
-    setIsComposing(false);
-    isComposingRef.current = false;
-    const el = inputRef.current;
-    if (!el || !stateRef.current.view.activeNodeId) return;
-    const finalText = el.value;
-    const pos = el.selectionStart ?? finalText.length;
-    const end = el.selectionEnd ?? pos;
-    undoManagerRef.current.handleTextChange(stateRef.current.document);
-    dispatch({
-      type: "typeText",
-      text: finalText,
-      cursorPos: pos,
-      selectionEnd: end,
-      commitModel: true,
-    });
-  }, [dispatch]);
-
-  const handleSelect = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    dispatch({
-      type: "setSelection",
-      cursorPos: el.selectionStart || 0,
-      selectionEnd: el.selectionEnd || 0,
-    });
-  }, [dispatch]);
-
-  // Visible URL box (image / link nodes): edits the node's `text` (its URL)
-  // while the canvas keeps drawing the preview. Persists on change so the
-  // preview and any saved copy stay in sync (same behaviour as the outline
-  // view's inline URL editor).
-  const handleUrlChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      undoManagerRef.current.handleTextChange(stateRef.current.document);
-      const next = dispatch({
-        type: "typeText",
-        text: e.target.value,
-        cursorPos: e.target.selectionStart ?? e.target.value.length,
-        selectionEnd: e.target.selectionEnd ?? e.target.value.length,
-        commitModel: true,
-      });
-      if (noteId) saveNote(next.document.model);
-    },
-    [dispatch, noteId, saveNote]
-  );
 
   // Refocus the editor after a click/menu/palette interaction, picking the
   // right keyboard host: the visible URL box while an image/link node is being
@@ -2906,10 +2849,7 @@ export function MindmapEditorView({
           onCopy={handleCopy}
           onCut={handleCut}
           onPaste={handlePaste}
-          onCompositionStart={() => {
-            setIsComposing(true);
-            isComposingRef.current = true;
-          }}
+          onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           style={{
             position: "absolute",
