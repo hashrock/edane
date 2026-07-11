@@ -35,20 +35,30 @@ interface StageLike {
   on(evtStr: string, handler: (e: any) => void): void;
 }
 
+/** Read the stage's current pan/zoom as a {@link ViewTransform}. */
+export function stageTransform(stage: StageLike): ViewTransform {
+  return {
+    scale: stage.scaleX(),
+    offsetX: stage.x(),
+    offsetY: stage.y(),
+  };
+}
+
+/** Write a {@link ViewTransform} back onto the stage. */
+export function applyStageTransform(stage: StageLike, t: ViewTransform): void {
+  stage.scale({ x: t.scale, y: t.scale });
+  stage.position({ x: t.offsetX, y: t.offsetY });
+}
+
 export function attachStagePanZoom(
   stage: StageLike,
   onTransform: () => void
 ): () => void {
   const recognize = createWheelGestureRecognizer();
 
-  const current = (): ViewTransform => ({
-    scale: stage.scaleX(),
-    offsetX: stage.x(),
-    offsetY: stage.y(),
-  });
+  const current = () => stageTransform(stage);
   const apply = (t: ViewTransform) => {
-    stage.scale({ x: t.scale, y: t.scale });
-    stage.position({ x: t.offsetX, y: t.offsetY });
+    applyStageTransform(stage, t);
     onTransform();
   };
 

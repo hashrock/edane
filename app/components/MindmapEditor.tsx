@@ -20,7 +20,13 @@ import {
   parseBranch,
 } from "../application/branchClipboard";
 import MarkdownPanel from "./MarkdownPanel";
-import { attachStagePanZoom } from "./stagePanZoom";
+import ViewControls from "./ViewControls";
+import {
+  attachStagePanZoom,
+  stageTransform,
+  applyStageTransform,
+} from "./stagePanZoom";
+import { zoomAt } from "../lib/panZoom";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { useTextInputHandlers } from "./useTextInputHandlers";
 import { layoutMindMap } from "../lib/treeLayout";
@@ -92,7 +98,7 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
-import { handleAuxInputKeys } from "../application/editSurface";
+import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
 import {
   loadPreferences,
   savePreferences,
@@ -117,6 +123,10 @@ function isNonPrimaryButton(e: { evt?: { button?: unknown } }): boolean {
 // press turns into a drag-select. Below this a small jitter stays a plain click
 // so selection doesn't jump to a neighbouring (e.g. same-Y parent) node.
 const DRAG_THRESHOLD = 4;
+
+// Zoom factor per click of the floating +/− buttons. Deliberately coarser than
+// WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
+const ZOOM_BUTTON_STEP = 1.2;
 
 /**
  * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
@@ -226,6 +236,13 @@ interface ViewProps {
   /** Embedded (iframe) mode: hide the navigation header. */
   embed?: boolean;
   onSaveToAccount?: (note: { title: string; content: string }) => void;
+  /**
+   * Current layout + switcher for the floating view controls. Provided by the
+   * responsive {@link NoteEditor} wrapper; absent in the standalone editor,
+   * which then shows only the zoom controls.
+   */
+  layout?: EditorLayout;
+  onLayoutChange?: (layout: EditorLayout) => void;
 }
 
 /**
@@ -237,6 +254,8 @@ export function MindmapEditorView({
   engine,
   embed,
   onSaveToAccount,
+  layout,
+  onLayoutChange,
 }: ViewProps) {
   const {
     state,
@@ -306,6 +325,8 @@ export function MindmapEditorView({
   // redraw effect re-runs and refills the newly-visible area. See the redraw
   // effect below — only nodes intersecting the visible viewport are built.
   const [viewportTick, setViewportTick] = useState(0);
+  // Current stage zoom mirrored into React for the floating view controls.
+  const [zoomPercent, setZoomPercent] = useState(100);
   // Transient highlight of just-inserted nodes (paste / child add) so the
   // insertion position is obvious. Cleared after a short delay.
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
@@ -1379,6 +1400,7 @@ export function MindmapEditorView({
         // Pan/zoom changes which nodes fall inside the viewport (zooming out
         // reveals more) — re-run the culled redraw instead of just translating.
         setViewportTick((t) => t + 1);
+        setZoomPercent(Math.round(stage.scaleX() * 100));
       });
 
       // Click on empty space: keep the node selected, just leave edit mode
@@ -1583,6 +1605,38 @@ export function MindmapEditorView({
   }, []);
   const centerOnOpenRef = useRef(centerOnOpen);
   centerOnOpenRef.current = centerOnOpen;
+
+  // Zoom from the floating view controls: scale by `factor` around the
+  // viewport centre (wheel/pinch zoom anchors at the pointer instead).
+  const zoomBy = useCallback((factor: number) => {
+    const stage = konvaStageRef.current;
+    if (!stage) return;
+    const t = zoomAt(
+      stageTransform(stage),
+      { x: stage.width() / 2, y: stage.height() / 2 },
+      factor
+    );
+    applyStageTransform(stage, t);
+    layerRef.current?.batchDraw();
+    updateGridRef.current();
+    setViewportTick((tick) => tick + 1);
+    setZoomPercent(Math.round(t.scale * 100));
+  }, []);
+
+  // Stable object so the memoized ViewControls skips re-rendering on the
+  // per-wheel-tick renders this view does during pan/zoom gestures.
+  const zoomControls = useMemo(
+    () => ({
+      percent: zoomPercent,
+      onZoomIn: () => zoomBy(ZOOM_BUTTON_STEP),
+      onZoomOut: () => zoomBy(1 / ZOOM_BUTTON_STEP),
+      onReset: () => {
+        const stage = konvaStageRef.current;
+        if (stage) zoomBy(1 / stage.scaleX());
+      },
+    }),
+    [zoomPercent, zoomBy]
+  );
 
   // Re-centre when the note changes (a fresh document should open centred too).
   useEffect(() => {
@@ -2722,18 +2776,18 @@ export function MindmapEditorView({
         }}
         onCancel={() => setLeaveConfirm(null)}
       />
-      <header className="anim-header flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
+      <header className="anim-header flex h-12 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
         <div className="flex items-center gap-3 min-w-0">
           {!embed && (
             <Link
               href="/notes"
               aria-label="一覧へ戻る"
               title="一覧へ戻る"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             >
               <svg
-                width="20"
-                height="20"
+                width="18"
+                height="18"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -2764,7 +2818,7 @@ export function MindmapEditorView({
                   e.currentTarget.blur();
                 }
               }}
-              className="h-9 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-lg font-bold tracking-tight outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="h-8 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-base font-semibold tracking-tight outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               placeholder="タイトル（ルートノード）"
             />
           ) : (
@@ -2773,38 +2827,43 @@ export function MindmapEditorView({
               className="flex min-w-0 items-center gap-2 rounded-lg px-1 text-left hover:bg-slate-100"
               title="タイトルを編集"
             >
-              <span className="truncate text-lg font-bold tracking-tight">
+              <span className="truncate text-base font-semibold tracking-tight">
                 {title || "無題"}
               </span>
-              <span className="text-slate-400">✎</span>
+              <span className="text-sm text-slate-400">✎</span>
             </button>
           )}
         </div>
-        {noteId && (
-          <div className="flex items-center gap-4 text-sm">
-            <span
-              ref={saveStatusRef}
-              className="whitespace-nowrap text-slate-500"
-            />
-            <PublicityDropdown
-              isPublic={isPublic}
-              onChange={(next) => {
-                setIsPublic(next);
-                saveNote(model, next);
-              }}
-            />
-          </div>
-        )}
-        {!noteId && onSaveToAccount && (
-          <div className="flex items-center gap-3 text-sm">
+        <div className="flex items-center gap-3 text-xs">
+          <ViewControls
+            layout={layout ?? "canvas"}
+            onLayoutChange={onLayoutChange}
+            zoom={zoomControls}
+          />
+          {noteId && (
+            <>
+              <span
+                ref={saveStatusRef}
+                className="whitespace-nowrap text-slate-500"
+              />
+              <PublicityDropdown
+                isPublic={isPublic}
+                onChange={(next) => {
+                  setIsPublic(next);
+                  saveNote(model, next);
+                }}
+              />
+            </>
+          )}
+          {!noteId && onSaveToAccount && (
             <button
               onClick={handleSaveToAccount}
-              className="whitespace-nowrap rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+              className="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white transition hover:bg-emerald-700"
             >
               アカウントに保存
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
       <div
         className="flex-1 relative overflow-hidden bg-slate-50"
