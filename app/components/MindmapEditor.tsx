@@ -128,6 +128,16 @@ const DRAG_THRESHOLD = 4;
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
 const ZOOM_BUTTON_STEP = 1.2;
 
+// Each connector leaves its parent with a short straight stub before the curve
+// begins. The stub's end is the shared junction where all of a parent's edges
+// fan out, so it anchors the collapse handle (see the collapse-handle pass).
+const CONNECTOR_STUB = 6;
+// Radius of the (invisible) hover zone around the junction, and of the round
+// minus button it reveals. The hit zone is wider than the button so the small
+// control is easy to aim at.
+const COLLAPSE_HIT_R = 11;
+const COLLAPSE_BTN_R = 7;
+
 /**
  * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
  * - "text": drag inside the node being edited extends a text selection.
@@ -201,6 +211,12 @@ export interface MindmapTestApi {
     editing: boolean;
   };
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
+  /**
+   * Screen-space centre of a node's collapse handle — the junction where its
+   * connectors fan out (null when the node has no visible children). Mirrors the
+   * draw-side junction math so collapse-handle click tests stay in sync with it.
+   */
+  getConnectorHandlePoint: (id: string) => { x: number; y: number } | null;
   /** Screen-space box of a node (x/y = top-left), for drag & drop zone tests. */
   getNodeRect: (
     id: string
@@ -1851,9 +1867,14 @@ export function MindmapEditorView({
         ) {
           return;
         }
-        const controlOffset = Math.abs(endX - startX) * 0.5;
+        // A short straight stub leaves the parent horizontally, then the curve
+        // takes over from the junction (stubX). The curve already departed
+        // horizontally (control point shares startY), so the stub just extends
+        // that departure — visually it reads as one continuous connector.
+        const stubX = startX + CONNECTOR_STUB;
+        const controlOffset = Math.abs(endX - stubX) * 0.5;
         const path = new Konva.Path({
-          data: `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`,
+          data: `M ${startX} ${startY} L ${stubX} ${startY} C ${stubX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`,
           stroke: "#aeb7c2",
           strokeWidth: 1.5,
           fill: "transparent",
@@ -2300,30 +2321,52 @@ export function MindmapEditorView({
         group.add(textNode);
       }
 
-      // Collapsed indicator: a small pill on the right showing hidden child count.
+      // Collapsed indicator: a small pill on the right showing hidden child
+      // count. Clicking it expands the branch — the mirror of the collapse
+      // handle at the connector junction, so collapse/expand share one gesture.
       if (node.collapsed && node.childCount > 0) {
         const badgeR = 9;
         const badgeX = node.x + rectWidth + 4 + badgeR;
-        const badge = new Konva.Circle({
-          x: badgeX,
-          y: node.y,
-          radius: badgeR,
-          fill: "#000000",
-          listening: false,
+        const badgeGroup = new Konva.Group();
+        badgeGroup.add(
+          new Konva.Circle({
+            x: badgeX,
+            y: node.y,
+            radius: badgeR,
+            fill: "#000000",
+          })
+        );
+        badgeGroup.add(
+          new Konva.Text({
+            x: badgeX - badgeR,
+            y: node.y - 6,
+            width: badgeR * 2,
+            align: "center",
+            text: String(node.childCount),
+            fontSize: 11,
+            fontFamily: "sans-serif",
+            fill: "#ffffff",
+            listening: false,
+          })
+        );
+        badgeGroup.on("mousedown touchstart", (e: any) => {
+          if (isNonPrimaryButton(e)) return;
+          e.cancelBubble = true;
+          // Expanding destroys this badge, so its mouseleave never fires —
+          // clear the pointer cursor here to avoid it sticking.
+          const st = konvaStageRef.current;
+          if (st) st.container().style.cursor = "";
+          dispatch({ type: "toggleCollapse", nodeId: node.id }, "collapse");
         });
-        group.add(badge);
-        const badgeText = new Konva.Text({
-          x: badgeX - badgeR,
-          y: node.y - 6,
-          width: badgeR * 2,
-          align: "center",
-          text: String(node.childCount),
-          fontSize: 11,
-          fontFamily: "sans-serif",
-          fill: "#ffffff",
-          listening: false,
+        badgeGroup.on("mouseenter", () => {
+          const st = konvaStageRef.current;
+          if (st) st.container().style.cursor = "pointer";
         });
-        group.add(badgeText);
+        badgeGroup.on("mouseleave", () => {
+          const st = konvaStageRef.current;
+          if (st) st.container().style.cursor = "";
+        });
+        group.add(badgeGroup);
       }
 
       // Click → activate node
@@ -2442,6 +2485,84 @@ export function MindmapEditorView({
       });
 
       layer.add(group);
+    });
+
+    // Collapse handles. Each expanded parent's connectors fan out from a single
+    // junction (stub end); one handle there collapses the whole branch. An
+    // invisible circular hover zone reveals a round minus button, and clicking
+    // it toggles the branch. Drawn last so the handle sits above the connectors
+    // and (unlike the edges) stays interactive. The mirror action — expanding a
+    // collapsed branch — lives on the count badge (see the collapsed indicator).
+    nodes.forEach((node, index) => {
+      if (!visible[index]) return;
+      if (node.collapsed || node.children.length === 0) return;
+      const parentWidth = textWidths.get(node.id) ?? node.width;
+      const junctionX = node.x + parentWidth + 40 + CONNECTOR_STUB;
+      const junctionY = node.y;
+      if (
+        junctionX < cullLeft ||
+        junctionX > cullRight ||
+        junctionY < cullTop ||
+        junctionY > cullBottom
+      ) {
+        return;
+      }
+
+      const handle = new Konva.Group();
+      // Transparent hit zone — invisible but still listening (Konva's hit graph
+      // ignores opacity), so hovering anywhere near the junction arms the button.
+      handle.add(
+        new Konva.Circle({
+          x: junctionX,
+          y: junctionY,
+          radius: COLLAPSE_HIT_R,
+          fill: "#000000",
+          opacity: 0,
+        })
+      );
+      // The round minus button, hidden until the zone is hovered.
+      const btn = new Konva.Group({ opacity: 0, listening: false });
+      btn.add(
+        new Konva.Circle({
+          x: junctionX,
+          y: junctionY,
+          radius: COLLAPSE_BTN_R,
+          fill: "#ffffff",
+          stroke: "#aeb7c2",
+          strokeWidth: 1.5,
+        })
+      );
+      btn.add(
+        new Konva.Line({
+          points: [junctionX - 3.5, junctionY, junctionX + 3.5, junctionY],
+          stroke: "#6b7280",
+          strokeWidth: 1.5,
+        })
+      );
+      handle.add(btn);
+
+      handle.on("mouseenter", () => {
+        btn.opacity(1);
+        layer.batchDraw();
+        const st = konvaStageRef.current;
+        if (st) st.container().style.cursor = "pointer";
+      });
+      handle.on("mouseleave", () => {
+        btn.opacity(0);
+        layer.batchDraw();
+        const st = konvaStageRef.current;
+        if (st) st.container().style.cursor = "";
+      });
+      handle.on("mousedown touchstart", (e: any) => {
+        if (isNonPrimaryButton(e)) return;
+        e.cancelBubble = true;
+        // The redraw destroys this handle, so its mouseleave never fires —
+        // clear the pointer cursor here to avoid it sticking.
+        const st = konvaStageRef.current;
+        if (st) st.container().style.cursor = "";
+        dispatch({ type: "toggleCollapse", nodeId: node.id }, "collapse");
+      });
+      layer.add(handle);
     });
 
     const drawStart = import.meta.env.PROD ? 0 : performance.now();
@@ -2673,6 +2794,18 @@ export function MindmapEditorView({
         const worldX = node.x + NODE_PADDING + textW / 2;
         // A card's clickable text (its title) sits at the top of the box.
         const worldY = node.y + (node.card?.titleOffsetY ?? 0);
+        return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
+      },
+      getConnectorHandlePoint: (id: string) => {
+        const node = nodesRef.current.find((n) => n.id === id);
+        const stage = konvaStageRef.current;
+        if (!node || !stage) return null;
+        if (node.collapsed || node.children.length === 0) return null;
+        const scale = stage.scaleX();
+        const data = lineDataRef.current.get(id);
+        const parentWidth = data ? lineDataWidth(data) || 40 : 40;
+        const worldX = node.x + parentWidth + 40 + CONNECTOR_STUB;
+        const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
       getNodeRect: (id: string) => {
