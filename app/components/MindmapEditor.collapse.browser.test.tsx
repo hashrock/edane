@@ -84,54 +84,37 @@ async function setup(model: MindMapModel = MODEL) {
   return { click };
 }
 
-// The collapse handle sits 6px past the connector's straight stub; the count
-// badge sits just past the collapsed node's right edge. Both are derived from
-// the same scale, recovered from two existing screen-space API points (the +6px
-// stub is exactly the gap between the click point and the handle, doubled out).
-function stageScale(id: string): number {
-  const rect = api().getNodeRect(id)!;
-  const click = api().getNodeClickPoint(id)!;
-  const handle = api().getConnectorHandlePoint(id)!;
-  const a = click.x - rect.x; // (NODE_PADDING + textW/2) * scale
-  const b = handle.x - rect.x; // (textW + 40 + 6) * scale
-  return (b - 2 * a) / 6; // (46 - 40) * scale / 6 = scale
-}
-
-describe("MindmapEditor connector collapse handle", () => {
-  it("clicking the connector-junction minus button collapses the branch", async () => {
+describe("MindmapEditor unified collapse/expand toggle button", () => {
+  it("clicking the toggle button collapses the branch", async () => {
     const { click } = await setup();
     expect(findNode(api().getModel(), "a")!.collapsed).toBeFalsy();
 
-    const handle = await waitFor(() => api().getConnectorHandlePoint("a"));
-    click(handle.x, handle.y);
+    const btn = await waitFor(() => api().getToggleButtonPoint("a"));
+    click(btn.x, btn.y);
 
     await waitFor(() => !!findNode(api().getModel(), "a")!.collapsed);
-    // Once collapsed there is no handle (the branch has no visible children).
-    expect(api().getConnectorHandlePoint("a")).toBeNull();
+    // The button stays put once collapsed (it becomes the count pill).
+    expect(api().getToggleButtonPoint("a")).not.toBeNull();
   });
 
-  it("clicking the count badge on a collapsed node expands it again", async () => {
+  it("clicking the same button again expands the branch", async () => {
     const { click } = await setup();
-    const scale = stageScale("a");
 
-    // Collapse "a" first.
-    const handle = await waitFor(() => api().getConnectorHandlePoint("a"));
-    click(handle.x, handle.y);
+    // Collapse "a" first — the button hugs the node's right edge.
+    const collapseAt = await waitFor(() => api().getToggleButtonPoint("a"));
+    click(collapseAt.x, collapseAt.y);
     await waitFor(() => !!findNode(api().getModel(), "a")!.collapsed);
 
-    // The badge is a 9px-radius pill centred 4+9px past the box's right edge.
-    const rect = await waitFor(() => api().getNodeRect("a"));
-    const badgeX = rect.x + rect.width + (4 + 9) * scale;
-    const badgeY = rect.y + rect.height / 2;
-    click(badgeX, badgeY);
+    // Collapse and expand share one control in one place, so clicking the same
+    // point toggles it back.
+    const expandAt = await waitFor(() => api().getToggleButtonPoint("a"));
+    click(expandAt.x, expandAt.y);
 
     await waitFor(() => !findNode(api().getModel(), "a")!.collapsed);
-    // Expanded again → the handle is back.
-    expect(api().getConnectorHandlePoint("a")).not.toBeNull();
   });
 
-  it("a leaf node (no children) has no collapse handle", async () => {
+  it("a leaf node (no children) has no toggle button", async () => {
     await setup();
-    expect(api().getConnectorHandlePoint("b")).toBeNull();
+    expect(api().getToggleButtonPoint("b")).toBeNull();
   });
 });
