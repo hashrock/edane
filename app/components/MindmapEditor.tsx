@@ -132,11 +132,17 @@ const ZOOM_BUTTON_STEP = 1.2;
 // begins. The stub's end is the shared junction where all of a parent's edges
 // fan out, so it anchors the collapse handle (see the collapse-handle pass).
 const CONNECTOR_STUB = 6;
-// Radius of the (invisible) hover zone around the junction, and of the round
-// minus button it reveals. The hit zone is wider than the button so the small
-// control is easy to aim at.
-const COLLAPSE_HIT_R = 11;
-const COLLAPSE_BTN_R = 7;
+// The unified collapse/expand toggle button hugs a parent's right edge: a "−"
+// while expanded (collapses) or the hidden-child count while collapsed
+// (expands). One control in one place, so the two states morph into each other
+// (see the morph overlay). TOGGLE_GAP is the gap from the box edge to the
+// button; TOGGLE_R its radius (also the resting count-badge radius, so a
+// collapsed node's badge keeps its previous position). The expand affordance
+// (count pill) shows always; the collapse affordance (minus) is revealed only
+// on hover, so an (invisible, wider) TOGGLE_HIT_R zone keeps it easy to aim at.
+const TOGGLE_GAP = 4;
+const TOGGLE_R = 9;
+const TOGGLE_HIT_R = 12;
 
 /**
  * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
@@ -212,11 +218,13 @@ export interface MindmapTestApi {
   };
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
   /**
-   * Screen-space centre of a node's collapse handle — the junction where its
-   * connectors fan out (null when the node has no visible children). Mirrors the
-   * draw-side junction math so collapse-handle click tests stay in sync with it.
+   * Screen-space centre of a node's unified collapse/expand toggle button — the
+   * round control hugging the node's right edge (null when the node has no
+   * children). Works in both states (the button stays put when the branch
+   * toggles), so a test clicks the same point to collapse then expand. Mirrors
+   * the draw-side position math so click tests stay in sync with it.
    */
-  getConnectorHandlePoint: (id: string) => { x: number; y: number } | null;
+  getToggleButtonPoint: (id: string) => { x: number; y: number } | null;
   /** Screen-space box of a node (x/y = top-left), for drag & drop zone tests. */
   getNodeRect: (
     id: string
@@ -377,6 +385,8 @@ export function MindmapEditorView({
   const layerRef = useRef<any>(null);
   const cursorLayerRef = useRef<any>(null);
   const flashLayerRef = useRef<any>(null);
+  // Overlay layer for the collapse/expand morph tween (see the morph effect).
+  const morphLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
@@ -384,6 +394,11 @@ export function MindmapEditorView({
   const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which node's toggle button the pointer is currently over. Lets the redraw
+  // that follows a collapse/expand click keep the (hover-only) minus visible —
+  // Konva won't re-fire mouseenter on the freshly rebuilt button under a
+  // stationary pointer, so we seed its opacity from this ref instead.
+  const hoveredToggleRef = useRef<string | null>(null);
   // True once the view has been centred for the current note (see the
   // centre-on-open logic in the Konva setup). Reset when the note changes.
   const didCenterRef = useRef(false);
@@ -394,6 +409,37 @@ export function MindmapEditorView({
     redrawLastMs: 0,
     redrawDrawMs: 0,
   });
+  // Collapse/expand morph signal. Set whenever a branch toggles so the morph
+  // overlay effect can tween the toggle button between its "−" and count looks.
+  // The nonce makes re-toggling the same node re-fire the effect.
+  const [morphSignal, setMorphSignal] = useState<{
+    nodeId: string;
+    toCollapsed: boolean;
+    nonce: number;
+  } | null>(null);
+  const morphNonceRef = useRef(0);
+
+  // Toggle a branch's collapsed state and arm the morph. All three entry points
+  // (the toggle button, the count badge — now one control — and the context
+  // menu) route through here so collapse and expand always morph in place.
+  const toggleCollapse = useCallback(
+    (nodeId: string) => {
+      const before = findNode(modelRef.current, nodeId);
+      const wasCollapsed = !!before?.collapsed;
+      const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
+      morphNonceRef.current += 1;
+      setMorphSignal({
+        nodeId,
+        toCollapsed: !wasCollapsed,
+        nonce: morphNonceRef.current,
+      });
+      return next;
+    },
+    [dispatch]
+  );
+  const toggleCollapseRef = useRef(toggleCollapse);
+  toggleCollapseRef.current = toggleCollapse;
+
   // Briefly highlight a set of nodes (used to show where a paste/insert landed).
   const flashNodes = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
@@ -1000,7 +1046,7 @@ export function MindmapEditorView({
       structureGroup.push({
         label: node.collapsed ? "展開する" : "折りたたむ",
         onSelect: () => {
-          const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
+          const next = toggleCollapse(nodeId);
           if (noteId) saveNote(next.document.model);
         },
       });
@@ -1149,6 +1195,7 @@ export function MindmapEditorView({
   }, [
     contextMenu,
     dispatch,
+    toggleCollapse,
     noteId,
     saveNote,
     fetchLinkMeta,
@@ -1247,6 +1294,13 @@ export function MindmapEditorView({
       const flashLayer = new Konva.Layer({ listening: false });
       stage.add(flashLayer);
       flashLayerRef.current = flashLayer;
+
+      // Collapse/expand morph overlay. Sits above the main layer so the morphing
+      // circle covers the freshly-drawn real toggle button underneath, then
+      // clears to reveal it (see the morph effect). Non-interactive.
+      const morphLayer = new Konva.Layer({ listening: false });
+      stage.add(morphLayer);
+      morphLayerRef.current = morphLayer;
 
       // Drag & drop preview layer. Drawn imperatively on every mousemove of a
       // move drag — going through React state would re-render per move. It sits
@@ -1587,6 +1641,8 @@ export function MindmapEditorView({
         layerRef.current = null;
         cursorLayerRef.current = null;
         dragLayerRef.current = null;
+        flashLayerRef.current = null;
+        morphLayerRef.current = null;
       }
     };
   }, [dispatch]);
@@ -2321,53 +2377,9 @@ export function MindmapEditorView({
         group.add(textNode);
       }
 
-      // Collapsed indicator: a small pill on the right showing hidden child
-      // count. Clicking it expands the branch — the mirror of the collapse
-      // handle at the connector junction, so collapse/expand share one gesture.
-      if (node.collapsed && node.childCount > 0) {
-        const badgeR = 9;
-        const badgeX = node.x + rectWidth + 4 + badgeR;
-        const badgeGroup = new Konva.Group();
-        badgeGroup.add(
-          new Konva.Circle({
-            x: badgeX,
-            y: node.y,
-            radius: badgeR,
-            fill: "#000000",
-          })
-        );
-        badgeGroup.add(
-          new Konva.Text({
-            x: badgeX - badgeR,
-            y: node.y - 6,
-            width: badgeR * 2,
-            align: "center",
-            text: String(node.childCount),
-            fontSize: 11,
-            fontFamily: "sans-serif",
-            fill: "#ffffff",
-            listening: false,
-          })
-        );
-        badgeGroup.on("mousedown touchstart", (e: any) => {
-          if (isNonPrimaryButton(e)) return;
-          e.cancelBubble = true;
-          // Expanding destroys this badge, so its mouseleave never fires —
-          // clear the pointer cursor here to avoid it sticking.
-          const st = konvaStageRef.current;
-          if (st) st.container().style.cursor = "";
-          dispatch({ type: "toggleCollapse", nodeId: node.id }, "collapse");
-        });
-        badgeGroup.on("mouseenter", () => {
-          const st = konvaStageRef.current;
-          if (st) st.container().style.cursor = "pointer";
-        });
-        badgeGroup.on("mouseleave", () => {
-          const st = konvaStageRef.current;
-          if (st) st.container().style.cursor = "";
-        });
-        group.add(badgeGroup);
-      }
+      // The collapsed count / expand control is drawn once for every parent (in
+      // either state) by the unified toggle-button pass below, so nothing to do
+      // here.
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
@@ -2487,82 +2499,116 @@ export function MindmapEditorView({
       layer.add(group);
     });
 
-    // Collapse handles. Each expanded parent's connectors fan out from a single
-    // junction (stub end); one handle there collapses the whole branch. An
-    // invisible circular hover zone reveals a round minus button, and clicking
-    // it toggles the branch. Drawn last so the handle sits above the connectors
-    // and (unlike the edges) stays interactive. The mirror action — expanding a
-    // collapsed branch — lives on the count badge (see the collapsed indicator).
+    // Toggle buttons. Every parent carries a single round control hugging its
+    // right edge, in the same place in both states: the hidden-child count while
+    // collapsed (always shown — click expands) or a "−" while expanded (revealed
+    // only on hover — click collapses). One control in one place, so toggling
+    // morphs the two states into each other (see the morph overlay effect).
+    // Drawn last so it sits above the connectors and stays interactive.
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      if (node.collapsed || node.children.length === 0) return;
+      // childCount counts direct children even while collapsed (when the flat
+      // `children` array is empty), so it's the true leaf test for both states.
+      if (node.childCount === 0) return; // leaves have nothing to toggle
+      const isRoot = index === 0;
       const parentWidth = textWidths.get(node.id) ?? node.width;
-      const junctionX = node.x + parentWidth + 40 + CONNECTOR_STUB;
-      const junctionY = node.y;
-      if (
-        junctionX < cullLeft ||
-        junctionX > cullRight ||
-        junctionY < cullTop ||
-        junctionY > cullBottom
-      ) {
+      const rectW = nodeBoxWidth(parentWidth, isRoot);
+      const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+      const cy = node.y;
+      if (cx < cullLeft || cx > cullRight || cy < cullTop || cy > cullBottom) {
         return;
       }
 
-      const handle = new Konva.Group();
-      // Transparent hit zone — invisible but still listening (Konva's hit graph
-      // ignores opacity), so hovering anywhere near the junction arms the button.
-      handle.add(
+      const collapsed = !!node.collapsed;
+      const btn = new Konva.Group();
+      // Invisible hover/hit zone — wider than the button and always listening
+      // (Konva's hit graph ignores opacity), so the hover-only minus is easy to
+      // aim at and stays clickable even while unrevealed.
+      btn.add(
         new Konva.Circle({
-          x: junctionX,
-          y: junctionY,
-          radius: COLLAPSE_HIT_R,
+          x: cx,
+          y: cy,
+          radius: TOGGLE_HIT_R,
           fill: "#000000",
           opacity: 0,
         })
       );
-      // The round minus button, hidden until the zone is hovered.
-      const btn = new Konva.Group({ opacity: 0, listening: false });
-      btn.add(
+      // The visible control. While expanded it's hidden until hovered; the
+      // hoveredToggleRef seed keeps it shown across the click-driven redraw.
+      const hovered = hoveredToggleRef.current === node.id;
+      const visual = new Konva.Group({
+        opacity: collapsed || hovered ? 1 : 0,
+        listening: false,
+      });
+      visual.add(
         new Konva.Circle({
-          x: junctionX,
-          y: junctionY,
-          radius: COLLAPSE_BTN_R,
-          fill: "#ffffff",
-          stroke: "#aeb7c2",
-          strokeWidth: 1.5,
+          x: cx,
+          y: cy,
+          radius: TOGGLE_R,
+          fill: collapsed ? "#000000" : "#ffffff",
+          stroke: collapsed ? undefined : "#aeb7c2",
+          strokeWidth: collapsed ? 0 : 1.5,
         })
       );
-      btn.add(
-        new Konva.Line({
-          points: [junctionX - 3.5, junctionY, junctionX + 3.5, junctionY],
-          stroke: "#6b7280",
-          strokeWidth: 1.5,
-        })
-      );
-      handle.add(btn);
+      if (collapsed) {
+        // Expand affordance: the hidden-child count in a filled pill.
+        visual.add(
+          new Konva.Text({
+            x: cx - TOGGLE_R,
+            y: cy - 6,
+            width: TOGGLE_R * 2,
+            align: "center",
+            text: String(node.childCount),
+            fontSize: 11,
+            fontFamily: "sans-serif",
+            fill: "#ffffff",
+            listening: false,
+          })
+        );
+      } else {
+        // Collapse affordance: a minus glyph in an outlined pill.
+        visual.add(
+          new Konva.Line({
+            points: [cx - 3.5, cy, cx + 3.5, cy],
+            stroke: "#6b7280",
+            strokeWidth: 1.5,
+            listening: false,
+          })
+        );
+      }
+      btn.add(visual);
 
-      handle.on("mouseenter", () => {
-        btn.opacity(1);
-        layer.batchDraw();
+      btn.on("mouseenter", () => {
+        hoveredToggleRef.current = node.id;
+        // Reveal the minus (the count is always visible, so leave it be).
+        if (!collapsed) {
+          visual.opacity(1);
+          layer.batchDraw();
+        }
         const st = konvaStageRef.current;
         if (st) st.container().style.cursor = "pointer";
       });
-      handle.on("mouseleave", () => {
-        btn.opacity(0);
-        layer.batchDraw();
+      btn.on("mouseleave", () => {
+        if (hoveredToggleRef.current === node.id) {
+          hoveredToggleRef.current = null;
+        }
+        if (!collapsed) {
+          visual.opacity(0);
+          layer.batchDraw();
+        }
         const st = konvaStageRef.current;
         if (st) st.container().style.cursor = "";
       });
-      handle.on("mousedown touchstart", (e: any) => {
+      btn.on("mousedown touchstart", (e: any) => {
         if (isNonPrimaryButton(e)) return;
         e.cancelBubble = true;
-        // The redraw destroys this handle, so its mouseleave never fires —
+        // The redraw destroys this button, so its mouseleave never fires —
         // clear the pointer cursor here to avoid it sticking.
         const st = konvaStageRef.current;
         if (st) st.container().style.cursor = "";
-        dispatch({ type: "toggleCollapse", nodeId: node.id }, "collapse");
+        toggleCollapseRef.current(node.id);
       });
-      layer.add(handle);
+      layer.add(btn);
     });
 
     const drawStart = import.meta.env.PROD ? 0 : performance.now();
@@ -2766,6 +2812,102 @@ export function MindmapEditorView({
     };
   }, [highlightIds, nodes]);
 
+  // --- Collapse / expand morph ---
+  // The unified toggle button (drawn on the main layer) flips between "−" and
+  // the child count the instant its node toggles. To bridge the jump, an overlay
+  // circle at the same spot tweens its fill white⇄black while the minus line and
+  // the count crossfade, then clears to reveal the freshly-drawn real button
+  // underneath. The overlay circle shares the button's radius, so it fully hides
+  // the real button below it for the whole tween — no double-draw peeking out.
+  // Runs on its own layer (see stage setup) so nothing tears it down mid-morph.
+  useEffect(() => {
+    if (!morphSignal) return;
+    const Konva = konvaRef.current;
+    const layer = morphLayerRef.current;
+    if (!Konva || !layer) return;
+
+    const flat = nodesRef.current;
+    const node = flat.find((n) => n.id === morphSignal.nodeId);
+    layer.destroyChildren();
+    if (!node || node.childCount === 0) {
+      layer.batchDraw();
+      return;
+    }
+
+    const isRoot = flat[0]?.id === node.id;
+    const rectW = nodeBoxWidth(node.width, isRoot);
+    const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+    const cy = node.y;
+    // toCollapsed: the button is BECOMING the count pill (collapse). Each shape
+    // starts in the pre-toggle look and tweens to the post-toggle one.
+    const toCollapsed = morphSignal.toCollapsed;
+
+    const circle = new Konva.Circle({
+      x: cx,
+      y: cy,
+      radius: TOGGLE_R,
+      stroke: "#aeb7c2",
+      fill: toCollapsed ? "#ffffff" : "#000000",
+      strokeWidth: toCollapsed ? 1.5 : 0,
+      listening: false,
+    });
+    const minus = new Konva.Line({
+      points: [cx - 3.5, cy, cx + 3.5, cy],
+      stroke: "#6b7280",
+      strokeWidth: 1.5,
+      opacity: toCollapsed ? 1 : 0,
+      listening: false,
+    });
+    const count = new Konva.Text({
+      x: cx - TOGGLE_R,
+      y: cy - 6,
+      width: TOGGLE_R * 2,
+      align: "center",
+      text: String(node.childCount),
+      fontSize: 11,
+      fontFamily: "sans-serif",
+      fill: "#ffffff",
+      opacity: toCollapsed ? 0 : 1,
+      listening: false,
+    });
+    layer.add(circle, minus, count);
+    layer.batchDraw();
+
+    const DUR = 0.2;
+    const tweens = [
+      new Konva.Tween({
+        node: circle,
+        duration: DUR,
+        fill: toCollapsed ? "#000000" : "#ffffff",
+        strokeWidth: toCollapsed ? 0 : 1.5,
+        easing: Konva.Easings.EaseInOut,
+      }),
+      new Konva.Tween({
+        node: minus,
+        duration: DUR,
+        opacity: toCollapsed ? 0 : 1,
+        easing: Konva.Easings.EaseInOut,
+      }),
+      new Konva.Tween({
+        node: count,
+        duration: DUR,
+        opacity: toCollapsed ? 1 : 0,
+        easing: Konva.Easings.EaseInOut,
+        onFinish: () => {
+          layer.destroyChildren();
+          layer.batchDraw();
+        },
+      }),
+    ];
+    tweens.forEach((t) => t.play());
+
+    return () => {
+      tweens.forEach((t) => t.destroy());
+      layer.destroyChildren();
+      layer.batchDraw();
+    };
+  }, [morphSignal]);
+
   // --- Test API (non-production): imperative hooks for browser e2e tests ---
   // Exposes the live model plus a "node select" helper that returns the screen
   // point at the middle of a node's text, so tests can issue a real click that
@@ -2796,15 +2938,16 @@ export function MindmapEditorView({
         const worldY = node.y + (node.card?.titleOffsetY ?? 0);
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
-      getConnectorHandlePoint: (id: string) => {
-        const node = nodesRef.current.find((n) => n.id === id);
+      getToggleButtonPoint: (id: string) => {
+        const flat = nodesRef.current;
+        const node = flat.find((n) => n.id === id);
         const stage = konvaStageRef.current;
         if (!node || !stage) return null;
-        if (node.collapsed || node.children.length === 0) return null;
+        if (node.childCount === 0) return null;
         const scale = stage.scaleX();
-        const data = lineDataRef.current.get(id);
-        const parentWidth = data ? lineDataWidth(data) || 40 : 40;
-        const worldX = node.x + parentWidth + 40 + CONNECTOR_STUB;
+        const isRoot = flat[0]?.id === id;
+        const rectW = nodeBoxWidth(node.width, isRoot);
+        const worldX = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
