@@ -8,6 +8,7 @@
  */
 
 import type { MindMapModel } from "../domain/model";
+import { verticalMove } from "../lib/textGeometry";
 
 export interface OutlineRow {
   node: MindMapModel;
@@ -60,30 +61,8 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
  * Column-preserving caret move across the hard newlines within a single node's
  * text (mobile textareas keep multi-line nodes). Returns the new absolute
  * offset, or `null` when there is no line in `dir` — the caller then crosses to
- * the previous / next node. Mirrors the canvas editor's `verticalMove` (both
- * split on "\n"), so line navigation behaves the same in either layout.
+ * the previous / next node. Re-exports the canvas editor's `verticalMove` from
+ * lib/textGeometry so both layouts navigate lines with the exact same
+ * algorithm instead of two copies that could silently drift apart.
  */
-export function verticalMoveInText(
-  text: string,
-  pos: number,
-  dir: -1 | 1
-): number | null {
-  const lines = text.split("\n");
-  const starts: number[] = [];
-  let acc = 0;
-  for (let i = 0; i < lines.length; i++) {
-    starts[i] = acc;
-    acc += lines[i].length + 1; // +1 for the consumed "\n"
-  }
-  let line = 0;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (pos >= starts[i]) {
-      line = i;
-      break;
-    }
-  }
-  const col = pos - starts[line];
-  const target = line + dir;
-  if (target < 0 || target >= lines.length) return null;
-  return starts[target] + Math.min(col, lines[target].length);
-}
+export const verticalMoveInText = verticalMove;
