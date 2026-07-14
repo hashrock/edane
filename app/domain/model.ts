@@ -13,17 +13,46 @@
 export type NodeType = "text" | "image" | "link" | "markdown" | "object";
 
 /**
+ * Node kind as stored in JSON. `"text"` is represented by absence so that
+ * the common case adds no bytes. Use `NodeType` when you need the resolved kind.
+ */
+type StoredNodeType = Exclude<NodeType, "text">;
+
+/**
+ * `satisfies Record<StoredNodeType, true>` makes this exhaustive both ways:
+ * adding a `NodeType` member refuses to compile here until it's declared,
+ * which is what keeps {@link isStoredNodeType} (used to validate persisted
+ * JSON) from silently dropping a newly-added type instead of erroring loudly
+ * at the type level.
+ */
+const STORED_NODE_TYPE_SET = {
+  image: true,
+  link: true,
+  markdown: true,
+  object: true,
+} as const satisfies Record<StoredNodeType, true>;
+
+export function isStoredNodeType(value: unknown): value is StoredNodeType {
+  return typeof value === "string" && value in STORED_NODE_TYPE_SET;
+}
+
+/**
  * Display format for a numeric field-row value inside an object card. This is
  * Excel's value/display split: the node's `text` keeps the raw value, only the
  * card rendering changes.
  */
 export type NumFormat = "comma" | "currency" | "percent";
 
-/**
- * Node kind as stored in JSON. `"text"` is represented by absence so that
- * the common case adds no bytes. Use `NodeType` when you need the resolved kind.
- */
-type StoredNodeType = Exclude<NodeType, "text">;
+/** Same exhaustiveness trick as {@link STORED_NODE_TYPE_SET}, for NumFormat. */
+const NUM_FORMAT_SET = {
+  comma: true,
+  currency: true,
+  percent: true,
+} as const satisfies Record<NumFormat, true>;
+
+export function isNumFormat(value: unknown): value is NumFormat {
+  return typeof value === "string" && value in NUM_FORMAT_SET;
+}
 
 /** Tree node model (stored as JSON) */
 export interface MindMapModel {

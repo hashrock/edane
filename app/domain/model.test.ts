@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "./model";
+import type { MindMapModel, NodeType, NumFormat } from "./model";
 import {
   detachBranch,
   cloneWithNewIds,
@@ -22,6 +22,8 @@ import {
   moveBranch,
   mergeIntoPredecessor,
   mergeSuccessorInto,
+  isStoredNodeType,
+  isNumFormat,
 } from "./model";
 
 /** Build a small fixed tree:
@@ -614,5 +616,30 @@ describe("null-node branch coverage for model mutations", () => {
     const model = sampleModel();
     const result = setLinkMeta(model, "nonexistent", { linkTitle: "x" });
     expect(JSON.stringify(result)).toBe(JSON.stringify(model));
+  });
+});
+
+describe("isStoredNodeType / isNumFormat", () => {
+  // Every non-"text" NodeType member, spelled out so this test fails to
+  // typecheck (not just fails at runtime) if a member is ever renamed without
+  // updating the list below.
+  const storedTypes: Exclude<NodeType, "text">[] = [
+    "image",
+    "link",
+    "markdown",
+    "object",
+  ];
+  const numFormats: NumFormat[] = ["comma", "currency", "percent"];
+
+  it("accepts every declared StoredNodeType/NumFormat literal", () => {
+    for (const t of storedTypes) expect(isStoredNodeType(t)).toBe(true);
+    for (const f of numFormats) expect(isNumFormat(f)).toBe(true);
+  });
+
+  it("rejects text, unknown strings and non-strings", () => {
+    for (const bad of ["text", "bogus", 1, null, undefined, {}]) {
+      expect(isStoredNodeType(bad)).toBe(false);
+      expect(isNumFormat(bad)).toBe(false);
+    }
   });
 });

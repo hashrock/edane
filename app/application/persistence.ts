@@ -4,7 +4,7 @@
  */
 
 import type { MindMapModel } from "../domain/model";
-import { generateId } from "../domain/model";
+import { generateId, isNumFormat, isStoredNodeType } from "../domain/model";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
 export function textToModel(title: string, content: string): MindMapModel {
@@ -80,19 +80,12 @@ export function normalizeTree(
 
   // Preserve the known optional fields, guarding each by type.
   if (v.collapsed === true) node.collapsed = true;
-  if (
-    v.type === "image" ||
-    v.type === "link" ||
-    v.type === "markdown" ||
-    v.type === "object"
-  )
-    node.type = v.type;
+  if (isStoredNodeType(v.type)) node.type = v.type;
   if (typeof v.fontSize === "number") node.fontSize = v.fontSize;
   if (v.bold === true) node.bold = true;
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
-  if (v.numFormat === "comma" || v.numFormat === "currency" || v.numFormat === "percent")
-    node.numFormat = v.numFormat;
+  if (isNumFormat(v.numFormat)) node.numFormat = v.numFormat;
   if (
     typeof v.decimals === "number" &&
     Number.isInteger(v.decimals) &&
