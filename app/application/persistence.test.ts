@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapModel, NodeType } from "../domain/model";
 import {
   modelToText,
   textToModel,
@@ -7,6 +7,22 @@ import {
   serializeModel,
   createDefaultModel,
 } from "./persistence";
+
+/**
+ * Every non-default NodeType. `satisfies` only checks each element is a
+ * valid NodeType (not that the list is complete) — the real exhaustiveness
+ * guard is model.ts's `isStoredNodeType` (backed by `STORED_NODE_TYPE_SET`),
+ * which normalizeTree calls and which fails to typecheck if a NodeType is
+ * added without being declared there. This list is an end-to-end regression
+ * check that the full parseContent → normalizeTree pipeline actually
+ * preserves every currently-declared type, not just the predicate itself.
+ */
+const STORED_NODE_TYPES: readonly Exclude<NodeType, "text">[] = [
+  "image",
+  "link",
+  "markdown",
+  "object",
+] satisfies NodeType[];
 
 /** Strip IDs so we can compare tree structure and text only */
 function stripIds(model: MindMapModel): unknown {
@@ -277,6 +293,21 @@ describe("parseContent", () => {
     expect(c.collapsed).toBe(true);
     expect(c.linkTitle).toBe("Example");
     expect(c.favicon).toBe("https://example.com/f.ico");
+  });
+
+  it("preserves every declared NodeType through normalization", () => {
+    // Guards the round-trip invariant that OPTIONAL_NODE_TYPES protects at
+    // the type level: every non-default NodeType must survive normalizeTree
+    // unchanged, not silently fall back to "text".
+    for (const type of STORED_NODE_TYPES) {
+      const json = JSON.stringify({
+        id: "r",
+        text: "Root",
+        children: [{ id: "c", text: "v", type, children: [] }],
+      });
+      const model = parseContent(json, "ignored");
+      expect(model.children[0].type).toBe(type);
+    }
   });
 
   it("drops malformed children instead of accepting a non-tree shape", () => {
