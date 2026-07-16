@@ -8,6 +8,7 @@ import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken, hashToken } from "./utils/apiToken";
 import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
+import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import type { Env } from "./global.d";
 
 const DEV_USER = {
@@ -28,18 +29,11 @@ app.use("*", async (c, next) => {
     // Dev-only: preview the logged-out landing page while auth is bypassed.
     // `?guest=1` flips into guest mode (persisted in a cookie so the LP's
     // embedded /guest iframe is guest too); `?guest=0` flips back to Dev User.
-    const cookie = c.req.header("Cookie") || "";
-    let guest = /(?:^|;\s*)dev_guest=1(?:;|$)/.test(cookie);
-    const q = new URL(c.req.url).searchParams.get("guest");
-    if (q !== null) {
-      guest = q !== "0";
-      c.header(
-        "Set-Cookie",
-        guest
-          ? "dev_guest=1; Path=/; SameSite=Lax"
-          : "dev_guest=; Path=/; Max-Age=0; SameSite=Lax"
-      );
-    }
+    const { guest, setCookieHeader } = resolveDevGuestPreference(
+      c.req.header("Cookie") || "",
+      new URL(c.req.url).searchParams.get("guest")
+    );
+    if (setCookieHeader) c.header("Set-Cookie", setCookieHeader);
     if (guest) {
       c.set("user", null);
       return next();
