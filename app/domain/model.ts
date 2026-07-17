@@ -116,6 +116,26 @@ export function findParentAndIndex(
 }
 
 /**
+ * The tree-visibility rule shared by keyboard navigation ({@link getFlatOrder}),
+ * canvas layout (`flattenToNodes` in application/nodeUtils.ts) and the outline
+ * row list (`outlineRows` in application/outline.ts): a collapsed node hides its
+ * descendants entirely; an "object" node's direct children are visible rows but
+ * their own subtrees stay hidden inside the card. Defining the rule once here
+ * keeps the three traversals — which independently need it for three different
+ * output shapes — from drifting apart.
+ */
+export type VisibleChildren =
+  | { kind: "none" }
+  | { kind: "leaves"; children: MindMapModel[] }
+  | { kind: "recurse"; children: MindMapModel[] };
+
+export function visibleChildrenOf(node: MindMapModel): VisibleChildren {
+  if (node.collapsed) return { kind: "none" };
+  if (node.type === "object") return { kind: "leaves", children: node.children };
+  return { kind: "recurse", children: node.children };
+}
+
+/**
  * DFS order of node IDs (navigation order). Descendants of a collapsed node are
  * skipped so keyboard navigation never lands on a hidden node. An object node's
  * direct children are its visible card rows, but their own subtrees are hidden
@@ -125,12 +145,13 @@ export function getFlatOrder(model: MindMapModel): string[] {
   const result: string[] = [];
   function walk(node: MindMapModel) {
     result.push(node.id);
-    if (node.collapsed) return;
-    if (node.type === "object") {
-      for (const child of node.children) result.push(child.id);
+    const vis = visibleChildrenOf(node);
+    if (vis.kind === "none") return;
+    if (vis.kind === "leaves") {
+      for (const child of vis.children) result.push(child.id);
       return;
     }
-    for (const child of node.children) walk(child);
+    for (const child of vis.children) walk(child);
   }
   walk(model);
   return result;

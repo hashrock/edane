@@ -6,6 +6,7 @@ import {
   findNode,
   getFlatOrder,
   getNodeDepths,
+  visibleChildrenOf,
   addSiblingAfter,
   splitNode,
   updateNodeText,
@@ -142,6 +143,33 @@ describe("cloneWithNewIds", () => {
     const before = JSON.stringify(node);
     cloneWithNewIds(node);
     expect(JSON.stringify(node)).toBe(before);
+  });
+});
+
+describe("visibleChildrenOf", () => {
+  it("hides all children of a collapsed node, regardless of type", () => {
+    const collapsedText: MindMapModel = { id: "c1", text: "C", collapsed: true, children: [{ id: "x", text: "X", children: [] }] };
+    const collapsedObject: MindMapModel = {
+      id: "c2",
+      text: "C",
+      type: "object",
+      collapsed: true,
+      children: [{ id: "y", text: "Y", children: [] }],
+    };
+    expect(visibleChildrenOf(collapsedText)).toEqual({ kind: "none" });
+    expect(visibleChildrenOf(collapsedObject)).toEqual({ kind: "none" });
+  });
+
+  it("exposes an object node's direct children as leaves, not recursed into", () => {
+    const grandchild: MindMapModel = { id: "gc", text: "GC", children: [] };
+    const child: MindMapModel = { id: "c", text: "C", children: [grandchild] };
+    const object: MindMapModel = { id: "o", text: "O", type: "object", children: [child] };
+    expect(visibleChildrenOf(object)).toEqual({ kind: "leaves", children: [child] });
+  });
+
+  it("recurses normally into a non-collapsed, non-object node's children", () => {
+    const model = sampleModel();
+    expect(visibleChildrenOf(model)).toEqual({ kind: "recurse", children: model.children });
   });
 });
 
