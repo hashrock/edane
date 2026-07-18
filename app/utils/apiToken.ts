@@ -3,15 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { apiTokens, users } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { SessionUser } from "../user";
-
-/** SHA-256 hash of a token string, returned as hex. */
-export async function hashToken(token: string): Promise<string> {
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(token)
-  );
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+import { hashToken } from "./tokenHash";
 
 /** Look up a user by Bearer token. Returns null if invalid. */
 export async function getUserByToken(
