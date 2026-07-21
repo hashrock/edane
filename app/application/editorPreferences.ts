@@ -44,6 +44,34 @@ export const DEFAULT_PREFERENCES: EditorPreferences = {
 export const PREFERENCES_KEY = "edane:editor-preferences";
 
 /**
+ * `satisfies Record<...>` makes this exhaustive both ways: adding a member to
+ * `tabBehavior` refuses to compile here until it's declared, which is what
+ * keeps {@link isTabBehavior} (used to validate localStorage JSON) from
+ * silently dropping a newly-added value instead of erroring loudly at the
+ * type level (same trick as `STORED_NODE_TYPE_SET` in domain/model.ts).
+ */
+const TAB_BEHAVIOR_SET = {
+  indent: true,
+  "insert-child": true,
+} as const satisfies Record<EditorPreferences["tabBehavior"], true>;
+
+function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"] {
+  return typeof value === "string" && value in TAB_BEHAVIOR_SET;
+}
+
+/** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `arrowBehavior`. */
+const ARROW_BEHAVIOR_SET = {
+  collapse: true,
+  navigate: true,
+} as const satisfies Record<EditorPreferences["arrowBehavior"], true>;
+
+function isArrowBehavior(
+  value: unknown
+): value is EditorPreferences["arrowBehavior"] {
+  return typeof value === "string" && value in ARROW_BEHAVIOR_SET;
+}
+
+/**
  * Read preferences from localStorage. Unknown fields are dropped and invalid
  * or missing values fall back to the defaults, so a stale or hand-edited
  * entry can never wedge the editor. Safe without a DOM (SSR) — returns the
@@ -59,14 +87,12 @@ export function loadPreferences(): EditorPreferences {
         typeof parsed.selectionMode === "boolean"
           ? parsed.selectionMode
           : DEFAULT_PREFERENCES.selectionMode,
-      tabBehavior:
-        parsed.tabBehavior === "indent" || parsed.tabBehavior === "insert-child"
-          ? parsed.tabBehavior
-          : DEFAULT_PREFERENCES.tabBehavior,
-      arrowBehavior:
-        parsed.arrowBehavior === "collapse" || parsed.arrowBehavior === "navigate"
-          ? parsed.arrowBehavior
-          : DEFAULT_PREFERENCES.arrowBehavior,
+      tabBehavior: isTabBehavior(parsed.tabBehavior)
+        ? parsed.tabBehavior
+        : DEFAULT_PREFERENCES.tabBehavior,
+      arrowBehavior: isArrowBehavior(parsed.arrowBehavior)
+        ? parsed.arrowBehavior
+        : DEFAULT_PREFERENCES.arrowBehavior,
     };
   } catch {
     return { ...DEFAULT_PREFERENCES };
