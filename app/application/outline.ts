@@ -7,7 +7,7 @@
  * and the logic is unit-testable without a DOM.
  */
 
-import type { MindMapModel } from "../domain/model";
+import { type MindMapModel, visibleChildrenOf } from "../domain/model";
 import { verticalMove } from "../lib/textGeometry";
 
 export interface OutlineRow {
@@ -35,13 +35,13 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
       hasChildren: node.children.length > 0,
       collapsed: !!node.collapsed,
     });
-    if (node.collapsed) return;
-    if (node.type === "object") {
-      // Mirror getFlatOrder: an object node's children are its visible card
-      // rows, but their own subtrees stay hidden — the outline must show the
-      // exact set of nodes the caret can reach. Rows with hidden children
-      // report `collapsed` so the count badge renders.
-      for (const c of node.children) {
+    const vis = visibleChildrenOf(node);
+    if (vis.kind === "none") return;
+    if (vis.kind === "leaves") {
+      // Rows with hidden children report `collapsed` so the count badge
+      // renders — see visibleChildrenOf for why this set of nodes matches
+      // what the caret can reach.
+      for (const c of vis.children) {
         rows.push({
           node: c,
           depth: depth + 1,
@@ -51,7 +51,7 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
       }
       return;
     }
-    for (const c of node.children) walk(c, depth + 1);
+    for (const c of vis.children) walk(c, depth + 1);
   }
   walk(model, 0);
   return rows;

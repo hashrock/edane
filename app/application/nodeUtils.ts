@@ -2,7 +2,7 @@
  * Application layer: bridge between domain model and rendering nodes.
  */
 
-import type { MindMapModel, NodeType } from "../domain/model";
+import { type MindMapModel, type NodeType, visibleChildrenOf } from "../domain/model";
 import { measureNodeBox, NODE_PADDING, nodeBoxWidth, nodeBoxHeight } from "../lib/measureText";
 import { markdownTitle } from "./markdownCard";
 import { objectCardGeom } from "./objectCard";
@@ -160,8 +160,9 @@ export function flattenToNodes(
   function walk(m: MindMapModel) {
     const collapsed = !!m.collapsed;
     const type: NodeType = m.type ?? "text";
+    const vis = visibleChildrenOf(m);
 
-    if (type === "object" && !collapsed) {
+    if (vis.kind === "leaves") {
       // Expanded object node: one card node (a layout LEAF — its flat
       // `children` stay empty so the tree layout doesn't position the rows)
       // plus one row node per direct child. Row world positions are derived
@@ -251,8 +252,8 @@ export function flattenToNodes(
       linkTitle: m.linkTitle,
       favicon: m.favicon,
     });
-    if (collapsed) return;
-    for (const child of m.children) walk(child);
+    if (vis.kind === "none") return;
+    for (const child of vis.children) walk(child);
   }
   walk(model);
   return nodes;
