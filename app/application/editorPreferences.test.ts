@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { EditorPreferences } from "./editorPreferences";
 import {
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
@@ -58,5 +59,32 @@ describe("loadPreferences", () => {
   it("falls back to the defaults on unparsable JSON", () => {
     localStorage.setItem(PREFERENCES_KEY, "{nope");
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it("accepts every declared tabBehavior/arrowBehavior literal", () => {
+    // Spelled out so this test fails to typecheck (not just at runtime) if a
+    // member is ever renamed without updating the list below.
+    const tabBehaviors: EditorPreferences["tabBehavior"][] = [
+      "indent",
+      "insert-child",
+    ];
+    const arrowBehaviors: EditorPreferences["arrowBehavior"][] = [
+      "collapse",
+      "navigate",
+    ];
+    for (const tabBehavior of tabBehaviors) {
+      localStorage.setItem(
+        PREFERENCES_KEY,
+        JSON.stringify({ ...DEFAULT_PREFERENCES, tabBehavior })
+      );
+      expect(loadPreferences().tabBehavior).toBe(tabBehavior);
+    }
+    for (const arrowBehavior of arrowBehaviors) {
+      localStorage.setItem(
+        PREFERENCES_KEY,
+        JSON.stringify({ ...DEFAULT_PREFERENCES, arrowBehavior })
+      );
+      expect(loadPreferences().arrowBehavior).toBe(arrowBehavior);
+    }
   });
 });
