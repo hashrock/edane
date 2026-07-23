@@ -10,6 +10,7 @@ import { getUserByToken } from "./utils/apiToken";
 import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
+import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import type { Env } from "./global.d";
 
 const DEV_USER = {
@@ -135,21 +136,29 @@ app.put("/api/notes/:id", async (c) => {
     isPublic?: boolean;
   }>();
 
-  const willBePublic = body.isPublic ?? note.isPublic;
+  const action = resolveNoteContentAction({
+    currentIsPublic: note.isPublic,
+    currentContent: note.content,
+    requestedIsPublic: body.isPublic,
+    requestedContent: body.content,
+  });
 
-  let contentToStore = body.content;
-  if (contentToStore !== undefined && !willBePublic) {
-    contentToStore = await encrypt(contentToStore, c.env.ENCRYPTION_KEY);
-  }
-  // public -> private: re-encrypt existing content
-  if (body.isPublic === false && note.isPublic && contentToStore === undefined) {
-    contentToStore = await encrypt(note.content, c.env.ENCRYPTION_KEY);
-  }
-  // private -> public: decrypt existing content
-  if (body.isPublic === true && !note.isPublic && contentToStore === undefined) {
-    if (isEncrypted(note.content)) {
-      contentToStore = await decrypt(note.content, c.env.ENCRYPTION_KEY);
-    }
+  let contentToStore: string | undefined;
+  switch (action.kind) {
+    case "store-plain":
+      contentToStore = action.content;
+      break;
+    case "encrypt":
+      contentToStore = await encrypt(action.content, c.env.ENCRYPTION_KEY);
+      break;
+    case "decrypt-if-encrypted":
+      contentToStore = isEncrypted(action.content)
+        ? await decrypt(action.content, c.env.ENCRYPTION_KEY)
+        : undefined;
+      break;
+    case "unchanged":
+      contentToStore = undefined;
+      break;
   }
 
   await db
