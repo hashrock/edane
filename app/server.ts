@@ -11,6 +11,7 @@ import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
+import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
 import type { Env } from "./global.d";
 
 const DEV_USER = {
@@ -19,9 +20,6 @@ const DEV_USER = {
   name: "Dev User",
   avatarUrl: "",
 };
-
-// Per-user image storage quota (bytes).
-const STORAGE_LIMIT = 10 * 1024 * 1024; // 10MB
 
 const app = new Hono<Env>();
 
@@ -255,7 +253,7 @@ app.get("/api/images", async (c) => {
       createdAt: r.createdAt,
     })),
     used,
-    limit: STORAGE_LIMIT,
+    limit: IMAGE_STORAGE_LIMIT_BYTES,
   });
 });
 
@@ -278,9 +276,9 @@ app.post("/api/images", async (c) => {
     .from(images)
     .where(eq(images.userId, user.id));
   const used = existing.reduce((sum, r) => sum + r.size, 0);
-  if (used + file.size > STORAGE_LIMIT) {
+  if (used + file.size > IMAGE_STORAGE_LIMIT_BYTES) {
     return c.json(
-      { error: "Storage limit exceeded", used, limit: STORAGE_LIMIT, fileSize: file.size },
+      { error: "Storage limit exceeded", used, limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size },
       413
     );
   }

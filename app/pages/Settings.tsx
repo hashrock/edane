@@ -1,6 +1,7 @@
 import { Head, Link } from "@inertiajs/react";
 import { useEffect, useState, useCallback } from "react";
 import type { SessionUser } from "../user";
+import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 
 type User = SessionUser | null;
 
@@ -28,7 +29,7 @@ function formatBytes(bytes: number): string {
 export default function Settings({ user }: { user: User }) {
   const [images, setImages] = useState<ImageMeta[]>([]);
   const [used, setUsed] = useState(0);
-  const [limit, setLimit] = useState(10 * 1024 * 1024);
+  const [limit, setLimit] = useState(IMAGE_STORAGE_LIMIT_BYTES);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
