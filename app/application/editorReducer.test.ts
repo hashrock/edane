@@ -1090,6 +1090,35 @@ describe("setNodeContent", () => {
       })
     ).toBe(s);
   });
+
+  it("refocuses onto the changed node when a nodeType change hides the active node", () => {
+    // "hidden" is a GRANDCHILD of "a" (child of its row "a1"); converting "a"
+    // to an object card hides grandchildren (only the direct child rows stay
+    // visible), so the previously-active "hidden" would otherwise dangle
+    // outside the flat order.
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          children: [
+            { id: "a1", text: "a1: v", children: [{ id: "hidden", text: "H", children: [] }] },
+          ],
+        },
+      ],
+    };
+    const s = stateAt(model, "hidden");
+    const next = editorReducer(s, {
+      type: "setNodeContent",
+      nodeId: "a",
+      text: "A",
+      nodeType: "object",
+    });
+    expect(next.view.activeNodeId).toBe("a");
+    expect(getFlatOrder(next.document.model)).toContain(next.view.activeNodeId);
+  });
 });
 
 describe("setNodeStyle", () => {

@@ -1,11 +1,17 @@
 /**
  * Invariant test: "exactly ONE node is always active" (see the module doc
  * comment at the top of editorReducer.ts) means `view.activeNodeId`, whenever
- * non-null, must resolve to a node that actually exists in the resulting
- * `document.model`. Today this is only enforced ad hoc, one branch at a time
- * (the `!currentNode`/`!node` guards covered by editorReducer.coverage.test.ts)
- * plus, for undo/redo specifically, by reconcileView — nothing checks it holds
- * for every EditorAction variant dispatched through the normal path.
+ * non-null, must resolve to a node that actually exists AND is visible —
+ * present in {@link getFlatOrder}'s result — in the resulting
+ * `document.model`. Existence alone isn't enough: a node can exist while
+ * hidden inside a collapsed ancestor or inside an "object" card's hidden
+ * grandchild region, and several branches (toggleCollapse, setNodeType,
+ * setNodeContent, pasteBranch) go out of their way to refocus rather than
+ * leave activeNodeId pointing at an invisible node. Today that's only
+ * enforced ad hoc, one branch at a time (the `!currentNode`/`!node` guards
+ * covered by editorReducer.coverage.test.ts) plus, for undo/redo
+ * specifically, by reconcileView — nothing checks it holds for every
+ * EditorAction variant dispatched through the normal path.
  *
  * The `satisfies Record<EditorAction["type"], EditorAction>` table below turns
  * that gap into a compile error: adding a new EditorAction variant without
@@ -15,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
-import { findNode } from "../domain/model";
+import { findNode, getFlatOrder } from "../domain/model";
 import {
   editorReducer,
   type EditorAction,
@@ -116,9 +122,9 @@ const ACTIONS = {
   replace: { type: "replace", state: baseState() },
 } satisfies Record<EditorAction["type"], EditorAction>;
 
-describe("invariant: view.activeNodeId always resolves in the resulting document", () => {
+describe("invariant: view.activeNodeId always resolves to a visible node", () => {
   for (const [name, action] of Object.entries(ACTIONS)) {
-    it(`${name} leaves activeNodeId resolvable (or null)`, () => {
+    it(`${name} leaves activeNodeId resolvable and visible (or null)`, () => {
       const clipboard: MindMapModel | null =
         action.type === "pasteBranch"
           ? { id: "clip", text: "Clip", children: [] }
@@ -128,6 +134,7 @@ describe("invariant: view.activeNodeId always resolves in the resulting document
 
       if (next.view.activeNodeId !== null) {
         expect(findNode(next.document.model, next.view.activeNodeId)).not.toBeNull();
+        expect(getFlatOrder(next.document.model)).toContain(next.view.activeNodeId);
       }
     });
   }
