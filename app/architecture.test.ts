@@ -6,6 +6,10 @@
  * layer built on top of it. A violation here is a real regression (e.g. lib
  * reaching into application) even though nothing throws at runtime; nothing
  * else catches that shape of bug.
+ *
+ * The layering check only resolves relative specifiers, so it can't see a
+ * bare `from "react"` — a separate check below guards domain/lib/application
+ * against that blind spot specifically.
  */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
@@ -28,6 +32,13 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
 };
 
 const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));
+
+// domain/lib/application must stay usable without a UI framework (headless
+// tests, the outline vs. canvas layouts sharing one keymap, ...). The
+// relative-import check below can't see this: a bare `from "react"` never
+// resolves to a path, so it silently bypasses the layering check entirely.
+const NO_UI_FRAMEWORK_LAYERS = new Set(["domain", "lib", "application"]);
+const UI_FRAMEWORK_SPECIFIERS = /^(react|react-dom)(\/|$)/;
 
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -75,6 +86,29 @@ describe("dependency direction", () => {
         violations.push(
           `${relative(APP_ROOT, file)} (${fromBucket}) imports ${relative(APP_ROOT, target)} (${toBucket}); ` +
             `${fromBucket} may only import [${rule.join(", ") || "nothing"}]`
+        );
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps domain/lib/application free of UI-framework imports", () => {
+    const violations: string[] = [];
+
+    for (const file of listSourceFiles(APP_ROOT)) {
+      const fromBucket = bucketOf(file);
+      if (!NO_UI_FRAMEWORK_LAYERS.has(fromBucket)) continue;
+
+      const content = readFileSync(file, "utf-8");
+      const specs = [...content.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+
+      for (const spec of specs) {
+        if (spec.startsWith(".")) continue; // resolved & checked above
+        if (!UI_FRAMEWORK_SPECIFIERS.test(spec)) continue;
+        violations.push(
+          `${relative(APP_ROOT, file)} (${fromBucket}) imports "${spec}"; ` +
+            `${fromBucket} must stay usable without a UI framework`
         );
       }
     }
