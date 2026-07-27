@@ -524,7 +524,16 @@ function documentReducer(
       if (action.nodeType) {
         newModel = setNodeType(newModel, action.nodeId, action.nodeType);
       }
-      return { document: { ...document, model: newModel } };
+      const newDocument = { ...document, model: newModel };
+      // A nodeType change (e.g. to "object") can hide the active node the same
+      // way toggleCollapse can — its ancestor's grandchildren drop out of the
+      // flat order. Refocus onto the node whose content just changed, mirroring
+      // setNodeType, so "activeNodeId is always visible" holds regardless of
+      // which nodeType a future caller passes here.
+      if (activeNodeId && !getFlatOrder(newModel).includes(activeNodeId)) {
+        return { document: newDocument, focusId: action.nodeId };
+      }
+      return { document: newDocument };
     }
 
     case "setNodeStyle": {
@@ -874,6 +883,12 @@ function viewReducer(
     }
 
     case "setNodeContent": {
+      if (focusId !== undefined) {
+        // documentReducer only supplies focusId here when a nodeType change
+        // hid the previously-active node (e.g. an ancestor turned "object");
+        // land on it like the generic focus-handoff group above.
+        return focusView(view, model, focusId, focusCursorPos, focusSelectionEnd);
+      }
       if (view.activeNodeId !== action.nodeId) return view;
       // Mirrors documentReducer's own node-exists guard.
       if (nextDocument.model === prevDocument.model) return view;
