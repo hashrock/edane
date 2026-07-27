@@ -25,7 +25,6 @@
  * shortcut-help overlay truthful — it only ever lists bindings that can fire.
  */
 
-import type { KeyboardEvent } from "react";
 import type { EditorAction, EditorState, UndoType } from "./editorReducer";
 import type { MindMapModel } from "../domain/model";
 import { findNode, findParentAndIndex } from "../domain/model";
@@ -37,8 +36,19 @@ import {
 export type KeyMode = "selection" | "editing";
 export type KeyResult = "handled" | "pass";
 
+/** The key facts the keymap needs; React's synthetic KeyboardEvent and a
+ *  native KeyboardEvent both satisfy it (mirrors AuxKeyEvent in editSurface.ts). */
+export interface KeymapKeyEvent {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  preventDefault: () => void;
+}
+
 export interface KeyContext {
-  e: KeyboardEvent<HTMLTextAreaElement>;
+  e: KeymapKeyEvent;
   state: EditorState;
   /** The active node resolved from the current model (null if none). */
   node: MindMapModel | null;
@@ -67,12 +77,12 @@ export interface KeyBinding {
   /** Key combo shown in the help overlay. */
   keys: string;
   when: "global" | "selection" | "editing" | "both";
-  match: (e: KeyboardEvent) => boolean;
+  match: (e: KeymapKeyEvent) => boolean;
   run: (ctx: KeyContext) => KeyResult;
 }
 
 // Treat Cmd (mac) and Ctrl (win/linux) as the same "primary" modifier.
-const mod = (e: KeyboardEvent) => e.metaKey || e.ctrlKey;
+const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
 
 export function buildKeymap(
   deps: KeymapDeps,
