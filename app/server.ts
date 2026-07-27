@@ -11,6 +11,7 @@ import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
+import { assertNever } from "./utils/assertNever";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
 import type { Env } from "./global.d";
 
@@ -157,6 +158,8 @@ app.put("/api/notes/:id", async (c) => {
     case "unchanged":
       contentToStore = undefined;
       break;
+    default:
+      assertNever(action);
   }
 
   await db
