@@ -197,7 +197,18 @@ export function addSiblingAfter(
   return cloned;
 }
 
-/** Set a node's kind. Returns a new model. `text` is stored as absent. */
+/**
+ * Set a node's kind. Returns a new model. `text` is stored as absent.
+ *
+ * Refuses a change to "object" that would make an object node the direct
+ * parent or direct child of another object node: a card renders its direct
+ * children as key/value rows (objectCardGeom in application/objectCard.ts
+ * only special-cases image/link/markdown, so a nested object's own subtree
+ * would be mangled into a row instead of shown as a card). Mirrors the
+ * drag-and-drop guard (isCardIntoCard in application/dragDrop.ts), which
+ * blocks the same adjacency when moving a branch instead of retyping a node.
+ * On a blocked change the model is returned unchanged.
+ */
 export function setNodeType(
   model: MindMapModel,
   nodeId: string,
@@ -205,7 +216,14 @@ export function setNodeType(
 ): MindMapModel {
   const cloned = cloneModel(model);
   const node = findNode(cloned, nodeId);
-  if (node) node.type = type === "text" ? undefined : type;
+  if (!node) return cloned;
+  if (type === "object") {
+    const parentEntry = findParentAndIndex(cloned, nodeId);
+    const parentIsObject = parentEntry?.parent.type === "object";
+    const hasObjectChild = node.children.some((c) => c.type === "object");
+    if (parentIsObject || hasObjectChild) return cloned;
+  }
+  node.type = type === "text" ? undefined : type;
   return cloned;
 }
 
