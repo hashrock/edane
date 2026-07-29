@@ -101,7 +101,14 @@ export interface EditingNode {
  *    image/link node grows to fit the raw URL while a caret is active.
  *  - image → its (scaled) image display size.
  *  - link  → its fetched title (falling back to the URL) plus favicon room.
- *  - text  → its text.
+ *  - text / collapsed object → its text.
+ *
+ * The kind switch below is exhaustive (a `never`-typed default branch) so
+ * that adding a `NodeType` member — same trick as `STORED_NODE_TYPE_SET` in
+ * domain/model.ts — fails to compile here until this function decides how the
+ * new kind sizes, instead of silently falling through to plain-text
+ * measurement. (Can't reuse `utils/assertNever` here: the application layer
+ * may only import domain/lib, see architecture.test.ts.)
  */
 export function measureModelNode(
   m: MindMapModel,
@@ -121,27 +128,38 @@ export function measureModelNode(
     const box = measureNodeBox(editingText, { fontSize: m.fontSize, bold: m.bold });
     return { width: box.width, height: box.height };
   }
-  if ((m.type ?? "text") === "image") {
-    const d = imageDisplaySize(m.text);
-    return { width: d.w, height: d.h + IMAGE_V_PAD };
+  const type: NodeType = m.type ?? "text";
+  switch (type) {
+    case "image": {
+      const d = imageDisplaySize(m.text);
+      return { width: d.w, height: d.h + IMAGE_V_PAD };
+    }
+    case "link": {
+      const display = m.linkTitle || m.text;
+      const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
+      return {
+        width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
+        height: box.height,
+      };
+    }
+    case "markdown": {
+      // Shown as a COMPACT single-line card (doc glyph + title + line-count
+      // badge); the full document renders in the HTML side panel on demand.
+      // The box measures the (clipped) title plus fixed room for the glyph
+      // and badge.
+      const box = measureNodeBox(markdownTitle(m.text), { fontSize: m.fontSize });
+      return { width: box.width + MD_CARD_LEAD + MD_CARD_BADGE, height: box.height };
+    }
+    case "text":
+    case "object": {
+      const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
+      return { width: box.width, height: box.height };
+    }
+    default: {
+      const exhaustive: never = type;
+      throw new Error(`Unhandled node type: ${exhaustive}`);
+    }
   }
-  if (m.type === "link") {
-    const display = m.linkTitle || m.text;
-    const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
-    return {
-      width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
-      height: box.height,
-    };
-  }
-  if (m.type === "markdown") {
-    // Shown as a COMPACT single-line card (doc glyph + title + line-count
-    // badge); the full document renders in the HTML side panel on demand. The
-    // box measures the (clipped) title plus fixed room for the glyph and badge.
-    const box = measureNodeBox(markdownTitle(m.text), { fontSize: m.fontSize });
-    return { width: box.width + MD_CARD_LEAD + MD_CARD_BADGE, height: box.height };
-  }
-  const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
-  return { width: box.width, height: box.height };
 }
 
 /**
