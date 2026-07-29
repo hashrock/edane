@@ -364,6 +364,45 @@ describe("setNodeType", () => {
     const result = setNodeType(model, "n", "text");
     expect(findNode(result, "n")!.type).toBeUndefined();
   });
+
+  it("refuses to make a node 'object' when its parent is already an object card", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "card",
+          text: "Card",
+          type: "object",
+          children: [{ id: "field", text: "k: v", children: [] }],
+        },
+      ],
+    };
+    const result = setNodeType(model, "field", "object");
+    expect(findNode(result, "field")!.type).toBeUndefined();
+  });
+
+  it("refuses to make a node 'object' when it already has an object-type child", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "n",
+          text: "N",
+          children: [{ id: "card", text: "Card", type: "object", children: [] }],
+        },
+      ],
+    };
+    const result = setNodeType(model, "n", "object");
+    expect(findNode(result, "n")!.type).toBeUndefined();
+  });
+
+  it("still allows a node with no object neighbors to become 'object'", () => {
+    const model = sampleModel();
+    const result = setNodeType(model, "b", "object");
+    expect(findNode(result, "b")!.type).toBe("object");
+  });
 });
 
 describe("setNodeStyle branch conditions", () => {
