@@ -8,7 +8,7 @@ import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken } from "./utils/apiToken";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted } from "./utils/crypto";
+import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { assertNever } from "./utils/assertNever";
@@ -563,14 +563,8 @@ const routes = app
       .get();
     if (!note || note.userId !== user.id || note.deletedAt) return c.notFound();
 
-    let content = note.content;
-    if (!note.isPublic && content && isEncrypted(content)) {
-      try {
-        content = await decrypt(content, c.env.ENCRYPTION_KEY);
-      } catch {
-        content = "";
-      }
-    }
+    const content =
+      (await decodeStoredNoteContent(note.content, note.isPublic, c.env.ENCRYPTION_KEY)) ?? "";
     return c.render("Notes/Edit", {
       user,
       note: { id: note.id, title: note.title, content, isPublic: note.isPublic },
@@ -589,14 +583,8 @@ const routes = app
       return c.notFound();
     }
 
-    let content = note.content;
-    if (!note.isPublic && content && isEncrypted(content)) {
-      try {
-        content = await decrypt(content, c.env.ENCRYPTION_KEY);
-      } catch {
-        return c.text("Decryption failed", 500);
-      }
-    }
+    const content = await decodeStoredNoteContent(note.content, note.isPublic, c.env.ENCRYPTION_KEY);
+    if (content === null) return c.text("Decryption failed", 500);
     return c.render("Notes/Show", {
       user,
       note: { id: note.id, title: note.title, content, isPublic: note.isPublic },
