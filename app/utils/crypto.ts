@@ -66,3 +66,23 @@ export function isEncrypted(content: string): boolean {
     return false;
   }
 }
+
+/**
+ * Read-side counterpart to the encrypt/store-plain decision a caller makes
+ * before writing: public notes are stored plaintext, private notes are
+ * stored encrypted (older private notes may still be plaintext, hence the
+ * isEncrypted check rather than trusting isPublic alone). Returns null if
+ * decryption fails so callers can pick their own fallback.
+ */
+export async function decodeStoredNoteContent(
+  content: string,
+  isPublic: boolean,
+  secret: string
+): Promise<string | null> {
+  if (isPublic || !content || !isEncrypted(content)) return content;
+  try {
+    return await decrypt(content, secret);
+  } catch {
+    return null;
+  }
+}
