@@ -37,6 +37,23 @@ export function isStoredNodeType(value: unknown): value is StoredNodeType {
 }
 
 /**
+ * An object node (card) can't be the direct parent or direct child of
+ * another object node: a card renders its direct children as key/value rows
+ * (objectCardGeom in application/objectCard.ts only special-cases
+ * image/link/markdown), so a nested card's own subtree would be mangled into
+ * a row instead of shown as a card. Single source of truth for this
+ * adjacency check — used both when retyping a node ({@link setNodeType}) and
+ * when moving a branch by drag-and-drop (isCardIntoCard in
+ * application/dragDrop.ts).
+ */
+export function violatesObjectCardNesting(
+  parentType: NodeType | undefined,
+  childType: NodeType | undefined
+): boolean {
+  return parentType === "object" && childType === "object";
+}
+
+/**
  * Display format for a numeric field-row value inside an object card. This is
  * Excel's value/display split: the node's `text` keeps the raw value, only the
  * card rendering changes.
@@ -200,14 +217,10 @@ export function addSiblingAfter(
 /**
  * Set a node's kind. Returns a new model. `text` is stored as absent.
  *
- * Refuses a change to "object" that would make an object node the direct
- * parent or direct child of another object node: a card renders its direct
- * children as key/value rows (objectCardGeom in application/objectCard.ts
- * only special-cases image/link/markdown, so a nested object's own subtree
- * would be mangled into a row instead of shown as a card). Mirrors the
- * drag-and-drop guard (isCardIntoCard in application/dragDrop.ts), which
- * blocks the same adjacency when moving a branch instead of retyping a node.
- * On a blocked change the model is returned unchanged.
+ * Refuses a change to "object" that would violate
+ * {@link violatesObjectCardNesting} on either side of the node (as its new
+ * parent or as one of its existing children). On a blocked change the model
+ * is returned unchanged.
  */
 export function setNodeType(
   model: MindMapModel,
@@ -219,8 +232,10 @@ export function setNodeType(
   if (!node) return cloned;
   if (type === "object") {
     const parentEntry = findParentAndIndex(cloned, nodeId);
-    const parentIsObject = parentEntry?.parent.type === "object";
-    const hasObjectChild = node.children.some((c) => c.type === "object");
+    const parentIsObject = violatesObjectCardNesting(parentEntry?.parent.type, "object");
+    const hasObjectChild = node.children.some((c) =>
+      violatesObjectCardNesting("object", c.type)
+    );
     if (parentIsObject || hasObjectChild) return cloned;
   }
   node.type = type === "text" ? undefined : type;
