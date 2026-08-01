@@ -12,6 +12,7 @@ import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent } from "./utils/
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { assertNever } from "./utils/assertNever";
+import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
 import type { Env } from "./global.d";
 
@@ -365,24 +366,7 @@ app.get("/api/link-preview", async (c) => {
       redirect: "follow",
     });
     const html = await res.text();
-    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const title = titleMatch
-      ? titleMatch[1].replace(/\s+/g, " ").trim().slice(0, 300)
-      : target.hostname;
-
-    let favicon: string | null = null;
-    for (const tag of html.match(/<link[^>]+>/gi) ?? []) {
-      if (/rel=["'][^"']*icon[^"']*["']/i.test(tag)) {
-        const href = tag.match(/href=["']([^"']+)["']/i);
-        if (href) {
-          favicon = new URL(href[1], target).toString();
-          break;
-        }
-      }
-    }
-    if (!favicon) favicon = `${target.protocol}//${target.host}/favicon.ico`;
-
-    return c.json({ title, favicon });
+    return c.json(extractLinkPreview(html, target));
   } catch (e) {
     return c.json({ error: "fetch failed", detail: String(e) }, 502);
   }
