@@ -132,39 +132,52 @@ describe("global bindings", () => {
   });
 });
 
-describe("selection-mode collapse / navigate", () => {
+// ←/→ is a user preference, so each behaviour is pinned to its own setting
+// rather than riding on DEFAULT_PREFERENCES — the default may move again
+// (it already went "collapse" → "navigate") without silently retargeting
+// these cases. The navigate half lives in its own describe below.
+describe("preference: arrowBehavior = collapse", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    arrowBehavior: "collapse",
+  };
+
   it("Right expands a collapsed parent", () => {
     const m = model();
     m.children[0].collapsed = true;
     const { deps, dispatched } = makeDeps();
-    run(deps, state(m, "a", false), { key: "ArrowRight" });
+    run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
   });
 
   it("Right on an expanded parent moves into the first child", () => {
     const { deps, dispatched } = makeDeps();
-    run(deps, state(model(), "a", false), { key: "ArrowRight" });
+    run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([{ type: "moveDown" }]);
   });
 
   it("Right on a leaf is swallowed (handled, no dispatch)", () => {
     const { deps, dispatched } = makeDeps();
-    const { preventDefault } = run(deps, state(model(), "b", false), {
-      key: "ArrowRight",
-    });
+    const { preventDefault } = run(
+      deps,
+      state(model(), "b", false),
+      { key: "ArrowRight" },
+      {},
+      prefs
+    );
     expect(dispatched).toEqual([]);
     expect(preventDefault).toHaveBeenCalled();
   });
 
   it("Left collapses an expanded parent", () => {
     const { deps, dispatched } = makeDeps();
-    run(deps, state(model(), "a", false), { key: "ArrowLeft" });
+    run(deps, state(model(), "a", false), { key: "ArrowLeft" }, {}, prefs);
     expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
   });
 
   it("Left on a leaf moves to the parent", () => {
     const { deps, dispatched } = makeDeps();
-    run(deps, state(model(), "a1", false), { key: "ArrowLeft" });
+    run(deps, state(model(), "a1", false), { key: "ArrowLeft" }, {}, prefs);
     expect(dispatched).toEqual([{ type: "moveToParent" }]);
   });
 });
