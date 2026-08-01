@@ -1,8 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
+import {
+  DEFAULT_PREFERENCES,
+  PREFERENCES_KEY,
+  type EditorPreferences,
+} from "../application/editorPreferences";
 
 // Fixed-id tree so each test can target known nodes.
 const MODEL: MindMapModel = {
@@ -44,9 +49,28 @@ function findNode(node: MindMapModel, id: string): MindMapModel | null {
   return null;
 }
 
+/**
+ * Pin a preference for one test. Built on DEFAULT_PREFERENCES so a case only
+ * states the setting it actually depends on, and so changing a default never
+ * silently retargets an unrelated test.
+ */
+function seedPrefs(overrides: Partial<EditorPreferences>) {
+  localStorage.setItem(
+    PREFERENCES_KEY,
+    JSON.stringify({ ...DEFAULT_PREFERENCES, ...overrides })
+  );
+}
+
+// localStorage is shared across test files in the same browser session, so
+// seeded preferences must not outlive the test that set them.
+afterEach(() => {
+  localStorage.removeItem(PREFERENCES_KEY);
+});
+
 // Tailwind isn't loaded in the component test, so force the canvas to a real
 // size (otherwise Konva renders into a 0x0 stage and clicks hit nothing).
 beforeEach(() => {
+  localStorage.removeItem(PREFERENCES_KEY);
   const style = document.createElement("style");
   style.textContent = `
     [data-testid="mm-canvas"] {
@@ -106,6 +130,9 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
   });
 
   it("Tab indents a node under its previous sibling; Shift+Tab outdents it", async () => {
+    // Indenting is the "indent" tabBehavior, no longer the default — pin it
+    // here. The default ("insert-child") is covered in the prefs test file.
+    seedPrefs({ tabBehavior: "indent" });
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
