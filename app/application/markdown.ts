@@ -10,7 +10,7 @@
  * Depends on domain/model only (no DOM / rendering).
  */
 
-import type { MindMapModel } from "../domain/model";
+import type { MindMapModel, NodeType } from "../domain/model";
 import { generateId } from "../domain/model";
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
@@ -136,19 +136,40 @@ export function markdownToModel(md: string): MindMapModel {
   return root;
 }
 
-/** Render a single node's text as one Markdown list-item body. */
+/**
+ * Render a single node's text as one Markdown list-item body.
+ *
+ * The kind switch is exhaustive (a `never`-typed default branch) so that
+ * adding a `NodeType` member — same trick as `measureModelNode` in
+ * nodeUtils.ts — fails to compile here until this function decides how the
+ * new kind serializes, instead of silently falling through to plain-text
+ * rendering. (Can't reuse `utils/assertNever`: the application layer may
+ * only import domain/lib, see architecture.test.ts.)
+ */
 function nodeToMarkdownText(node: MindMapModel): string {
-  const type = node.type ?? "text";
-  if (type === "image") return `![](${node.text})`;
-  if (type === "link") {
-    const label = node.linkTitle?.trim() || node.text;
-    return `[${label}](${node.text})`;
+  const type: NodeType = node.type ?? "text";
+  switch (type) {
+    case "image":
+      return `![](${node.text})`;
+    case "link": {
+      const label = node.linkTitle?.trim() || node.text;
+      return `[${label}](${node.text})`;
+    }
+    case "markdown":
+      // A markdown node holds a raw blob; collapse newlines so it stays on
+      // the bullet line (a full re-embed would break the outline's list
+      // structure).
+      return node.text.replace(/\n+/g, " ").trim();
+    case "text":
+    case "object": {
+      const text = node.text;
+      return node.bold && text.trim() !== "" ? `**${text}**` : text;
+    }
+    default: {
+      const exhaustive: never = type;
+      throw new Error(`Unhandled node type: ${exhaustive}`);
+    }
   }
-  // A markdown node holds a raw blob; collapse newlines so it stays on the
-  // bullet line (a full re-embed would break the outline's list structure).
-  if (type === "markdown") return node.text.replace(/\n+/g, " ").trim();
-  const text = node.text;
-  return node.bold && text.trim() !== "" ? `**${text}**` : text;
 }
 
 /**
