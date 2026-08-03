@@ -24,8 +24,8 @@ export default function MarkdownPanel({
   onChange,
   onClose,
 }: Props) {
-  const [modeRaw, setMode] = useState<"view" | "edit">("view");
-  const mode = readOnly ? "view" : modeRaw;
+  // readOnly では表示/編集トグル自体を出さないので、mode は "view" のまま動かない。
+  const [mode, setMode] = useState<"view" | "edit">("view");
   const [draft, setDraft] = useState(source);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -61,30 +61,30 @@ export default function MarkdownPanel({
         <span className="text-sm font-semibold text-slate-700">Markdown</span>
         <div className="ml-auto flex items-center gap-1">
           {!readOnly && (
-          <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => setMode("view")}
-              className={`rounded-md px-2.5 py-1 ${
-                mode === "view"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              表示
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("edit")}
-              className={`rounded-md px-2.5 py-1 ${
-                mode === "edit"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              編集
-            </button>
-          </div>
+            <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setMode("view")}
+                className={`rounded-md px-2.5 py-1 ${
+                  mode === "view"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                表示
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("edit")}
+                className={`rounded-md px-2.5 py-1 ${
+                  mode === "edit"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                編集
+              </button>
+            </div>
           )}
           <button
             type="button"

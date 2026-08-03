@@ -68,7 +68,7 @@
 - [x] 旧デフォルト前提のテスト3件を設定軸で書き直す（#89）
 - [ ] ←/→のデフォルトを `navigate` のままにするか決める（「←で選択が飛ぶ」の報告は navigate の仕様どおりの挙動。挙動は設定化済みで両方正解なので、初期値をどちらにするかの問題）
 - [ ] キーボード不変条件を ←/→ にも広げる（CLAUDE.md と `keyboardEscape.browser.test.tsx` は現状 ↑/↓ のみ。arrowBehaviorの2値どちらでも成立する形で定義する）
-- [ ] `MindmapViewer.tsx` を捨て、読み取り専用モードの `MindmapEditor` に統一する（Konva描画が二重実装。dispatch/saveNote/自動保存/beforeunload/ナビゲーションガードの無効化が要る）
+- [x] `MindmapViewer.tsx` を捨て、読み取り専用モードの `MindmapEditor` に統一する（NoteEditor の readOnly prop として実装。dispatch 段階で編集を一括遮断し、保存系も全停止）
 
 ## 編集モードへの入り方
 

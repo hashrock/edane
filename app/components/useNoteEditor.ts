@@ -107,8 +107,13 @@ export function useNoteEditor({
   const saveTimerRef = useRef<any>(null);
   // Serialized content last confirmed persisted. The server just handed us the
   // initial model, so that's our clean baseline; every successful save advances
-  // it. `isDirty()` compares the live model against this.
-  const lastSavedContentRef = useRef<string>(serializeModel(model));
+  // it. `isDirty()` compares the live model against this. Lazily initialized:
+  // useRef(arg) は毎レンダーで引数を評価するので、素直に書くとレンダー毎に
+  // モデル全体を serialize してしまう（readOnly では丸ごと不要）。
+  const lastSavedContentRef = useRef<string | null>(null);
+  if (lastSavedContentRef.current === null && noteId && !readOnly) {
+    lastSavedContentRef.current = serializeModel(model);
+  }
   // Monotonic save-dispatch counter. An edit can arrive while a save is still
   // in flight, so two saves run concurrently and their responses may land out
   // of order. Each save takes the next `saveSeqRef` on dispatch; on success we
@@ -129,14 +134,14 @@ export function useNoteEditor({
   const dispatch = useCallback(
     (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
+      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する。
+      // クリックによる選択は活かしたいので、activateNode は編集突入だけ剥がす。
+      if (readOnly && action.type === "activateNode" && action.editing) {
+        action = { ...action, editing: false };
+      }
+      const next = editorReducer(prev, action);
+      if (next === prev) return prev;
       if (readOnly) {
-        // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する。
-        // クリックによる選択は活かしたいので、activateNode は編集突入だけ剥がす。
-        if (action.type === "activateNode" && action.editing) {
-          action = { ...action, editing: false };
-        }
-        const next = editorReducer(prev, action);
-        if (next === prev) return prev;
         // 編集モードに入る遷移は捨てる（startEditing / dragSelect など）。
         if (next.view.editing) return prev;
         // モデルを変えるアクションも捨てる。折りたたみだけは閲覧操作として通す
@@ -147,13 +152,7 @@ export function useNoteEditor({
         ) {
           return prev;
         }
-        stateRef.current = next;
-        setStateRaw(next);
-        return next;
-      }
-      const next = editorReducer(prev, action);
-      if (next === prev) return prev;
-      if (undoType && next.document !== prev.document) {
+      } else if (undoType && next.document !== prev.document) {
         undoManagerRef.current.push(undoType, prev.document, next.document);
       }
       stateRef.current = next;

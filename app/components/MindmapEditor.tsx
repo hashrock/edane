@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel, NodeType } from "../domain/model";
@@ -19,7 +27,6 @@ import {
   serializeBranch,
   parseBranch,
 } from "../application/branchClipboard";
-import MarkdownPanel from "./MarkdownPanel";
 import ViewControls from "./ViewControls";
 import {
   attachStagePanZoom,
@@ -105,6 +112,9 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 import EditorSettingsDialog from "./EditorSettingsDialog";
+
+// パネルを開くまで markdown レンダラ（marked / dompurify）を読み込まない。
+const MarkdownPanel = lazy(() => import("./MarkdownPanel"));
 
 /**
  * True for middle/right mouse buttons. Only the primary (left) button may
@@ -1001,15 +1011,16 @@ export function MindmapEditorView({
       const clipText = await navigator.clipboard.readText();
       pasteTextAsNodes(clipText);
     };
-    const cmds: Command[] = [
+    return [
       { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
       { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
-      { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
+      ...(readOnly
+        ? []
+        : [{ id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes }]),
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
       { id: "shortcuts", label: "キーボードショートカット一覧", action: () => setHelpOpen(true) },
       { id: "settings", label: "エディタ設定", action: () => setSettingsOpen(true) },
     ];
-    return readOnly ? cmds.filter((c) => c.id !== "paste") : cmds;
   }, [pasteTextAsNodes, readOnly]);
 
   // --- Right-click context menu items (for the node under the cursor) ---
@@ -1022,45 +1033,10 @@ export function MindmapEditorView({
     const hasChildren = node.children.length > 0;
     const type = node.type ?? "text";
 
-    // 閲覧専用: 閲覧操作（リンクを開く / 折りたたみ / コピー）だけに絞る。
-    if (readOnly) {
-      const roGroups: ContextMenuAction[][] = [];
-      if (type === "link" && node.text) {
-        roGroups.push([
-          {
-            label: "リンクを開く",
-            onSelect: () => window.open(node.text, "_blank", "noopener"),
-          },
-        ]);
-      }
-      if (hasChildren) {
-        roGroups.push([
-          {
-            label: node.collapsed ? "展開する" : "折りたたむ",
-            onSelect: () => {
-              toggleCollapse(nodeId);
-            },
-          },
-        ]);
-      }
-      roGroups.push([
-        {
-          label: "枝をテキストコピー",
-          onSelect: () => {
-            navigator.clipboard.writeText(modelToText(node));
-          },
-        },
-      ]);
-      const roItems: ContextMenuItem[] = [];
-      for (const group of roGroups.filter((g) => g.length > 0)) {
-        if (roItems.length > 0) roItems.push({ separator: true });
-        roItems.push(...group);
-      }
-      return roItems;
-    }
-
     // Items are grouped by category; empty groups are dropped and the
     // remaining groups are joined with divider separators below.
+    // 閲覧専用では編集系の項目・グループを個別にゲートし、閲覧操作
+    // （リンクを開く / 折りたたみ / コピー）だけが残る。
     const groups: ContextMenuAction[][] = [];
 
     // --- Link actions: open / fetch metadata (link only) ---
@@ -1071,24 +1047,28 @@ export function MindmapEditorView({
         label: "リンクを開く",
         onSelect: () => window.open(node.text, "_blank", "noopener"),
       });
-      linkGroup.push({
-        label: "リンク情報を取得（タイトル/favicon）",
-        onSelect: () => fetchLinkMeta(nodeId),
-      });
+      if (!readOnly) {
+        linkGroup.push({
+          label: "リンク情報を取得（タイトル/favicon）",
+          onSelect: () => fetchLinkMeta(nodeId),
+        });
+      }
     }
     groups.push(linkGroup);
 
     // --- Structure: add child / collapse ---
     const structureGroup: ContextMenuAction[] = [];
-    structureGroup.push({
-      label: "子ノードを追加",
-      onSelect: () => {
-        const next = dispatch({ type: "addChild", nodeId }, "add-child");
-        if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
-        if (noteId) saveNote(next.document.model);
-        focusEditorSoon();
-      },
-    });
+    if (!readOnly) {
+      structureGroup.push({
+        label: "子ノードを追加",
+        onSelect: () => {
+          const next = dispatch({ type: "addChild", nodeId }, "add-child");
+          if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+          if (noteId) saveNote(next.document.model);
+          focusEditorSoon();
+        },
+      });
+    }
     if (hasChildren) {
       structureGroup.push({
         label: node.collapsed ? "展開する" : "折りたたむ",
@@ -1102,7 +1082,7 @@ export function MindmapEditorView({
 
     // --- Kind conversion (root excluded — it's the note title) ---
     const typeGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       const setType = (nodeType: NodeType) => () => {
         const next = dispatch(
           { type: "setNodeType", nodeId, nodeType },
@@ -1124,7 +1104,7 @@ export function MindmapEditorView({
     // The raw value stays on the node; only the card's rendering changes.
     const numGroup: ContextMenuAction[] = [];
     const parentInfo = findParentAndIndex(modelRef.current, nodeId);
-    if (parentInfo?.parent.type === "object" && type === "text") {
+    if (!readOnly && parentInfo?.parent.type === "object" && type === "text") {
       const { value } = parseField(node.text);
       if (inferValueKind(value) === "number") {
         const applyNum = (patch: {
@@ -1164,7 +1144,7 @@ export function MindmapEditorView({
     // Card field rows render at the card's fixed rhythm, so per-node font
     // styling is hidden for them (the numeric format group above applies).
     const formatGroup: ContextMenuAction[] = [];
-    if (type === "text" && parentInfo?.parent.type !== "object") {
+    if (!readOnly && type === "text" && parentInfo?.parent.type !== "object") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
       const current = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bigger = SIZES.find((s) => s > current);
@@ -1200,7 +1180,7 @@ export function MindmapEditorView({
 
     // --- Media: image upload (R2). Replaces the node's content ---
     const mediaGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       mediaGroup.push({
         label: "画像をアップロード",
         onSelect: () => triggerImageUpload(nodeId),
@@ -1220,7 +1200,7 @@ export function MindmapEditorView({
 
     // --- Destructive ---
     const dangerGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       dangerGroup.push({
         label: "ノードを削除",
         danger: true,
@@ -2429,6 +2409,17 @@ export function MindmapEditorView({
       // either state) by the unified toggle-button pass below, so nothing to do
       // here.
 
+      // Select the whole node without entering edit mode (single click in
+      // select mode / any readOnly activation) — one payload, three call sites.
+      const selectWholeNode = () =>
+        dispatch({
+          type: "activateNode",
+          nodeId: node.id,
+          cursorPos: 0,
+          selectionEnd: node.text.length,
+          editing: false,
+        });
+
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
         if (isNonPrimaryButton(e)) return;
@@ -2439,13 +2430,7 @@ export function MindmapEditorView({
           // 直され、mouseup 時に Konva の click 判定（同一シェイプ比較）が
           // 崩れてパネルが開かない。選択もパネルも click 側で行う。
           if (node.type !== "markdown") {
-            dispatch({
-              type: "activateNode",
-              nodeId: node.id,
-              cursorPos: 0,
-              selectionEnd: node.text.length,
-              editing: false,
-            });
+            selectWholeNode();
             focusEditorSoon();
           }
           return;
@@ -2498,13 +2483,7 @@ export function MindmapEditorView({
           });
         } else {
           // Select mode: whole text selected so a follow-up keypress replaces it.
-          dispatch({
-            type: "activateNode",
-            nodeId: node.id,
-            cursorPos: 0,
-            selectionEnd: node.text.length,
-            editing: false,
-          });
+          selectWholeNode();
         }
 
         // Arm a drag (it only becomes "real" once the pointer moves past
@@ -2546,24 +2525,19 @@ export function MindmapEditorView({
       });
 
       // Double-click → select all text
-      group.on("dblclick dbltap", () => {
-        if (readOnly) return;
-        dispatch({ type: "selectAllInNode", nodeId: node.id });
-        focusEditorSoon();
-      });
+      if (!readOnly) {
+        group.on("dblclick dbltap", () => {
+          dispatch({ type: "selectAllInNode", nodeId: node.id });
+          focusEditorSoon();
+        });
+      }
 
       // 閲覧専用: markdownノードはクリックで全文をサイドパネル表示（編集時は
       // 「編集意図」フリップ経由で開くが、readOnly では editing に入れないため
       // ここで直接開く）。パン後は Konva がクリックを発火しないので誤爆しない。
       if (readOnly && node.type === "markdown") {
         group.on("click tap", () => {
-          dispatch({
-            type: "activateNode",
-            nodeId: node.id,
-            cursorPos: 0,
-            selectionEnd: node.text.length,
-            editing: false,
-          });
+          selectWholeNode();
           if (node.text.trim() !== "") setMdPanelNodeId(node.id);
         });
       }
@@ -3078,6 +3052,13 @@ export function MindmapEditorView({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // 静的表示（readOnly）と編集ボタンの中身で共用するタイトル。
+  const titleSpan = (
+    <span className="truncate text-base font-semibold tracking-tight">
+      {title || "無題"}
+    </span>
+  );
+
   return (
     <div className="flex flex-col h-full">
       <CommandPalette
@@ -3160,9 +3141,7 @@ export function MindmapEditorView({
             </Link>
           )}
           {readOnly ? (
-            <span className="truncate px-1 text-base font-semibold tracking-tight">
-              {title || "無題"}
-            </span>
+            titleSpan
           ) : editingTitle ? (
             <input
               type="text"
@@ -3190,9 +3169,7 @@ export function MindmapEditorView({
               className="flex min-w-0 items-center gap-2 rounded-lg px-1 text-left hover:bg-slate-100"
               title="タイトルを編集"
             >
-              <span className="truncate text-base font-semibold tracking-tight">
-                {title || "無題"}
-              </span>
+              {titleSpan}
               <span className="text-sm text-slate-400">✎</span>
             </button>
           )}
@@ -3253,12 +3230,14 @@ export function MindmapEditorView({
           const n = mdPanelNodeId ? findNode(model, mdPanelNodeId) : null;
           if (!n) return null;
           return (
-            <MarkdownPanel
-              source={n.text}
-              readOnly={readOnly}
-              onChange={(text) => handleMarkdownEdit(n.id, text)}
-              onClose={() => setMdPanelNodeId(null)}
-            />
+            <Suspense fallback={null}>
+              <MarkdownPanel
+                source={n.text}
+                readOnly={readOnly}
+                onChange={(text) => handleMarkdownEdit(n.id, text)}
+                onClose={() => setMdPanelNodeId(null)}
+              />
+            </Suspense>
           );
         })()}
         <textarea

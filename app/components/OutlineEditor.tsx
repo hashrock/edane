@@ -250,6 +250,13 @@ export default function OutlineEditor({
     fontWeight: node.bold ? 700 : 400,
   });
 
+  // 静的表示（readOnly）と編集ボタンの中身で共用するタイトル。
+  const titleSpan = (
+    <span className="truncate text-sm font-semibold tracking-tight">
+      {title || "無題"}
+    </span>
+  );
+
   return (
     <div
       data-testid="outline-view"
@@ -297,9 +304,7 @@ export default function OutlineEditor({
           </Link>
         )}
         {readOnly ? (
-          <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight">
-            {title || "無題"}
-          </span>
+          <div className="flex min-w-0 flex-1 px-1">{titleSpan}</div>
         ) : editingTitle ? (
           <input
             type="text"
@@ -322,9 +327,7 @@ export default function OutlineEditor({
             onClick={() => setEditingTitle(true)}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1 py-1 text-left hover:bg-slate-100"
           >
-            <span className="truncate text-sm font-semibold tracking-tight">
-              {title || "無題"}
-            </span>
+            {titleSpan}
             <span className="shrink-0 text-sm text-slate-400">✎</span>
           </button>
         )}
@@ -534,52 +537,52 @@ export default function OutlineEditor({
 
       {/* Bottom action bar: structural edits for touch (no hardware keyboard). */}
       {!readOnly && (
-      <div className="flex shrink-0 items-stretch justify-around gap-1 border-t border-slate-200 bg-white px-1 py-1.5">
-        {(
-          [
-            { label: "⇤", title: "アウトデント", type: "tab" as const, shift: true },
-            { label: "⇥", title: "インデント", type: "tab" as const, shift: false },
-            { label: "↑", title: "上へ移動", type: "moveNodeUp" as const },
-            { label: "↓", title: "下へ移動", type: "moveNodeDown" as const },
-          ]
-        ).map((b) => (
+        <div className="flex shrink-0 items-stretch justify-around gap-1 border-t border-slate-200 bg-white px-1 py-1.5">
+          {(
+            [
+              { label: "⇤", title: "アウトデント", type: "tab" as const, shift: true },
+              { label: "⇥", title: "インデント", type: "tab" as const, shift: false },
+              { label: "↑", title: "上へ移動", type: "moveNodeUp" as const },
+              { label: "↓", title: "下へ移動", type: "moveNodeDown" as const },
+            ]
+          ).map((b) => (
+            <button
+              key={b.title}
+              title={b.title}
+              disabled={!bodyActive}
+              onClick={() =>
+                withSave(
+                  b.type === "tab" ? "indent" : "reorder",
+                  b.type === "tab"
+                    ? { type: "tab", shift: b.shift }
+                    : { type: b.type }
+                )
+              }
+              className="flex-1 rounded-lg py-2 text-lg text-slate-700 disabled:text-slate-300 enabled:hover:bg-slate-100 enabled:active:bg-slate-200"
+            >
+              {b.label}
+            </button>
+          ))}
           <button
-            key={b.title}
-            title={b.title}
-            disabled={!bodyActive}
-            onClick={() =>
-              withSave(
-                b.type === "tab" ? "indent" : "reorder",
-                b.type === "tab"
-                  ? { type: "tab", shift: b.shift }
-                  : { type: b.type }
-              )
-            }
-            className="flex-1 rounded-lg py-2 text-lg text-slate-700 disabled:text-slate-300 enabled:hover:bg-slate-100 enabled:active:bg-slate-200"
+            title="項目を追加"
+            disabled={!activeNodeId}
+            onClick={() => withSave("insert-sibling", { type: "insertSiblingAfter" })}
+            className="flex-1 rounded-lg py-2 text-lg font-semibold text-emerald-700 disabled:text-slate-300 enabled:hover:bg-emerald-50 enabled:active:bg-emerald-100"
           >
-            {b.label}
+            ＋
           </button>
-        ))}
-        <button
-          title="項目を追加"
-          disabled={!activeNodeId}
-          onClick={() => withSave("insert-sibling", { type: "insertSiblingAfter" })}
-          className="flex-1 rounded-lg py-2 text-lg font-semibold text-emerald-700 disabled:text-slate-300 enabled:hover:bg-emerald-50 enabled:active:bg-emerald-100"
-        >
-          ＋
-        </button>
-        <button
-          title="項目を削除"
-          disabled={!bodyActive}
-          onClick={() => {
-            if (activeNodeId)
-              withSave("delete", { type: "deleteNode", nodeId: activeNodeId });
-          }}
-          className="flex flex-1 items-center justify-center rounded-lg py-2 text-rose-600 disabled:text-slate-300 enabled:hover:bg-rose-50 enabled:active:bg-rose-100"
-        >
-          <TrashIcon width="20" height="20" />
-        </button>
-      </div>
+          <button
+            title="項目を削除"
+            disabled={!bodyActive}
+            onClick={() => {
+              if (activeNodeId)
+                withSave("delete", { type: "deleteNode", nodeId: activeNodeId });
+            }}
+            className="flex flex-1 items-center justify-center rounded-lg py-2 text-rose-600 disabled:text-slate-300 enabled:hover:bg-rose-50 enabled:active:bg-rose-100"
+          >
+            <TrashIcon width="20" height="20" />
+          </button>
+        </div>
       )}
     </div>
   );
