@@ -65,7 +65,7 @@
 
 ## 直近
 
-- [ ] 旧デフォルト前提のテスト3件を設定軸で書き直す（`editorKeymap.test.ts` は←に toggleCollapse、`MindmapEditor.edit.browser.test.tsx` は Tab に indent を期待したまま。現在mainが赤い）
+- [x] 旧デフォルト前提のテスト3件を設定軸で書き直す（#89）
 - [ ] ←/→のデフォルトを `navigate` のままにするか決める（「←で選択が飛ぶ」の報告は navigate の仕様どおりの挙動。挙動は設定化済みで両方正解なので、初期値をどちらにするかの問題）
 - [ ] キーボード不変条件を ←/→ にも広げる（CLAUDE.md と `keyboardEscape.browser.test.tsx` は現状 ↑/↓ のみ。arrowBehaviorの2値どちらでも成立する形で定義する）
 - [ ] `MindmapViewer.tsx` を捨て、読み取り専用モードの `MindmapEditor` に統一する（Konva描画が二重実装。dispatch/saveNote/自動保存/beforeunload/ナビゲーションガードの無効化が要る）
@@ -90,7 +90,7 @@
 ## 公開まわり
 
 - [ ] 公開ノートのリンクをコピーする動線（エディタと一覧 `app/pages/Notes/Index.tsx` のメニュー両方）
-- [ ] オーナー以外が `/notes/:id/edit` を開いたら `/notes/:id` へリダイレクト（現状404。`app/server.ts`）
+- [x] オーナー以外が `/notes/:id/edit` を開いたら `/notes/:id` へリダイレクト（公開ノートなら閲覧ページへ。非公開ノートはid存在を漏らさないため引き続き404、未ログインはログイン用にトップへ。判定は`app/utils/noteEditAccess.ts`に純関数として分離）
 
 ※ 方向キーでのノード移動 / ダブルクリックで編集・Escで抜ける / パンズームの滑らかさは「いいところ」として挙がっていた（リグレッション注意）
 
