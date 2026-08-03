@@ -12,6 +12,7 @@
 
 import type { MindMapModel, NodeType } from "../domain/model";
 import { generateId } from "../domain/model";
+import { assertNever } from "../lib/assertNever";
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const UNORDERED = /^(\s*)[-*+]\s+(.*)$/;
@@ -139,12 +140,11 @@ export function markdownToModel(md: string): MindMapModel {
 /**
  * Render a single node's text as one Markdown list-item body.
  *
- * The kind switch is exhaustive (a `never`-typed default branch) so that
- * adding a `NodeType` member — same trick as `measureModelNode` in
+ * The kind switch is exhaustive (`assertNever` in the default branch) so
+ * that adding a `NodeType` member — same trick as `measureModelNode` in
  * nodeUtils.ts — fails to compile here until this function decides how the
  * new kind serializes, instead of silently falling through to plain-text
- * rendering. (Can't reuse `utils/assertNever`: the application layer may
- * only import domain/lib, see architecture.test.ts.)
+ * rendering.
  */
 function nodeToMarkdownText(node: MindMapModel): string {
   const type: NodeType = node.type ?? "text";
@@ -165,10 +165,8 @@ function nodeToMarkdownText(node: MindMapModel): string {
       const text = node.text;
       return node.bold && text.trim() !== "" ? `**${text}**` : text;
     }
-    default: {
-      const exhaustive: never = type;
-      throw new Error(`Unhandled node type: ${exhaustive}`);
-    }
+    default:
+      return assertNever(type);
   }
 }
 
