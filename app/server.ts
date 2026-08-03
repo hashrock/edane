@@ -11,7 +11,7 @@ import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
-import { assertNever } from "./utils/assertNever";
+import { assertNever } from "./lib/assertNever";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
 import type { Env } from "./global.d";

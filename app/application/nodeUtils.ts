@@ -4,6 +4,7 @@
 
 import { type MindMapModel, type NodeType, visibleChildrenOf } from "../domain/model";
 import { measureNodeBox, NODE_PADDING, nodeBoxWidth, nodeBoxHeight } from "../lib/measureText";
+import { assertNever } from "../lib/assertNever";
 import { markdownTitle } from "./markdownCard";
 import { objectCardGeom } from "./objectCard";
 import type { ValueKind } from "./objectField";
@@ -103,12 +104,11 @@ export interface EditingNode {
  *  - link  → its fetched title (falling back to the URL) plus favicon room.
  *  - text / collapsed object → its text.
  *
- * The kind switch below is exhaustive (a `never`-typed default branch) so
- * that adding a `NodeType` member — same trick as `STORED_NODE_TYPE_SET` in
- * domain/model.ts — fails to compile here until this function decides how the
- * new kind sizes, instead of silently falling through to plain-text
- * measurement. (Can't reuse `utils/assertNever` here: the application layer
- * may only import domain/lib, see architecture.test.ts.)
+ * The kind switch below is exhaustive (`assertNever` in the default branch)
+ * so that adding a `NodeType` member — same trick as `STORED_NODE_TYPE_SET`
+ * in domain/model.ts — fails to compile here until this function decides how
+ * the new kind sizes, instead of silently falling through to plain-text
+ * measurement.
  */
 export function measureModelNode(
   m: MindMapModel,
@@ -155,10 +155,8 @@ export function measureModelNode(
       const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
       return { width: box.width, height: box.height };
     }
-    default: {
-      const exhaustive: never = type;
-      throw new Error(`Unhandled node type: ${exhaustive}`);
-    }
+    default:
+      return assertNever(type);
   }
 }
 
