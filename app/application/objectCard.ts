@@ -3,9 +3,8 @@
  * node's card is sized and where its title / separator / field rows sit.
  *
  * Both the layout measurement (nodeUtils.flattenToNodes) and the canvas draw
- * (MindmapEditor / MindmapViewer) read from here, so the card box and its
- * contents can never drift apart — the same contract measureModelNode gives
- * plain nodes.
+ * (MindmapEditor) read from here, so the card box and its contents can never
+ * drift apart — the same contract measureModelNode gives plain nodes.
  *
  * All vertical positions are relative to the card's TOP edge; the flat-node
  * layer converts them to world coordinates once the card's centre is known.

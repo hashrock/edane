@@ -1,5 +1,5 @@
-import { Head, Link } from "@inertiajs/react";
-import MindmapViewer from "../../components/MindmapViewer";
+import { Head } from "@inertiajs/react";
+import NoteEditor from "../../components/NoteEditor";
 
 type Note = {
   id: string;
@@ -8,21 +8,17 @@ type Note = {
   isPublic: boolean;
 };
 
+// 公開ノートの閲覧ページ。編集ページと同じレスポンシブエディタ
+// （canvas / outline）を閲覧専用モードで使う。
 export default function NotesShow({ note }: { note: Note }) {
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col bg-slate-50 text-slate-950">
       <Head title={note.title} />
-      <header className="flex items-center gap-2 md:gap-4 px-3 md:px-4 py-2 border-b bg-white">
-        <Link href="/notes" className="text-blue-600 hover:underline text-sm">
-          &larr; 一覧
-        </Link>
-        <h1 className="font-semibold text-sm md:text-base truncate">
-          {note.title}
-        </h1>
-      </header>
-      <div className="flex-1">
-        <MindmapViewer initialContent={note.content} title={note.title} />
-      </div>
+      <NoteEditor
+        initialContent={note.content}
+        initialTitle={note.title}
+        readOnly
+      />
     </div>
   );
 }

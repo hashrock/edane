@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel, NodeType } from "../domain/model";
@@ -19,7 +27,6 @@ import {
   serializeBranch,
   parseBranch,
 } from "../application/branchClipboard";
-import MarkdownPanel from "./MarkdownPanel";
 import ViewControls from "./ViewControls";
 import {
   attachStagePanZoom,
@@ -105,6 +112,9 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 import EditorSettingsDialog from "./EditorSettingsDialog";
+
+// パネルを開くまで markdown レンダラ（marked / dompurify）を読み込まない。
+const MarkdownPanel = lazy(() => import("./MarkdownPanel"));
 
 /**
  * True for middle/right mouse buttons. Only the primary (left) button may
@@ -247,6 +257,8 @@ interface Props {
   initialIsPublic?: boolean;
   /** Embedded (iframe) mode: hide the navigation header. */
   embed?: boolean;
+  /** 閲覧専用モード（公開ノートの閲覧ページなど）。編集・保存を全面無効化。 */
+  readOnly?: boolean;
   /**
    * Guest mode "save to account" action. When provided (and there is no
    * noteId), the header shows a save button that hands the current document
@@ -296,6 +308,7 @@ export function MindmapEditorView({
     isPublic,
     setIsPublic,
     noteId,
+    readOnly,
     leaveConfirm,
     setLeaveConfirm,
     bypassNavGuardRef,
@@ -644,12 +657,13 @@ export function MindmapEditorView({
 
   const handleCanvasDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      if (readOnly) return;
       if (!dragHasImage(e.dataTransfer)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
       setDropActive(true);
     },
-    []
+    [readOnly]
   );
 
   const handleCanvasDragLeave = useCallback(
@@ -664,6 +678,7 @@ export function MindmapEditorView({
 
   const handleCanvasDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      if (readOnly) return;
       setDropActive(false);
       const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
         f.type.startsWith("image/")
@@ -685,7 +700,7 @@ export function MindmapEditorView({
         }
       })();
     },
-    [dispatch, nodeIdAtClientPoint, stateRef, uploadAndSetImage]
+    [dispatch, nodeIdAtClientPoint, readOnly, stateRef, uploadAndSetImage]
   );
 
   // Markdown nodes don't edit on the canvas — any edit intent (Space / typing /
@@ -801,6 +816,10 @@ export function MindmapEditorView({
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (readOnly) {
+        e.preventDefault();
+        return;
+      }
       // Pasting an image file into an empty node uploads it and turns the node
       // into an image. (Non-empty nodes fall through to normal text paste.)
       const files = e.clipboardData.files;
@@ -870,7 +889,7 @@ export function MindmapEditorView({
       e.preventDefault();
       pasteTextAsNodes(text);
     },
-    [dispatch, pasteTextAsNodes, flashNodes, noteId, saveNote]
+    [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
   );
 
   // Resolve the Markdown paste dialog with one of the three strategies.
@@ -995,12 +1014,14 @@ export function MindmapEditorView({
     return [
       { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
       { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
-      { id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes },
+      ...(readOnly
+        ? []
+        : [{ id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes }]),
       { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
       { id: "shortcuts", label: "キーボードショートカット一覧", action: () => setHelpOpen(true) },
       { id: "settings", label: "エディタ設定", action: () => setSettingsOpen(true) },
     ];
-  }, [pasteTextAsNodes]);
+  }, [pasteTextAsNodes, readOnly]);
 
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -1014,6 +1035,8 @@ export function MindmapEditorView({
 
     // Items are grouped by category; empty groups are dropped and the
     // remaining groups are joined with divider separators below.
+    // 閲覧専用では編集系の項目・グループを個別にゲートし、閲覧操作
+    // （リンクを開く / 折りたたみ / コピー）だけが残る。
     const groups: ContextMenuAction[][] = [];
 
     // --- Link actions: open / fetch metadata (link only) ---
@@ -1024,24 +1047,28 @@ export function MindmapEditorView({
         label: "リンクを開く",
         onSelect: () => window.open(node.text, "_blank", "noopener"),
       });
-      linkGroup.push({
-        label: "リンク情報を取得（タイトル/favicon）",
-        onSelect: () => fetchLinkMeta(nodeId),
-      });
+      if (!readOnly) {
+        linkGroup.push({
+          label: "リンク情報を取得（タイトル/favicon）",
+          onSelect: () => fetchLinkMeta(nodeId),
+        });
+      }
     }
     groups.push(linkGroup);
 
     // --- Structure: add child / collapse ---
     const structureGroup: ContextMenuAction[] = [];
-    structureGroup.push({
-      label: "子ノードを追加",
-      onSelect: () => {
-        const next = dispatch({ type: "addChild", nodeId }, "add-child");
-        if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
-        if (noteId) saveNote(next.document.model);
-        focusEditorSoon();
-      },
-    });
+    if (!readOnly) {
+      structureGroup.push({
+        label: "子ノードを追加",
+        onSelect: () => {
+          const next = dispatch({ type: "addChild", nodeId }, "add-child");
+          if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+          if (noteId) saveNote(next.document.model);
+          focusEditorSoon();
+        },
+      });
+    }
     if (hasChildren) {
       structureGroup.push({
         label: node.collapsed ? "展開する" : "折りたたむ",
@@ -1055,7 +1082,7 @@ export function MindmapEditorView({
 
     // --- Kind conversion (root excluded — it's the note title) ---
     const typeGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       const setType = (nodeType: NodeType) => () => {
         const next = dispatch(
           { type: "setNodeType", nodeId, nodeType },
@@ -1077,7 +1104,7 @@ export function MindmapEditorView({
     // The raw value stays on the node; only the card's rendering changes.
     const numGroup: ContextMenuAction[] = [];
     const parentInfo = findParentAndIndex(modelRef.current, nodeId);
-    if (parentInfo?.parent.type === "object" && type === "text") {
+    if (!readOnly && parentInfo?.parent.type === "object" && type === "text") {
       const { value } = parseField(node.text);
       if (inferValueKind(value) === "number") {
         const applyNum = (patch: {
@@ -1117,7 +1144,7 @@ export function MindmapEditorView({
     // Card field rows render at the card's fixed rhythm, so per-node font
     // styling is hidden for them (the numeric format group above applies).
     const formatGroup: ContextMenuAction[] = [];
-    if (type === "text" && parentInfo?.parent.type !== "object") {
+    if (!readOnly && type === "text" && parentInfo?.parent.type !== "object") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
       const current = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bigger = SIZES.find((s) => s > current);
@@ -1153,7 +1180,7 @@ export function MindmapEditorView({
 
     // --- Media: image upload (R2). Replaces the node's content ---
     const mediaGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       mediaGroup.push({
         label: "画像をアップロード",
         onSelect: () => triggerImageUpload(nodeId),
@@ -1173,7 +1200,7 @@ export function MindmapEditorView({
 
     // --- Destructive ---
     const dangerGroup: ContextMenuAction[] = [];
-    if (!isRoot) {
+    if (!isRoot && !readOnly) {
       dangerGroup.push({
         label: "ノードを削除",
         danger: true,
@@ -1197,6 +1224,7 @@ export function MindmapEditorView({
     dispatch,
     toggleCollapse,
     noteId,
+    readOnly,
     saveNote,
     fetchLinkMeta,
     triggerImageUpload,
@@ -2243,7 +2271,7 @@ export function MindmapEditorView({
             listening: false,
           })
         );
-        if (node.childCount === 0) {
+        if (node.childCount === 0 && !readOnly) {
           // Empty card: an inline "add field" button in place of the hint text.
           // Clicking it appends the first field row (see addFieldToCard); the
           // handler stops bubbling so the card's own mousedown doesn't also
@@ -2381,9 +2409,32 @@ export function MindmapEditorView({
       // either state) by the unified toggle-button pass below, so nothing to do
       // here.
 
+      // Select the whole node without entering edit mode (single click in
+      // select mode / any readOnly activation) — one payload, three call sites.
+      const selectWholeNode = () =>
+        dispatch({
+          type: "activateNode",
+          nodeId: node.id,
+          cursorPos: 0,
+          selectionEnd: node.text.length,
+          editing: false,
+        });
+
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
         if (isNonPrimaryButton(e)) return;
+        if (readOnly) {
+          // 閲覧専用: 選択だけ行い、ドラッグはステージのパンに任せる
+          // （cancelBubble しないのでノード上から掴んでもパンできる）。
+          // markdownノードはここで dispatch すると再描画でグループが作り
+          // 直され、mouseup 時に Konva の click 判定（同一シェイプ比較）が
+          // 崩れてパネルが開かない。選択もパネルも click 側で行う。
+          if (node.type !== "markdown") {
+            selectWholeNode();
+            focusEditorSoon();
+          }
+          return;
+        }
         e.cancelBubble = true;
         const stage = konvaStageRef.current;
         if (!stage) return;
@@ -2432,13 +2483,7 @@ export function MindmapEditorView({
           });
         } else {
           // Select mode: whole text selected so a follow-up keypress replaces it.
-          dispatch({
-            type: "activateNode",
-            nodeId: node.id,
-            cursorPos: 0,
-            selectionEnd: node.text.length,
-            editing: false,
-          });
+          selectWholeNode();
         }
 
         // Arm a drag (it only becomes "real" once the pointer moves past
@@ -2480,10 +2525,22 @@ export function MindmapEditorView({
       });
 
       // Double-click → select all text
-      group.on("dblclick dbltap", () => {
-        dispatch({ type: "selectAllInNode", nodeId: node.id });
-        focusEditorSoon();
-      });
+      if (!readOnly) {
+        group.on("dblclick dbltap", () => {
+          dispatch({ type: "selectAllInNode", nodeId: node.id });
+          focusEditorSoon();
+        });
+      }
+
+      // 閲覧専用: markdownノードはクリックで全文をサイドパネル表示（編集時は
+      // 「編集意図」フリップ経由で開くが、readOnly では editing に入れないため
+      // ここで直接開く）。パン後は Konva がクリックを発火しないので誤爆しない。
+      if (readOnly && node.type === "markdown") {
+        group.on("click tap", () => {
+          selectWholeNode();
+          if (node.text.trim() !== "") setMdPanelNodeId(node.id);
+        });
+      }
 
       // Right-click → open the node context menu at the cursor.
       group.on("contextmenu", (e: any) => {
@@ -2621,7 +2678,7 @@ export function MindmapEditorView({
       perfRef.current.redrawLastMs = now - perfStart;
       perfRef.current.redrawDrawMs += now - drawStart;
     }
-  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, viewportTick]);
+  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, readOnly, viewportTick]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -2995,6 +3052,13 @@ export function MindmapEditorView({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // 静的表示（readOnly）と編集ボタンの中身で共用するタイトル。
+  const titleSpan = (
+    <span className="truncate text-base font-semibold tracking-tight">
+      {title || "無題"}
+    </span>
+  );
+
   return (
     <div className="flex flex-col h-full">
       <CommandPalette
@@ -3076,7 +3140,9 @@ export function MindmapEditorView({
               </svg>
             </Link>
           )}
-          {editingTitle ? (
+          {readOnly ? (
+            titleSpan
+          ) : editingTitle ? (
             <input
               type="text"
               autoFocus
@@ -3103,9 +3169,7 @@ export function MindmapEditorView({
               className="flex min-w-0 items-center gap-2 rounded-lg px-1 text-left hover:bg-slate-100"
               title="タイトルを編集"
             >
-              <span className="truncate text-base font-semibold tracking-tight">
-                {title || "無題"}
-              </span>
+              {titleSpan}
               <span className="text-sm text-slate-400">✎</span>
             </button>
           )}
@@ -3116,7 +3180,7 @@ export function MindmapEditorView({
             onLayoutChange={onLayoutChange}
             zoom={zoomControls}
           />
-          {noteId && (
+          {noteId && !readOnly && (
             <>
               <span
                 ref={saveStatusRef}
@@ -3131,7 +3195,7 @@ export function MindmapEditorView({
               />
             </>
           )}
-          {!noteId && onSaveToAccount && (
+          {!noteId && !readOnly && onSaveToAccount && (
             <button
               onClick={handleSaveToAccount}
               className="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white transition hover:bg-emerald-700"
@@ -3166,11 +3230,14 @@ export function MindmapEditorView({
           const n = mdPanelNodeId ? findNode(model, mdPanelNodeId) : null;
           if (!n) return null;
           return (
-            <MarkdownPanel
-              source={n.text}
-              onChange={(text) => handleMarkdownEdit(n.id, text)}
-              onClose={() => setMdPanelNodeId(null)}
-            />
+            <Suspense fallback={null}>
+              <MarkdownPanel
+                source={n.text}
+                readOnly={readOnly}
+                onChange={(text) => handleMarkdownEdit(n.id, text)}
+                onClose={() => setMdPanelNodeId(null)}
+              />
+            </Suspense>
           );
         })()}
         <textarea

@@ -30,6 +30,12 @@ export interface NoteEditorInit {
   initialContent?: string;
   initialTitle?: string;
   initialIsPublic?: boolean;
+  /**
+   * 閲覧専用モード。編集モードへの突入とドキュメント変更を dispatch の段階で
+   * 一括遮断する（例外: 折りたたみトグルは閲覧操作として許可）。保存系
+   * （autosave / 離脱ガード / beforeunload）もすべて無効になる。
+   */
+  readOnly?: boolean;
 }
 
 /** A pending Inertia visit held back while an unsaved edit is flushed. */
@@ -58,6 +64,8 @@ export interface NoteEditorEngine {
   undo: () => void;
   redo: () => void;
   noteId?: string;
+  /** 閲覧専用モード（ビュー側は編集系UIを隠す）。 */
+  readOnly: boolean;
   // --- navigation guard (rendered as a confirm dialog by the active view) ---
   leaveConfirm: LeaveConfirm | null;
   setLeaveConfirm: (v: LeaveConfirm | null) => void;
@@ -69,6 +77,7 @@ export function useNoteEditor({
   initialContent,
   initialTitle,
   initialIsPublic,
+  readOnly = false,
 }: NoteEditorInit): NoteEditorEngine {
   // --- Single source of truth: the full editor state ---
   // Exactly one node is always selected; the root starts active.
@@ -98,8 +107,13 @@ export function useNoteEditor({
   const saveTimerRef = useRef<any>(null);
   // Serialized content last confirmed persisted. The server just handed us the
   // initial model, so that's our clean baseline; every successful save advances
-  // it. `isDirty()` compares the live model against this.
-  const lastSavedContentRef = useRef<string>(serializeModel(model));
+  // it. `isDirty()` compares the live model against this. Lazily initialized:
+  // useRef(arg) は毎レンダーで引数を評価するので、素直に書くとレンダー毎に
+  // モデル全体を serialize してしまう（readOnly では丸ごと不要）。
+  const lastSavedContentRef = useRef<string | null>(null);
+  if (lastSavedContentRef.current === null && noteId && !readOnly) {
+    lastSavedContentRef.current = serializeModel(model);
+  }
   // Monotonic save-dispatch counter. An edit can arrive while a save is still
   // in flight, so two saves run concurrently and their responses may land out
   // of order. Each save takes the next `saveSeqRef` on dispatch; on success we
@@ -120,16 +134,32 @@ export function useNoteEditor({
   const dispatch = useCallback(
     (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
+      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する。
+      // クリックによる選択は活かしたいので、activateNode は編集突入だけ剥がす。
+      if (readOnly && action.type === "activateNode" && action.editing) {
+        action = { ...action, editing: false };
+      }
       const next = editorReducer(prev, action);
       if (next === prev) return prev;
-      if (undoType && next.document !== prev.document) {
+      if (readOnly) {
+        // 編集モードに入る遷移は捨てる（startEditing / dragSelect など）。
+        if (next.view.editing) return prev;
+        // モデルを変えるアクションも捨てる。折りたたみだけは閲覧操作として通す
+        // （保存系は readOnly で全部止まっているので永続化はされない）。
+        if (
+          next.document.model !== prev.document.model &&
+          action.type !== "toggleCollapse"
+        ) {
+          return prev;
+        }
+      } else if (undoType && next.document !== prev.document) {
         undoManagerRef.current.push(undoType, prev.document, next.document);
       }
       stateRef.current = next;
       setStateRaw(next);
       return next;
     },
-    []
+    [readOnly]
   );
 
   // --- Save ---
@@ -155,7 +185,7 @@ export function useNoteEditor({
 
   const saveNote = useCallback(
     async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
-      if (!noteId) return true;
+      if (!noteId || readOnly) return true;
       const content = serializeModel(currentModel);
       const seq = ++saveSeqRef.current;
       updateSaveStatus("保存中...");
@@ -196,13 +226,14 @@ export function useNoteEditor({
   const isDirty = useCallback(
     () =>
       !!noteId &&
+      !readOnly &&
       serializeModel(modelRef.current) !== lastSavedContentRef.current,
-    [noteId]
+    [noteId, readOnly]
   );
 
   // Debounced auto-save (with retry-on-failure).
   useEffect(() => {
-    if (!noteId) return;
+    if (!noteId || readOnly) return;
     // Don't surface the "unsaved" state as visible text — it's visual noise.
     // Clear the status so the header stays quiet until the save itself flips
     // this to 保存中... → 保存済み.
@@ -224,14 +255,14 @@ export function useNoteEditor({
       cancelled = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [model, noteId, saveNote, isDirty, updateSaveStatus]);
+  }, [model, noteId, readOnly, saveNote, isDirty, updateSaveStatus]);
 
   // --- Guard against leaving with unsaved edits ---
   // Tab close / reload / hard navigation: fire a best-effort keepalive save so
   // the last edit survives, and raise the browser's native confirm as a
   // backstop in case that request doesn't land.
   useEffect(() => {
-    if (!noteId) return;
+    if (!noteId || readOnly) return;
     const handler = (e: BeforeUnloadEvent) => {
       if (!isDirty()) return;
       const current = modelRef.current;
@@ -251,14 +282,14 @@ export function useNoteEditor({
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [noteId, isDirty, isPublic]);
+  }, [noteId, readOnly, isDirty, isPublic]);
 
   // Client-side (Inertia) navigation — e.g. the "← 一覧" link or the browser
   // back button. When there are unsaved edits, hold the visit, flush the save,
   // then let it proceed; only interrupt the user with a dialog if that save
   // fails (otherwise navigation stays invisible, matching the autosave UX).
   useEffect(() => {
-    if (!noteId) return;
+    if (!noteId || readOnly) return;
     return router.on("before", (event) => {
       // The visit we re-issue after a successful flush must pass through.
       if (bypassNavGuardRef.current) {
@@ -285,7 +316,7 @@ export function useNoteEditor({
         }
       })();
     });
-  }, [noteId, isDirty, saveNote]);
+  }, [noteId, readOnly, isDirty, saveNote]);
 
   // --- Undo manager: commit pending text using the latest state ---
   useEffect(() => {
@@ -331,6 +362,7 @@ export function useNoteEditor({
     undo,
     redo,
     noteId,
+    readOnly,
     leaveConfirm,
     setLeaveConfirm,
     bypassNavGuardRef,
