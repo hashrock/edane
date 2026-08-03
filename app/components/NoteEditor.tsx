@@ -10,6 +10,8 @@ interface Props {
   initialTitle?: string;
   initialIsPublic?: boolean;
   embed?: boolean;
+  /** 閲覧専用モード（公開ノートの閲覧ページなど）。編集・保存を全面無効化。 */
+  readOnly?: boolean;
   onSaveToAccount?: (note: { title: string; content: string }) => void;
 }
 

@@ -75,6 +75,7 @@ export default function OutlineEditor({
     undo,
     redo,
     noteId,
+    readOnly,
     leaveConfirm,
     setLeaveConfirm,
     bypassNavGuardRef,
@@ -295,7 +296,11 @@ export default function OutlineEditor({
             </svg>
           </Link>
         )}
-        {editingTitle ? (
+        {readOnly ? (
+          <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight">
+            {title || "無題"}
+          </span>
+        ) : editingTitle ? (
           <input
             type="text"
             autoFocus
@@ -329,13 +334,13 @@ export default function OutlineEditor({
             onLayoutChange={onLayoutChange}
           />
         )}
-        {noteId && (
+        {noteId && !readOnly && (
           <span
             ref={saveStatusRef}
             className="shrink-0 whitespace-nowrap text-xs text-slate-500"
           />
         )}
-        {noteId && (
+        {noteId && !readOnly && (
           <PublicityDropdown
             isPublic={isPublic}
             onChange={(next) => {
@@ -344,7 +349,7 @@ export default function OutlineEditor({
             }}
           />
         )}
-        {!noteId && onSaveToAccount && (
+        {!noteId && !readOnly && onSaveToAccount && (
           <button
             onClick={() =>
               onSaveToAccount({
@@ -495,7 +500,7 @@ export default function OutlineEditor({
               );
             })}
           </ul>
-        {model.children.length === 0 && (
+        {model.children.length === 0 && !readOnly && (
           <button
             onClick={() => withSave("add-child", { type: "addChild", nodeId: model.id })}
             className="mx-auto mt-4 block rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50"
@@ -528,6 +533,7 @@ export default function OutlineEditor({
       </div>
 
       {/* Bottom action bar: structural edits for touch (no hardware keyboard). */}
+      {!readOnly && (
       <div className="flex shrink-0 items-stretch justify-around gap-1 border-t border-slate-200 bg-white px-1 py-1.5">
         {(
           [
@@ -574,6 +580,7 @@ export default function OutlineEditor({
           <TrashIcon width="20" height="20" />
         </button>
       </div>
+      )}
     </div>
   );
 }

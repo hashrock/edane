@@ -4,6 +4,8 @@ import { renderMarkdownHtml } from "../lib/markdownHtml";
 interface Props {
   /** The markdown source to show / edit. */
   source: string;
+  /** 閲覧専用: 表示/編集トグルを隠し、表示モードに固定する。 */
+  readOnly?: boolean;
   /** Persist an edit to the source. */
   onChange: (next: string) => void;
   /** Close the panel. */
@@ -16,8 +18,14 @@ interface Props {
  * open, so — unlike an always-on per-node overlay — it needs no canvas position
  * sync: it's a fixed panel, not pinned to the node.
  */
-export default function MarkdownPanel({ source, onChange, onClose }: Props) {
-  const [mode, setMode] = useState<"view" | "edit">("view");
+export default function MarkdownPanel({
+  source,
+  readOnly,
+  onChange,
+  onClose,
+}: Props) {
+  const [modeRaw, setMode] = useState<"view" | "edit">("view");
+  const mode = readOnly ? "view" : modeRaw;
   const [draft, setDraft] = useState(source);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,6 +60,7 @@ export default function MarkdownPanel({ source, onChange, onClose }: Props) {
       <header className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-4 py-2.5">
         <span className="text-sm font-semibold text-slate-700">Markdown</span>
         <div className="ml-auto flex items-center gap-1">
+          {!readOnly && (
           <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
             <button
               type="button"
@@ -76,6 +85,7 @@ export default function MarkdownPanel({ source, onChange, onClose }: Props) {
               編集
             </button>
           </div>
+          )}
           <button
             type="button"
             onClick={onClose}

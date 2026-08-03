@@ -3,7 +3,7 @@
  * node's card is sized and where its title / separator / field rows sit.
  *
  * Both the layout measurement (nodeUtils.flattenToNodes) and the canvas draw
- * (MindmapEditor / MindmapViewer) read from here, so the card box and its
+ * (MindmapEditor) read from here, so the card box and its
  * contents can never drift apart — the same contract measureModelNode gives
  * plain nodes.
  *
