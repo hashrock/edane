@@ -11,6 +11,7 @@ import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
+import { resolveEditPageAccess } from "./utils/noteEditAccess";
 import { assertNever } from "./lib/assertNever";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
@@ -538,21 +539,30 @@ const routes = app
   })
   .get("/notes/:id/edit", async (c) => {
     const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const id = c.req.param("id");
     const db = drizzle(c.env.DB);
-    const note = await db
-      .select()
-      .from(notes)
-      .where(eq(notes.id, c.req.param("id")))
-      .get();
-    if (!note || note.userId !== user.id || note.deletedAt) return c.notFound();
-
-    const content =
-      (await decodeStoredNoteContent(note.content, note.isPublic, c.env.ENCRYPTION_KEY)) ?? "";
-    return c.render("Notes/Edit", {
-      user,
-      note: { id: note.id, title: note.title, content, isPublic: note.isPublic },
-    });
+    const note = await db.select().from(notes).where(eq(notes.id, id)).get();
+    const access = resolveEditPageAccess({ note, viewer: user });
+    switch (access.kind) {
+      case "not-found":
+        return c.notFound();
+      case "redirect-to-view":
+        return c.redirect(`/notes/${id}`);
+      case "redirect-to-home":
+        return c.redirect("/");
+      case "render": {
+        const owned = access.note;
+        const content =
+          (await decodeStoredNoteContent(owned.content, owned.isPublic, c.env.ENCRYPTION_KEY)) ??
+          "";
+        return c.render("Notes/Edit", {
+          user: access.viewer,
+          note: { id: owned.id, title: owned.title, content, isPublic: owned.isPublic },
+        });
+      }
+      default:
+        return assertNever(access);
+    }
   })
   .get("/notes/:id", async (c) => {
     const db = drizzle(c.env.DB);
