@@ -25,6 +25,19 @@ import {
 } from "../application/persistence";
 import { UndoManager } from "../application/undoManager";
 
+/**
+ * updateSaveStatus に渡せる文言。フェード演出の分岐（"" / "保存済み" / それ以外）
+ * が呼び出し側の文字列と一致し続けることを型で保証する。
+ */
+export type SaveStatusText =
+  | ""
+  | "保存中..."
+  | "保存済み"
+  | "保存失敗"
+  | "画像アップロード中..."
+  | "アップロード失敗"
+  | "容量超過（上限10MB）";
+
 export interface NoteEditorInit {
   noteId?: string;
   initialContent?: string;
@@ -55,7 +68,7 @@ export interface NoteEditorEngine {
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved / guest mode). */
   saveNote: (currentModel: MindMapModel, pub?: boolean) => Promise<boolean>;
-  updateSaveStatus: (status: string) => void;
+  updateSaveStatus: (status: SaveStatusText) => void;
   saveStatusRef: React.RefObject<HTMLSpanElement | null>;
   isDirty: () => boolean;
   isPublic: boolean;
@@ -163,7 +176,7 @@ export function useNoteEditor({
   );
 
   // --- Save ---
-  const updateSaveStatus = useCallback((status: string) => {
+  const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
     el.textContent = status;
