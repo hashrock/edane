@@ -375,7 +375,14 @@ export function cloneWithNewIds(node: MindMapModel): MindMapModel {
   };
 }
 
-/** Indent: make node the last child of its previous sibling */
+/**
+ * Indent: make node the last child of its previous sibling. Expands the
+ * sibling first if it was collapsed — like addChildToNode/moveBranch's
+ * callers, this must never move content into a hidden destination (see
+ * {@link visibleChildrenOf}); the sibling being collapsed doesn't hide
+ * itself, so the node being indented could otherwise vanish from
+ * `getFlatOrder` while still being the active node.
+ */
 export function indentNode(
   model: MindMapModel,
   nodeId: string
@@ -386,6 +393,7 @@ export function indentNode(
   if (!result || result.index === 0) return cloned;
   const [node] = result.parent.children.splice(result.index, 1);
   const prevSibling = result.parent.children[result.index - 1];
+  prevSibling.collapsed = false;
   prevSibling.children.push(node);
   return cloned;
 }
@@ -496,9 +504,13 @@ export function moveBranch(
  * the grandparent). The predecessor is:
  *   - the node's previous sibling if it has one — the node's text is appended
  *     to that sibling and the node's children become the sibling's trailing
- *     children; or
+ *     children (expanding the sibling first if it was collapsed, so the
+ *     merged-in children stay visible — see {@link indentNode}); or
  *   - otherwise the node's parent — the text is appended to the parent and the
- *     node's children take the node's former slot (as `removeNode` would).
+ *     node's children take the node's former slot (as `removeNode` would). The
+ *     parent can't be collapsed here: a collapsed node hides its own
+ *     descendants (including `node`, which is being merged), so `node`
+ *     couldn't have been reachable/active in the first place.
  * The root has no predecessor → returns null (caller treats as no-op).
  *
  * Returns the new model, the id the caret should land on (the merge target) and
@@ -517,6 +529,7 @@ export function mergeIntoPredecessor(
   if (info.index > 0) {
     // Merge into the previous sibling; children trail the sibling's own.
     const target = info.parent.children[info.index - 1];
+    target.collapsed = false;
     const caretPos = target.text.length;
     target.text += node.text;
     target.children.push(...node.children);
