@@ -1,9 +1,10 @@
 /**
  * Round 2 characterization tests — run against the REAL edane domain/application
- * code (no re-implementation). Unlike formal/repro/reproduce.test.ts (which pins
- * the FIXED round-1 behaviour), these pin the CURRENT, still-open round-2
- * findings, so they read as executable evidence for FINDINGS.md and will flip
- * (start failing) the moment a fix lands — a built-in check that the fix works.
+ * code (no re-implementation). FINDING A pins the CURRENT, still-open finding,
+ * so it reads as executable evidence for FINDINGS.md and will flip (start
+ * failing) the moment a fix lands. FINDING B was fixed (see FINDINGS.md) — like
+ * formal/repro/reproduce.test.ts's round-1 tests, its tests now pin the
+ * CORRECTED behaviour so the fix can't silently regress.
  *
  * Run:  npx vitest run --config formal/round2/repro/vitest.config.ts
  */
@@ -75,8 +76,8 @@ describe("FINDING A (Z3 view_faithfulness / TLA+ EditUndo): undo leaves a stale 
   });
 });
 
-describe("FINDING B (Z3 collapse_visibility / Alloy CollapseVisibility): edits hide content under a collapsed sibling", () => {
-  it("Backspace-at-start merges into a COLLAPSED previous sibling, hiding the moved children", () => {
+describe("FINDING B (Z3 collapse_visibility / Alloy CollapseVisibility): edits no longer hide content under a collapsed sibling (fixed)", () => {
+  it("Backspace-at-start into a previously-collapsed sibling expands it, keeping the moved children visible", () => {
     // A is a folded section (collapsed, hides A1). B sits below it with children.
     const model = mk("root", "Root", [
       mk("A", "A", [mk("A1", "A1")], { collapsed: true }),
@@ -90,21 +91,21 @@ describe("FINDING B (Z3 collapse_visibility / Alloy CollapseVisibility): edits h
       { type: "backspaceAtStart" }
     );
 
-    // B's text merged into A; B1/B2 became A's (hidden) children and dropped out
-    // of navigation entirely.
+    // B's text merged into A; B1/B2 became A's children.
     expect(findNode(next.document.model, "A")!.text).toBe("AB");
     expect(findNode(next.document.model, "A")!.children.map((c) => c.id)).toEqual([
       "A1",
       "B1",
       "B2",
     ]);
+    // A was expanded by the merge, so nothing dropped out of navigation.
+    expect(findNode(next.document.model, "A")!.collapsed).toBe(false);
     const order = getFlatOrder(next.document.model);
-    expect(order).toEqual(["root", "A"]); // B1, B2 silently vanished
-    // The caret even lands on the collapsed node A.
+    expect(order).toEqual(["root", "A", "A1", "B1", "B2"]);
     expect(next.view.activeNodeId).toBe("A");
   });
 
-  it("Tab-indent under a COLLAPSED previous sibling hides the ACTIVE node itself", () => {
+  it("Tab-indent under a previously-collapsed sibling expands it, keeping the ACTIVE node visible", () => {
     const model = mk("root", "Root", [
       mk("A", "A", [mk("A1", "A1")], { collapsed: true }),
       mk("B", "B"),
@@ -113,9 +114,10 @@ describe("FINDING B (Z3 collapse_visibility / Alloy CollapseVisibility): edits h
       { document: { model, clipboard: null }, view: view({ activeNodeId: "B" }) },
       { type: "tab", shift: false }
     );
-    // B is now a hidden child of collapsed A, yet it stays the active node.
+    // B is now A's child, and stays the active node.
     expect(next.view.activeNodeId).toBe("B");
-    expect(getFlatOrder(next.document.model)).toEqual(["root", "A"]);
+    expect(findNode(next.document.model, "A")!.collapsed).toBe(false);
+    expect(getFlatOrder(next.document.model)).toEqual(["root", "A", "A1", "B"]);
     expect(findNode(next.document.model, "A")!.children.map((c) => c.id)).toEqual(["A1", "B"]);
   });
 

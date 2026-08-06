@@ -279,6 +279,30 @@ describe("mergeIntoPredecessor", () => {
   it("returns null when the node is not found", () => {
     expect(mergeIntoPredecessor(tree(), "missing")).toBeNull();
   });
+
+  it("expands a collapsed previous sibling so the merged-in children stay visible", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          collapsed: true,
+          children: [{ id: "a1", text: "A1", children: [] }],
+        },
+        {
+          id: "b",
+          text: "B",
+          children: [{ id: "b1", text: "B1", children: [] }],
+        },
+      ],
+    };
+    const res = mergeIntoPredecessor(model, "b")!;
+    const a = findNode(res.model, "a")!;
+    expect(a.collapsed).toBe(false);
+    expect(getFlatOrder(res.model)).toEqual(["root", "a", "a1", "b1"]);
+  });
 });
 
 describe("mergeSuccessorInto", () => {
@@ -492,6 +516,26 @@ describe("indentNode edge cases", () => {
     // "a" is the first child of root (index 0)
     const result = indentNode(model, "a");
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+
+  it("expands a collapsed previous sibling so the indented node stays visible", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          collapsed: true,
+          children: [{ id: "a1", text: "A1", children: [] }],
+        },
+        { id: "b", text: "B", children: [] },
+      ],
+    };
+    const result = indentNode(model, "b");
+    const a = findNode(result, "a")!;
+    expect(a.collapsed).toBe(false);
+    expect(getFlatOrder(result)).toEqual(["root", "a", "a1", "b"]);
   });
 });
 
