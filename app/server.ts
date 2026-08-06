@@ -8,7 +8,7 @@ import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken } from "./utils/apiToken";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent } from "./utils/crypto";
+import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteContentForStorage } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess } from "./utils/noteEditAccess";
@@ -451,10 +451,7 @@ const routes = app
     // Guest-mode imports arrive with their own serialized content; a plain
     // "new note" falls back to the starter topics.
     const plain = body.content ?? "トピック1\nトピック2";
-    // Public notes store plaintext; private notes are encrypted at rest
-    const content = isPublic
-      ? plain
-      : await encrypt(plain, c.env.ENCRYPTION_KEY);
+    const content = await encodeNoteContentForStorage(plain, isPublic, c.env.ENCRYPTION_KEY);
 
     await db.insert(notes).values({
       id,

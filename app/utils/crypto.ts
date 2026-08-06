@@ -86,3 +86,17 @@ export async function decodeStoredNoteContent(
     return null;
   }
 }
+
+/**
+ * Write-side counterpart to decodeStoredNoteContent: public notes are stored
+ * plaintext, private notes are stored encrypted. Kept here (rather than
+ * inlined at each call site) so the storage policy has one home instead of
+ * drifting between a read-side helper and ad-hoc ternaries.
+ */
+export async function encodeNoteContentForStorage(
+  content: string,
+  isPublic: boolean,
+  secret: string
+): Promise<string> {
+  return isPublic ? content : await encrypt(content, secret);
+}
