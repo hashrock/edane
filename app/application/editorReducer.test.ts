@@ -49,6 +49,7 @@ function stateAt(model: MindMapModel, nodeId: string): EditorState {
       editingText: node.text,
       cursorPos: node.text.length,
       selectionEnd: node.text.length,
+      lastChildByParent: {},
     },
   };
 }
@@ -960,6 +961,102 @@ describe("moveToParent", () => {
   });
 });
 
+describe("moveToChild (last-visited-child memory)", () => {
+  /** Root → P(p1, p2, p3), Q */
+  function branchModel(): MindMapModel {
+    return {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "p",
+          text: "P",
+          children: [
+            { id: "p1", text: "P1", children: [] },
+            { id: "p2", text: "P2", children: [] },
+            { id: "p3", text: "P3", children: [] },
+          ],
+        },
+        { id: "q", text: "Q", children: [] },
+      ],
+    };
+  }
+
+  it("lands on the first child when the branch has never been entered", () => {
+    const next = editorReducer(stateAt(branchModel(), "p"), {
+      type: "moveToChild",
+    });
+    expect(next.view.activeNodeId).toBe("p1");
+  });
+
+  it("returns to the child the focus left from (← then → round-trips)", () => {
+    const model = branchModel();
+    let s = stateAt(model, "p2");
+    s = editorReducer(s, { type: "moveToParent" });
+    expect(s.view.activeNodeId).toBe("p");
+    s = editorReducer(s, { type: "moveToChild" });
+    expect(s.view.activeNodeId).toBe("p2");
+  });
+
+  it("remembers where the user stopped, not where they entered", () => {
+    // Enter at p1, arrow down to p3, go up to P: → must return to p3.
+    const model = branchModel();
+    let s = stateAt(model, "p");
+    s = editorReducer(s, { type: "moveToChild" }); // p1
+    s = editorReducer(s, { type: "moveDown" }); // p2
+    s = editorReducer(s, { type: "moveDown" }); // p3
+    s = editorReducer(s, { type: "moveToParent" }); // P
+    s = editorReducer(s, { type: "moveToChild" });
+    expect(s.view.activeNodeId).toBe("p3");
+  });
+
+  it("survives a detour through another branch (memory is per parent)", () => {
+    const model = branchModel();
+    let s = stateAt(model, "p2");
+    s = editorReducer(s, { type: "moveToParent" }); // P
+    s = editorReducer(s, { type: "moveDown" }); // p1 — visiting P's branch again
+    s = editorReducer(s, { type: "moveToParent" }); // P (memory now p1)
+    s = editorReducer(s, { type: "activateNode" as const, nodeId: "q", editing: false, cursorPos: 0, selectionEnd: 0 });
+    s = editorReducer(s, { type: "activateNode" as const, nodeId: "p", editing: false, cursorPos: 0, selectionEnd: 0 });
+    s = editorReducer(s, { type: "moveToChild" });
+    expect(s.view.activeNodeId).toBe("p1");
+  });
+
+  it("falls back to the first child when the remembered child is gone", () => {
+    // A stale entry — the node was deleted, or moved under another parent.
+    const model = branchModel();
+    const base = stateAt(model, "p");
+    const s: EditorState = {
+      ...base,
+      view: { ...base.view, lastChildByParent: { p: "ghost" } },
+    };
+    expect(editorReducer(s, { type: "moveToChild" }).view.activeNodeId).toBe(
+      "p1"
+    );
+  });
+
+  it("is a no-op on a leaf", () => {
+    const s = stateAt(branchModel(), "q");
+    expect(editorReducer(s, { type: "moveToChild" })).toBe(s);
+  });
+
+  it("refuses to focus a hidden node: collapsed parents are the caller's job", () => {
+    const model = branchModel();
+    model.children[0].collapsed = true;
+    const s = stateAt(model, "p");
+    expect(editorReducer(s, { type: "moveToChild" })).toBe(s);
+  });
+
+  it("keeps the record's identity stable when nothing new is recorded", () => {
+    const model = branchModel();
+    const s = stateAt(model, "p2");
+    const up = editorReducer(s, { type: "moveToParent" });
+    const down = editorReducer(up, { type: "moveToChild" });
+    // Re-recording p2 under P must not allocate a new record.
+    expect(down.view.lastChildByParent).toBe(up.view.lastChildByParent);
+  });
+});
+
 describe("addChild", () => {
   it("adds a new empty child to a node and focuses it", () => {
     const model = sampleModel();
@@ -1273,6 +1370,7 @@ describe("replace", () => {
         editingText: "New",
         cursorPos: 0,
         selectionEnd: 3,
+        lastChildByParent: {},
       },
     };
     const next = editorReducer(s, { type: "replace", state: replacement });
@@ -1290,6 +1388,7 @@ describe("reconcileView", () => {
       editingText: "A1",
       cursorPos: 2,
       selectionEnd: 2,
+      lastChildByParent: {},
     };
     expect(reconcileView(view, document)).toBe(view);
   });
@@ -1305,6 +1404,7 @@ describe("reconcileView", () => {
       editingText: "stale",
       cursorPos: 3,
       selectionEnd: 3,
+      lastChildByParent: {},
     };
     const reconciled = reconcileView(view, document);
     expect(reconciled.activeNodeId).toBe(model.id);
@@ -1323,6 +1423,7 @@ describe("reconcileView", () => {
       editingText: "",
       cursorPos: 0,
       selectionEnd: 0,
+      lastChildByParent: {},
     };
     const reconciled = reconcileView(view, document);
     expect(reconciled.activeNodeId).toBe(model.id);
@@ -1345,6 +1446,7 @@ describe("reconcileView", () => {
       editingText: "B",
       cursorPos: 1,
       selectionEnd: 1,
+      lastChildByParent: {},
     };
     const reconciled = reconcileView(view, document, prevDocument);
     expect(reconciled.activeNodeId).toBe("a1");
@@ -1370,6 +1472,7 @@ describe("reconcileView", () => {
       editingText: "A1",
       cursorPos: 0,
       selectionEnd: 0,
+      lastChildByParent: {},
     };
     const reconciled = reconcileView(view, document, prevDocument);
     expect(reconciled.activeNodeId).toBe("b");

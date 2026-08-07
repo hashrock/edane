@@ -53,6 +53,7 @@ function baseState(clipboard: MindMapModel | null = null): EditorState {
       editingText: "A1",
       cursorPos: 2,
       selectionEnd: 2,
+      lastChildByParent: {},
     },
   };
 }
@@ -104,6 +105,7 @@ const ACTIONS = {
     anchorOffset: 0,
     focusOffset: 2,
   },
+  moveToChild: { type: "moveToChild" },
   insertSiblingAfter: { type: "insertSiblingAfter" },
   toggleCollapse: { type: "toggleCollapse", nodeId: "a" },
   addChild: { type: "addChild", nodeId: "a1" },
