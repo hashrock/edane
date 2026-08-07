@@ -12,6 +12,7 @@ import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteConte
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess } from "./utils/noteEditAccess";
+import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
@@ -126,8 +127,8 @@ app.put("/api/notes/:id", async (c) => {
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
 
-  const note = await db.select().from(notes).where(eq(notes.id, id)).get();
-  if (!note || note.userId !== user.id) {
+  const note = await loadOwnedNote(db, id, user.id);
+  if (!note) {
     return c.json({ error: "Not found" }, 404);
   }
 
@@ -470,12 +471,8 @@ const routes = app
     const user = c.get("user");
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
-    const note = await db
-      .select()
-      .from(notes)
-      .where(eq(notes.id, c.req.param("id")))
-      .get();
-    if (note && note.userId === user.id) {
+    const note = await loadOwnedNote(db, c.req.param("id"), user.id);
+    if (note) {
       await db
         .update(notes)
         .set({ deletedAt: new Date().toISOString() })
@@ -488,12 +485,8 @@ const routes = app
     const user = c.get("user");
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
-    const note = await db
-      .select()
-      .from(notes)
-      .where(eq(notes.id, c.req.param("id")))
-      .get();
-    if (note && note.userId === user.id) {
+    const note = await loadOwnedNote(db, c.req.param("id"), user.id);
+    if (note) {
       await db
         .update(notes)
         .set({ deletedAt: null })
@@ -506,12 +499,8 @@ const routes = app
     const user = c.get("user");
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
-    const note = await db
-      .select()
-      .from(notes)
-      .where(eq(notes.id, c.req.param("id")))
-      .get();
-    if (note && note.userId === user.id) {
+    const note = await loadOwnedNote(db, c.req.param("id"), user.id);
+    if (note) {
       await db.delete(notes).where(eq(notes.id, note.id));
     }
     return c.redirect("/trash", 303);
@@ -520,12 +509,8 @@ const routes = app
     const user = c.get("user");
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
-    const note = await db
-      .select()
-      .from(notes)
-      .where(eq(notes.id, c.req.param("id")))
-      .get();
-    if (note && note.userId === user.id) {
+    const note = await loadOwnedNote(db, c.req.param("id"), user.id);
+    if (note) {
       const body = await c.req
         .json<{ pinned?: boolean }>()
         .catch(() => ({}) as { pinned?: boolean });
