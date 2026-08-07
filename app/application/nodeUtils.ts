@@ -3,7 +3,13 @@
  */
 
 import { type MindMapModel, type NodeType, visibleChildrenOf } from "../domain/model";
-import { measureNodeBox, NODE_PADDING, nodeBoxWidth, nodeBoxHeight } from "../lib/measureText";
+import {
+  measureNodeBox,
+  NODE_PADDING,
+  NODE_MAX_CONTENT_WIDTH,
+  nodeBoxWidth,
+  nodeBoxHeight,
+} from "../lib/measureText";
 import { assertNever } from "../lib/assertNever";
 import { markdownTitle } from "./markdownCard";
 import { objectCardGeom } from "./objectCard";
@@ -20,6 +26,20 @@ export { NODE_PADDING, nodeBoxWidth, nodeBoxHeight };
 /** Extra card width (px) for a markdown node: doc glyph + line-count badge. */
 export const MD_CARD_LEAD = 24;
 export const MD_CARD_BADGE = 34;
+/**
+ * Width the markdown card's title may occupy — the content cap minus the glyph
+ * and badge columns. The card stays ONE line (the whole document is a panel
+ * away), so the title is ellipsised at this width rather than wrapped; the
+ * canvas draw sets the same width on its Konva.Text, so the measured box and
+ * the ellipsis land together.
+ */
+export const MD_TITLE_MAX_W =
+  NODE_MAX_CONTENT_WIDTH - MD_CARD_LEAD - MD_CARD_BADGE;
+
+/** Width a link node's title may occupy: the cap minus its favicon column. */
+export function linkTitleMaxWidth(hasFavicon: boolean): number {
+  return NODE_MAX_CONTENT_WIDTH - (hasFavicon ? FAVICON_SIZE + FAVICON_GAP : 0);
+}
 
 /** Flat node for rendering (computed from domain model via layout). */
 export interface MindMapNode {
@@ -57,6 +77,8 @@ export interface MindMapNode {
     top: number;
     key: string | null;
     display: string;
+    /** `display` pre-wrapped to the value column (see CardRowGeom). */
+    displayLines: string[];
     kind: ValueKind;
     keyColW: number;
     thumbW?: number;
@@ -104,6 +126,10 @@ export interface EditingNode {
  *  - link  → its fetched title (falling back to the URL) plus favicon room.
  *  - text / collapsed object → its text.
  *
+ * Every kind is bounded by NODE_MAX_CONTENT_WIDTH, each in the way that suits
+ * it: text-like content soft-wraps, the markdown card ellipsises its one-line
+ * title, and an image scales down (lib/imageCache). See the constant's doc.
+ *
  * The kind switch below is exhaustive (`assertNever` in the default branch)
  * so that adding a `NodeType` member — same trick as `STORED_NODE_TYPE_SET`
  * in domain/model.ts — fails to compile here until this function decides how
@@ -136,7 +162,11 @@ export function measureModelNode(
     }
     case "link": {
       const display = m.linkTitle || m.text;
-      const box = measureNodeBox(display, { fontSize: m.fontSize, bold: m.bold });
+      const box = measureNodeBox(display, {
+        fontSize: m.fontSize,
+        bold: m.bold,
+        maxWidth: linkTitleMaxWidth(!!m.favicon),
+      });
       return {
         width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
         height: box.height,
@@ -146,9 +176,17 @@ export function measureModelNode(
       // Shown as a COMPACT single-line card (doc glyph + title + line-count
       // badge); the full document renders in the HTML side panel on demand.
       // The box measures the (clipped) title plus fixed room for the glyph
-      // and badge.
-      const box = measureNodeBox(markdownTitle(m.text), { fontSize: m.fontSize });
-      return { width: box.width + MD_CARD_LEAD + MD_CARD_BADGE, height: box.height };
+      // and badge. The title never wraps — it is ellipsised at MD_TITLE_MAX_W,
+      // so the card keeps its one-line shape whatever the document holds.
+      const box = measureNodeBox(markdownTitle(m.text), {
+        fontSize: m.fontSize,
+        maxWidth: Infinity,
+      });
+      return {
+        width:
+          Math.min(box.width, MD_TITLE_MAX_W) + MD_CARD_LEAD + MD_CARD_BADGE,
+        height: box.height,
+      };
     }
     case "text":
     case "object": {
@@ -235,6 +273,7 @@ export function flattenToNodes(
             top: row.top,
             key: row.key,
             display: row.display,
+            displayLines: row.displayLines,
             kind: row.kind,
             keyColW: geom.keyColW,
             thumbW: row.thumbW,

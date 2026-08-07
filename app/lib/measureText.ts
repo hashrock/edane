@@ -7,13 +7,12 @@
  * we fall back to a cheap character-count estimate. The fallback keeps the
  * pure-logic layout tests deterministic and the server render working.
  *
- * Lines only ever break on explicit `\n` here: we lay out with `pre-wrap` and a
- * very large max width, so a node grows horizontally to fit its widest line and
- * vertically by its hard line count.
+ * Lines break on explicit `\n` and, beyond {@link NODE_MAX_CONTENT_WIDTH}, on
+ * soft wraps: a node grows horizontally only up to that cap, then vertically.
  */
 import {
   prepareWithSegments,
-  layout,
+  layoutWithLines,
   measureNaturalWidth,
 } from "@chenglou/pretext";
 
@@ -45,16 +44,37 @@ export interface MeasureOpts {
   fontSize?: number;
   /** Bold weight (default false). */
   bold?: boolean;
+  /**
+   * Content width cap in px (default {@link NODE_MAX_CONTENT_WIDTH}); text
+   * soft-wraps at it. Pass `Infinity` for a measurement that must stay on one
+   * line per hard break (e.g. the markdown card's ellipsised title).
+   */
+  maxWidth?: number;
 }
 /** Vertical padding added around the text block to form the node box. */
 const BOX_V_PAD = 14;
 /** Minimum node box height (keeps single-line nodes at their original size). */
 const MIN_BOX_HEIGHT = 32;
-/** Effectively-unbounded width so wrapping only happens on hard `\n` breaks. */
-const NO_WRAP_WIDTH = 100000;
 
 /** Horizontal padding between a node's box edge and its content (px). */
 export const NODE_PADDING = 20;
+
+/**
+ * THE upper bound on a node's CONTENT width (px) — the one place the "nodes
+ * must not grow sideways forever" rule is expressed. Everything a node can
+ * hold is sized against it, so the widest possible node box is
+ * `NODE_MAX_CONTENT_WIDTH + NODE_PADDING * 2`:
+ *
+ *  - text / link title / object-card title & field values → soft-wrap here
+ *    (see {@link wrapNodeText}), growing downwards instead of sideways;
+ *  - markdown card title → stays one line and is ellipsised at this width
+ *    (the card is deliberately compact — the document opens in the panel);
+ *  - image → scaled down to fit (aspect preserved), see lib/imageCache.
+ *
+ * 420px ≈ 60 latin / 30 CJK characters at the 14px node font, which keeps a
+ * long paragraph inside a comfortable reading measure.
+ */
+export const NODE_MAX_CONTENT_WIDTH = 420;
 
 /**
  * Visual box width for a measured text/content width: add horizontal padding,
@@ -72,15 +92,24 @@ export function nodeBoxHeight(measuredHeight: number): number {
 }
 
 export interface NodeBox {
-  /** Widest line's measured width (px). */
+  /** Widest line's measured width (px); bounded by the caller's width cap. */
   width: number;
   /** Full box height including vertical padding (px). */
   height: number;
-  /** Number of hard-break lines (>= 1). */
+  /** Number of VISUAL lines — hard breaks plus soft wraps (>= 1). */
   lineCount: number;
 }
 
-const _boxCache = new Map<string, NodeBox>();
+export interface WrappedText {
+  /** Visual lines: hard `\n` breaks plus soft wraps at the width cap. */
+  lines: string[];
+  /** Absolute start offset of each visual line in the source string. */
+  lineStarts: number[];
+  /** Widest visual line's measured width (px); never exceeds the cap. */
+  width: number;
+}
+
+const _wrapCache = new Map<string, WrappedText>();
 
 function canMeasure(): boolean {
   return (
@@ -89,50 +118,143 @@ function canMeasure(): boolean {
   );
 }
 
-/** Character-count estimate used when no Canvas 2D context is available. */
-function estimateBox(text: string, fontSize: number, lineHeight: number): NodeBox {
-  const lines = text.split("\n");
-  let maxLen = 0;
-  for (const line of lines) maxLen = Math.max(maxLen, line.length);
-  const width = maxLen * fontSize * 0.6;
-  const lineCount = lines.length;
-  return {
-    width,
-    height: Math.max(MIN_BOX_HEIGHT, lineCount * lineHeight + BOX_V_PAD),
-    lineCount,
-  };
+/** One visual line: its text, its start offset within the hard line, its width. */
+interface Piece {
+  text: string;
+  start: number;
+  width: number;
 }
 
 /**
- * Measure a node's box. Cached per text string + font — only the actively
+ * Character-count estimate used when no Canvas 2D context is available (Node
+ * test runner / SSR worker). Breaks at the last space that still fits, falling
+ * back to a mid-word break so an unbroken run can't exceed the cap either.
+ */
+function estimatePieces(line: string, fontSize: number, maxWidth: number): Piece[] {
+  const charW = fontSize * 0.6;
+  const perLine = Math.max(1, Math.floor(maxWidth / charW));
+  if (line.length <= perLine) {
+    return [{ text: line, start: 0, width: line.length * charW }];
+  }
+  const pieces: Piece[] = [];
+  let start = 0;
+  while (start < line.length) {
+    let end = Math.min(line.length, start + perLine);
+    if (end < line.length) {
+      const space = line.lastIndexOf(" ", end);
+      // Only honour a space that leaves a non-empty line behind.
+      if (space > start) end = space + 1;
+    }
+    const text = end < line.length ? trimLineEnd(line.slice(start, end)) : line.slice(start, end);
+    pieces.push({ text, start, width: text.length * charW });
+    start = end;
+  }
+  return pieces;
+}
+
+/**
+ * Drop the whitespace a soft break consumed. Like CSS, a wrapped line "hangs"
+ * its trailing spaces: they neither widen the line box nor get drawn, and the
+ * caret offsets that land in them resolve to the end of the line (the gap
+ * between two lineStarts, exactly as for a consumed "\n").
+ */
+function trimLineEnd(text: string): string {
+  return text.replace(/[ \t]+$/, "");
+}
+
+/** Soft-wrap ONE hard line (no `\n` inside) to `maxWidth`. */
+function wrapOneLine(
+  line: string,
+  font: string,
+  fontSize: number,
+  maxWidth: number
+): Piece[] {
+  if (!canMeasure()) return estimatePieces(line, fontSize, maxWidth);
+
+  const measure = (s: string) =>
+    measureNaturalWidth(prepareWithSegments(s, font, { whiteSpace: "pre-wrap" }));
+
+  const prepared = prepareWithSegments(line, font, { whiteSpace: "pre-wrap" });
+  const natural = measureNaturalWidth(prepared);
+  // Fast path (and the only path for an empty line, which pretext lays out as
+  // zero lines): nothing to break.
+  if (natural <= maxWidth) return [{ text: line, start: 0, width: natural }];
+
+  // pretext reports each visual line's text but not its offset in the source;
+  // the only characters it drops are the whitespace consumed at a break, so a
+  // forward scan recovers the offsets. `indexOf` failing (an exotic case such
+  // as a materialised soft hyphen) degrades to a contiguous guess rather than
+  // a wrong one.
+  const { lines } = layoutWithLines(prepared, maxWidth, 1);
+  const pieces: Piece[] = [];
+  let pos = 0;
+  lines.forEach((l, i) => {
+    const found = line.indexOf(l.text, pos);
+    const start = found < 0 ? pos : found;
+    pos = start + l.text.length;
+    // pretext reports the PAINTED width, which still counts the space the
+    // break ate — leaving it in would push the box a few px past the cap and
+    // make it disagree with the caret's own measurement of the drawn line.
+    const text = i === lines.length - 1 ? l.text : trimLineEnd(l.text);
+    pieces.push({
+      text,
+      start,
+      width: text === l.text ? l.width : measure(text),
+    });
+  });
+  return pieces;
+}
+
+/**
+ * Split `text` into the visual lines a node actually renders: hard `\n` breaks
+ * always split, and any line still wider than the cap soft-wraps.
+ *
+ * This is the single wrapping authority — {@link measureNodeBox} (layout) and
+ * lib/textGeometry's `buildLineData` (caret geometry + canvas draw) both go
+ * through it, so the box, the drawn text and the caret can never disagree
+ * about where a line breaks. Cached per text + font + cap: only the actively
  * edited node's text changes between renders, so every other node is an O(1)
- * hit. `opts` defaults to the 14px / normal-weight baseline.
+ * hit.
+ */
+export function wrapNodeText(text: string, opts?: MeasureOpts): WrappedText {
+  const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
+  const bold = opts?.bold ?? false;
+  const maxWidth = opts?.maxWidth ?? NODE_MAX_CONTENT_WIDTH;
+  const key = `${fontSize}|${bold ? 1 : 0}|${maxWidth}|${text}`;
+  const cached = _wrapCache.get(key);
+  if (cached) return cached;
+
+  const font = nodeFontString(fontSize, bold);
+  const lines: string[] = [];
+  const lineStarts: number[] = [];
+  let width = 0;
+  let base = 0;
+  for (const hard of text.split("\n")) {
+    for (const p of wrapOneLine(hard, font, fontSize, maxWidth)) {
+      lines.push(p.text);
+      lineStarts.push(base + p.start);
+      width = Math.max(width, p.width);
+    }
+    base += hard.length + 1; // +1 for the consumed "\n"
+  }
+
+  const wrapped: WrappedText = { lines, lineStarts, width };
+  if (_wrapCache.size > 4000) _wrapCache.clear();
+  _wrapCache.set(key, wrapped);
+  return wrapped;
+}
+
+/**
+ * Measure a node's box from its wrapped lines. `opts` defaults to the 14px /
+ * normal-weight baseline and the {@link NODE_MAX_CONTENT_WIDTH} cap.
  */
 export function measureNodeBox(text: string, opts?: MeasureOpts): NodeBox {
   const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
-  const bold = opts?.bold ?? false;
   const lineHeight = lineHeightFor(fontSize);
-  const key = `${fontSize}|${bold ? 1 : 0}|${text}`;
-  const cached = _boxCache.get(key);
-  if (cached) return cached;
-
-  let box: NodeBox;
-  if (!canMeasure()) {
-    box = estimateBox(text, fontSize, lineHeight);
-  } else {
-    const prepared = prepareWithSegments(text, nodeFontString(fontSize, bold), {
-      whiteSpace: "pre-wrap",
-    });
-    const { lineCount } = layout(prepared, NO_WRAP_WIDTH, lineHeight);
-    const lines = Math.max(1, lineCount);
-    box = {
-      width: measureNaturalWidth(prepared),
-      height: Math.max(MIN_BOX_HEIGHT, lines * lineHeight + BOX_V_PAD),
-      lineCount: lines,
-    };
-  }
-
-  if (_boxCache.size > 4000) _boxCache.clear();
-  _boxCache.set(key, box);
-  return box;
+  const { lines, width } = wrapNodeText(text, opts);
+  return {
+    width,
+    height: Math.max(MIN_BOX_HEIGHT, lines.length * lineHeight + BOX_V_PAD),
+    lineCount: lines.length,
+  };
 }

@@ -11,7 +11,12 @@
  */
 
 import type { MindMapModel } from "../domain/model";
-import { measureNodeBox, LINE_HEIGHT } from "../lib/measureText";
+import {
+  measureNodeBox,
+  wrapNodeText,
+  LINE_HEIGHT,
+  NODE_MAX_CONTENT_WIDTH,
+} from "../lib/measureText";
 import { imageDisplaySize } from "../lib/imageCache";
 import { markdownTitle } from "./markdownCard";
 import {
@@ -74,6 +79,12 @@ export interface CardRowGeom {
   key: string | null;
   /** Formatted display string for the value (raw text stays on the node). */
   display: string;
+  /**
+   * `display` split into the visual lines the value column actually renders
+   * (soft-wrapped to the room left by the key column and the badge). The draw
+   * joins these back with "\n" so the row's height and its text agree.
+   */
+  displayLines: string[];
   kind: ValueKind;
   /** Row top relative to the card's top edge (px). */
   top: number;
@@ -84,7 +95,11 @@ export interface CardRowGeom {
 }
 
 export interface ObjectCardGeom {
-  /** Content width (px); the node box adds NODE_PADDING on both sides. */
+  /**
+   * Content width (px); the node box adds NODE_PADDING on both sides. Bounded
+   * by NODE_MAX_CONTENT_WIDTH — a long title or field value wraps instead of
+   * widening the card.
+   */
   width: number;
   /** Full card box height (px). */
   height: number;
@@ -103,38 +118,40 @@ export interface EditingOverride {
   text: string;
 }
 
-interface RowCalc {
+/** Row content that does NOT depend on the shared key-column width. */
+interface RowParse {
   key: string | null;
   display: string;
   kind: ValueKind;
-  height: number;
-  rawW: number;
-  dispW: number;
   keyW: number;
   hasHiddenChildren: boolean;
   thumbW?: number;
   thumbH?: number;
 }
 
-function calcRow(child: MindMapModel, raw: string): RowCalc {
+/** Row sizes, resolved once the shared key column width is known. */
+interface RowCalc extends RowParse {
+  height: number;
+  rawW: number;
+  dispW: number;
+  displayLines: string[];
+}
+
+function parseRow(child: MindMapModel, raw: string): RowParse {
   const type = child.type ?? "text";
+  const hasHiddenChildren = child.children.length > 0;
 
   if (type === "image") {
     const d = imageDisplaySize(raw);
     const scale = Math.min(1, ROW_THUMB_MAX_W / d.w, ROW_THUMB_MAX_H / d.h);
-    const thumbW = Math.max(1, d.w * scale);
-    const thumbH = Math.max(1, d.h * scale);
     return {
       key: null,
       display: "",
       kind: "image",
-      height: thumbH + ROW_V_PAD,
-      rawW: thumbW,
-      dispW: thumbW,
       keyW: 0,
-      hasHiddenChildren: child.children.length > 0,
-      thumbW,
-      thumbH,
+      hasHiddenChildren,
+      thumbW: Math.max(1, d.w * scale),
+      thumbH: Math.max(1, d.h * scale),
     };
   }
 
@@ -157,22 +174,49 @@ function calcRow(child: MindMapModel, raw: string): RowCalc {
         : parsed.value;
   }
 
-  // The row must fit BOTH renderings: the two-column display and the raw
-  // `key: value` text shown while the row is being edited.
-  const rawBox = measureNodeBox(raw);
-  const dispBox = measureNodeBox(display === "" ? "empty" : display);
   const keyW = key
     ? Math.min(measureNodeBox(key, { fontSize: KEY_FONT_SIZE }).width, KEY_COL_MAX)
     : 0;
+  return { key, display, kind, keyW, hasHiddenChildren };
+}
+
+/**
+ * Size a row against the width still available to it. Values wrap into the
+ * room left by the key column and the hidden-children pill, so however long a
+ * field gets the card can never grow past NODE_MAX_CONTENT_WIDTH; the row just
+ * gets taller.
+ */
+function measureRow(p: RowParse, raw: string, keyColW: number): RowCalc {
+  if (p.kind === "image") {
+    const thumbW = p.thumbW ?? 1;
+    return {
+      ...p,
+      height: (p.thumbH ?? 1) + ROW_V_PAD,
+      rawW: thumbW,
+      dispW: thumbW,
+      displayLines: [],
+    };
+  }
+
+  const valueMax =
+    NODE_MAX_CONTENT_WIDTH -
+    (p.key !== null ? keyColW + KEY_GAP : 0) -
+    (p.hasHiddenChildren ? ROW_BADGE_W : 0);
+  // The row must fit BOTH renderings: the two-column display and the raw
+  // `key: value` text shown while the row is being edited. The raw text is
+  // measured at the FULL cap because that is what the shared caret geometry
+  // (buildLineData) wraps it at — and the pill isn't drawn while editing.
+  const rawBox = measureNodeBox(raw);
+  const disp = wrapNodeText(p.display === "" ? "empty" : p.display, {
+    maxWidth: Math.max(1, valueMax),
+  });
+  const lineCount = Math.max(rawBox.lineCount, disp.lines.length);
   return {
-    key,
-    display,
-    kind,
-    height: Math.max(ROW_MIN_H, rawBox.lineCount * LINE_HEIGHT + ROW_V_PAD),
+    ...p,
+    height: Math.max(ROW_MIN_H, lineCount * LINE_HEIGHT + ROW_V_PAD),
     rawW: rawBox.width,
-    dispW: dispBox.width,
-    keyW,
-    hasHiddenChildren: child.children.length > 0,
+    dispW: disp.width,
+    displayLines: p.display === "" ? [] : disp.lines,
   };
 }
 
@@ -191,25 +235,30 @@ export function objectCardGeom(
   const titleCenterY = CARD_TITLE_TOP + titleH / 2;
   const sepY = CARD_TITLE_TOP + titleH + CARD_TITLE_BOTTOM;
 
-  const calcs = node.children.map((child) =>
-    calcRow(child, editing?.id === child.id ? editing.text : child.text)
+  // Two passes: the key column is shared across rows, and how much width a
+  // value has left to wrap into depends on it.
+  const raws = node.children.map((child) =>
+    editing?.id === child.id ? editing.text : child.text
   );
-  const keyColW = calcs.reduce((w, c) => Math.max(w, c.keyW), 0);
+  const parsed = node.children.map((child, i) => parseRow(child, raws[i]));
+  const keyColW = parsed.reduce((w, p) => Math.max(w, p.keyW), 0);
+  const calcs = parsed.map((p, i) => measureRow(p, raws[i], keyColW));
 
   let width = Math.max(CARD_MIN_CONTENT_W, titleBox.width);
   const rows: CardRowGeom[] = [];
   let top = sepY + CARD_ROWS_TOP;
   calcs.forEach((c, i) => {
-    const colsW = (c.key !== null ? keyColW + KEY_GAP : 0) + c.dispW;
-    width = Math.max(
-      width,
-      Math.max(c.rawW, colsW) + (c.hasHiddenChildren ? ROW_BADGE_W : 0)
-    );
+    const colsW =
+      (c.key !== null ? keyColW + KEY_GAP : 0) +
+      c.dispW +
+      (c.hasHiddenChildren ? ROW_BADGE_W : 0);
+    width = Math.max(width, c.rawW, colsW);
     rows.push({
       id: node.children[i].id,
       index: i,
       key: c.key,
       display: c.display,
+      displayLines: c.displayLines,
       kind: c.kind,
       top,
       height: c.height,

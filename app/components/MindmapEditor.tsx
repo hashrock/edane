@@ -41,6 +41,7 @@ import {
   LINE_HEIGHT,
   lineHeightFor,
   DEFAULT_FONT_SIZE,
+  NODE_MAX_CONTENT_WIDTH,
 } from "../lib/measureText";
 import {
   measureEmptyWidth,
@@ -64,6 +65,8 @@ import {
   markdownPreview,
   MD_CARD_LEAD,
   MD_CARD_BADGE,
+  MD_TITLE_MAX_W,
+  linkTitleMaxWidth,
 } from "../application/nodeUtils";
 import {
   KEY_FONT_SIZE,
@@ -1916,10 +1919,16 @@ export function MindmapEditorView({
       // the bold weight's extra width, since objectCardGeom already sizes the
       // box with bold:true.
       const measuredBold = !!(node.card || node.bold);
+      // Same content-width cap the box was measured with (measureModelNode), so
+      // the caret's visual lines are exactly the ones the box was sized for. A
+      // link node's title shares its row with the favicon, hence the narrower cap.
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
-        measuredBold
+        measuredBold,
+        node.type === "link"
+          ? linkTitleMaxWidth(!!node.favicon)
+          : NODE_MAX_CONTENT_WIDTH
       );
       lineDataMap.set(node.id, data);
       textWidths.set(
@@ -2007,7 +2016,6 @@ export function MindmapEditorView({
           ? node.linkTitle || node.text
           : node.text;
       const isEmpty = displayRaw === "";
-      const displayText = isEmpty ? "empty" : displayRaw;
       const fontSize = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bold = !!node.bold;
       const lineHeightPx = lineHeightFor(fontSize);
@@ -2017,6 +2025,10 @@ export function MindmapEditorView({
       const data = lineDataMap.get(node.id)!;
       const lineCount = data.lines.length;
       const blockHeight = lineCount * lineHeightPx;
+      // Draw the VISUAL lines the box was measured from (hard breaks + soft
+      // wraps at the width cap), pre-joined so Konva does no wrapping of its
+      // own — text, box and caret then agree by construction.
+      const drawnText = isEmpty ? "empty" : data.lines.join("\n");
       // Favicon only when a non-active link node has one.
       const favEntry =
         asLink && node.favicon ? getImageEntry(node.favicon) : undefined;
@@ -2165,12 +2177,15 @@ export function MindmapEditorView({
         } else {
           const placeholder =
             r.display === "" ? (r.key !== null ? "—" : "empty") : null;
-          const displayLines = (placeholder ?? r.display).split("\n").length;
+          // Pre-wrapped by objectCardGeom to the room this column actually has,
+          // so a long value grows the row's height instead of the card's width.
+          const valueText = placeholder ?? r.displayLines.join("\n");
+          const displayLines = placeholder ? 1 : r.displayLines.length;
           group.add(
             new Konva.Text({
               x: valueX,
               y: node.y - (displayLines * lineHeightPx) / 2 + 2,
-              text: placeholder ?? r.display,
+              text: valueText,
               fontSize: DEFAULT_FONT_SIZE,
               fontFamily: "sans-serif",
               lineHeight: konvaLineHeight,
@@ -2247,13 +2262,13 @@ export function MindmapEditorView({
       } else if (isCard) {
         // Card chrome: bold title at the top + separator above the rows (the
         // rows themselves are separate flat nodes drawn right after this one).
-        // The title text doubles as the raw editing view — displayText is the
-        // live buffer while the title is being edited.
+        // The title text doubles as the raw editing view — drawnText is the
+        // (wrapped) live buffer while the title is being edited.
         group.add(
           new Konva.Text({
             x: node.x + nodePadding,
             y: node.y + titleOffsetY - blockHeight / 2 + 2,
-            text: displayText,
+            text: drawnText,
             fontSize,
             fontFamily: "sans-serif",
             lineHeight: konvaLineHeight,
@@ -2345,6 +2360,11 @@ export function MindmapEditorView({
           new Konva.Text({
             x: glyphX + MD_CARD_LEAD,
             y: node.y - fontSize / 2 - 1,
+            // Stays one line: clipped with an ellipsis at the same width the
+            // box was measured against, so a long title can't widen the card.
+            width: MD_TITLE_MAX_W,
+            wrap: "none",
+            ellipsis: true,
             text: markdownTitle(node.text),
             fontSize,
             fontFamily: "sans-serif",
@@ -2385,7 +2405,7 @@ export function MindmapEditorView({
         const textNode = new Konva.Text({
           x: node.x + nodePadding + favOffset,
           y: node.y - blockHeight / 2 + 2,
-          text: displayText,
+          text: drawnText,
           fontSize,
           fontFamily: "sans-serif",
           lineHeight: konvaLineHeight,

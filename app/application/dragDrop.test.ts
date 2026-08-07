@@ -161,6 +161,7 @@ describe("resolveDropTarget: cards can't be dropped inside cards", () => {
           top: 0,
           key: "k",
           display: "v",
+          displayLines: ["v"],
           kind: "text",
           keyColW: 20,
         },

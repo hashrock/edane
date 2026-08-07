@@ -12,8 +12,10 @@
 import {
   NODE_FONT,
   DEFAULT_FONT_SIZE,
+  NODE_MAX_CONTENT_WIDTH,
   nodeFontString,
   lineHeightFor,
+  wrapNodeText,
 } from "./measureText";
 
 const NODE_FONT_ITALIC = `italic ${NODE_FONT}`;
@@ -73,6 +75,7 @@ export function measureEmptyWidth(): number {
 }
 
 export interface LineData {
+  /** VISUAL lines: hard `\n` breaks plus soft wraps at the width cap. */
   lines: string[];
   /** Per-line cumulative char x-offsets (from measureOffsets). */
   lineOffsets: number[][];
@@ -83,24 +86,25 @@ export interface LineData {
 }
 
 /**
- * Split node text into lines and pre-measure each line's caret offsets, using
- * the node's own `fontSize` / `bold` so offsets and line height match the
- * rendered text (including the actively edited node).
+ * Split node text into its VISUAL lines and pre-measure each line's caret
+ * offsets, using the node's own `fontSize` / `bold` so offsets and line height
+ * match the rendered text (including the actively edited node).
+ *
+ * Line breaking is delegated to {@link wrapNodeText}, the same function that
+ * sizes the box in measureNodeBox — the caret can therefore never land on a
+ * line the layout doesn't know about. `maxWidth` is the content-width cap the
+ * caller draws the text at (a link node subtracts its favicon column, say);
+ * pass `Infinity` to break on hard newlines only.
  */
 export function buildLineData(
   text: string,
   fontSize: number = DEFAULT_FONT_SIZE,
-  bold: boolean = false
+  bold: boolean = false,
+  maxWidth: number = NODE_MAX_CONTENT_WIDTH
 ): LineData {
   const font = nodeFontString(fontSize, bold);
-  const lines = text.split("\n");
+  const { lines, lineStarts } = wrapNodeText(text, { fontSize, bold, maxWidth });
   const lineOffsets = lines.map((l) => measureOffsets(l, font));
-  const lineStarts: number[] = [];
-  let acc = 0;
-  for (let i = 0; i < lines.length; i++) {
-    lineStarts[i] = acc;
-    acc += lines[i].length + 1; // +1 for the consumed "\n"
-  }
   return { lines, lineOffsets, lineStarts, lineHeight: lineHeightFor(fontSize) };
 }
 
@@ -146,13 +150,22 @@ export function nearestCol(offsets: number[] | undefined, relX: number): number 
   return col;
 }
 
-/** Vertical caret move within a node; returns new pos or null if no such line. */
+/**
+ * Vertical caret move within a node; returns new pos or null if no such line.
+ *
+ * Deliberately breaks on HARD newlines only (`Infinity` cap): this is shared by
+ * both layouts through the keymap's edit-up / edit-down, and a soft wrap sits
+ * at a different place on the canvas (the node's width cap) than in the outline
+ * (the row's DOM width). Hard newlines are the one line structure both agree
+ * on, so ↑/↓ behave identically in either view — and the keyboard-escape
+ * invariant keeps its exact, layout-independent step count.
+ */
 export function verticalMove(
   text: string,
   pos: number,
   dir: -1 | 1
 ): number | null {
-  const data = buildLineData(text);
+  const data = buildLineData(text, DEFAULT_FONT_SIZE, false, Infinity);
   const { line, col } = posToLineCol(data, pos);
   const target = line + dir;
   if (target < 0 || target >= data.lines.length) return null;

@@ -9,9 +9,12 @@ import {
   nearestCol,
   verticalMove,
 } from "./textGeometry";
+import { NODE_MAX_CONTENT_WIDTH, DEFAULT_FONT_SIZE } from "./measureText";
 
 // These run under the "node" project (no DOM), so measurement goes through the
 // deterministic fallback: 8px per character, and 40px for the "empty" hint.
+// Soft wrapping estimates a slightly different fontSize * 0.6 per character.
+const PER_LINE = Math.floor(NODE_MAX_CONTENT_WIDTH / (DEFAULT_FONT_SIZE * 0.6));
 
 describe("measureOffsets (fallback)", () => {
   it("returns cumulative prefix widths starting at 0", () => {
@@ -34,6 +37,36 @@ describe("buildLineData", () => {
     expect(data.lines).toEqual(["ab", "cde"]);
     expect(data.lineStarts).toEqual([0, 3]); // "ab" + consumed "\n"
     expect(data.lineHeight).toBe(18); // lineHeightFor(14)
+  });
+
+  it("soft-wraps at the content cap, with offsets for every visual line", () => {
+    const text = "x".repeat(PER_LINE * 2);
+    const data = buildLineData(text);
+    expect(data.lines.length).toBe(2);
+    // One offsets array per VISUAL line, so the caret can be placed on both.
+    expect(data.lineOffsets.length).toBe(2);
+    expect(data.lineStarts).toEqual([0, PER_LINE]);
+  });
+
+  it("breaks on hard newlines only when the cap is Infinity", () => {
+    const data = buildLineData("x".repeat(PER_LINE * 2), 14, false, Infinity);
+    expect(data.lines.length).toBe(1);
+  });
+});
+
+describe("caret round-trip across a soft wrap", () => {
+  const text = "x".repeat(PER_LINE * 2);
+  const data = buildLineData(text);
+
+  it("maps every offset to a line/col that maps back", () => {
+    for (let pos = 0; pos <= text.length; pos++) {
+      const { line, col } = posToLineCol(data, pos);
+      expect(lineColToPos(data, line, col)).toBe(pos);
+    }
+  });
+
+  it("puts the first character of the second visual line on line 1", () => {
+    expect(posToLineCol(data, PER_LINE)).toEqual({ line: 1, col: 0 });
   });
 });
 
@@ -77,5 +110,12 @@ describe("verticalMove", () => {
   });
   it("returns null past the last line", () => {
     expect(verticalMove("ab\ncde", 4, 1)).toBeNull();
+  });
+  it("ignores soft wraps so canvas and outline step identically", () => {
+    // A long single-line node wraps visually on the canvas, but ↑/↓ must still
+    // leave the node in one press — a soft wrap sits elsewhere in the outline.
+    const long = "x".repeat(PER_LINE * 3);
+    expect(verticalMove(long, 0, 1)).toBeNull();
+    expect(verticalMove(long, long.length, -1)).toBeNull();
   });
 });

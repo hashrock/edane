@@ -18,7 +18,10 @@ import {
   type KeyBinding,
 } from "../application/editorKeymap";
 import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
-import { DEFAULT_FONT_SIZE } from "../lib/measureText";
+import {
+  DEFAULT_FONT_SIZE,
+  NODE_MAX_CONTENT_WIDTH,
+} from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
 import ViewControls from "./ViewControls";
@@ -423,10 +426,17 @@ export default function OutlineEditor({
                     </button>
 
                     {/* Content */}
+                    {/* Same content-width cap as a canvas node box: the row
+                        text already wraps at the viewport on a phone, and on a
+                        wide screen this stops a long item from running the
+                        full width. The overlaid textarea measures THIS element
+                        (see the overlay effect), so the edit width follows the
+                        display width automatically. */}
                     <div
                       ref={isEditingThis ? activeRowRef : null}
                       onClick={() => activateRow(node.id)}
                       className="min-w-0 flex-1 cursor-text py-0.5"
+                      style={{ maxWidth: NODE_MAX_CONTENT_WIDTH }}
                     >
                       {type === "image" ? (
                         node.text ? (
