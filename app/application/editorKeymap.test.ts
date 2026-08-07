@@ -241,6 +241,34 @@ describe("cross-mode collapse chord (Cmd/Ctrl + .)", () => {
     expect(dispatched).toEqual([{ type: "startEditing" }]);
     expect(preventDefault).toHaveBeenCalled();
   });
+
+  // Plain Enter is insert-sibling, so the chord is the Enter-flavoured way into
+  // edit mode. Same payload as Space: no cursor args → whole text selected.
+  it("Cmd+Enter starts editing instead of inserting a sibling", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "Enter",
+      metaKey: true,
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Ctrl+Enter starts editing too (windows/linux)", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "Enter", ctrlKey: true });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+  });
+
+  it("Cmd+Shift+Enter still starts editing (shift is ignored)", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), {
+      key: "Enter",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+  });
 });
 
 describe("reorder and bold (cross-mode)", () => {

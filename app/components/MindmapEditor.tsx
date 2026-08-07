@@ -404,6 +404,14 @@ export function MindmapEditorView({
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<DragState | null>(null);
+  // Re-click on the already-selected node: the intent to enter edit mode is
+  // recorded at mousedown but only committed on release, so a press that turns
+  // into a drag (branch move / text selection) never flips into editing. Holds
+  // the node and the caret position resolved from the click point; consumed and
+  // cleared by the stage's mouseup handler.
+  const clickEditIntentRef = useRef<{ nodeId: string; charIdx: number } | null>(
+    null
+  );
   const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1613,12 +1621,37 @@ export function MindmapEditorView({
 
       stage.on("mouseup touchend", () => {
         const drag = dragStateRef.current;
+        const intent = clickEditIntentRef.current;
+        clickEditIntentRef.current = null;
         if (drag) {
           if (drag.mode === "move") {
             clearMovePreview();
             if (drag.moved && drag.drop) {
               commitMoveRef.current(drag.nodeId, drag.drop);
             }
+          }
+          // Re-click on the already-selected node: enter edit mode now that the
+          // press turned out to be a click rather than a drag. The caret lands
+          // where the click did (a drag would have been a text selection or a
+          // branch move instead).
+          if (!drag.moved && intent && intent.nodeId === drag.nodeId) {
+            // Move the hidden textarea's own selection first: the mousedown
+            // render left a queued "select" event for the whole-text range it
+            // had just applied, and handleSelect reads the live DOM when that
+            // event lands — after this dispatch it would push the stale range
+            // back into the state and undo the caret set here.
+            inputRef.current?.setSelectionRange(
+              intent.charIdx,
+              intent.charIdx
+            );
+            dispatch({
+              type: "activateNode",
+              nodeId: intent.nodeId,
+              cursorPos: intent.charIdx,
+              selectionEnd: intent.charIdx,
+              editing: true,
+            });
+            focusEditorSoon();
           }
           wasDraggingRef.current = true;
           dragStateRef.current = null;
@@ -1630,6 +1663,7 @@ export function MindmapEditorView({
       // mouseup — treat it as a drag cancel so the preview can't get stuck.
       const onWindowMouseUp = () => {
         const drag = dragStateRef.current;
+        clickEditIntentRef.current = null;
         if (!drag) return;
         if (drag.mode === "move") clearMovePreview();
         dragStateRef.current = null;
@@ -2471,6 +2505,16 @@ export function MindmapEditorView({
         const cur = stateRef.current;
         const editingThis =
           cur.view.editing && cur.view.activeNodeId === node.id;
+        // Clicking the node that is already selected (but not yet edited)
+        // enters edit mode without waiting for a double click. The state change
+        // is deferred to mouseup so the same press can still start a drag; a
+        // drag that passes the threshold drops the intent (see mouseup).
+        clickEditIntentRef.current =
+          prefsRef.current.selectionMode &&
+          !cur.view.editing &&
+          cur.view.activeNodeId === node.id
+            ? { nodeId: node.id, charIdx }
+            : null;
         if (editingThis || !prefsRef.current.selectionMode) {
           // Always-edit preference: any click lands the caret at the clicked
           // position instead of passing through a select-first step.
