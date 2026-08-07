@@ -23,11 +23,20 @@ import {
   parseContent,
   serializeModel,
 } from "../application/persistence";
+import {
+  COPY_LINK_FAILURE,
+  COPY_LINK_SUCCESS,
+  publicNoteUrl,
+} from "../application/publicNoteLink";
 import { UndoManager } from "../application/undoManager";
+import { copyText } from "../lib/clipboard";
 
 /**
  * updateSaveStatus に渡せる文言。フェード演出の分岐（"" / "保存済み" / それ以外）
  * が呼び出し側の文字列と一致し続けることを型で保証する。
+ *
+ * 保存以外のヘッダー通知（画像アップロード、リンクコピー）も同じ一行に相乗り
+ * している。専用のトースト機構は持たない。
  */
 export type SaveStatusText =
   | ""
@@ -36,7 +45,9 @@ export type SaveStatusText =
   | "保存失敗"
   | "画像アップロード中..."
   | "アップロード失敗"
-  | "容量超過（上限10MB）";
+  | "容量超過（上限10MB）"
+  | typeof COPY_LINK_SUCCESS
+  | typeof COPY_LINK_FAILURE;
 
 export interface NoteEditorInit {
   noteId?: string;
@@ -70,6 +81,11 @@ export interface NoteEditorEngine {
   saveNote: (currentModel: MindMapModel, pub?: boolean) => Promise<boolean>;
   updateSaveStatus: (status: SaveStatusText) => void;
   saveStatusRef: React.RefObject<HTMLSpanElement | null>;
+  /**
+   * 公開ノートの閲覧URLをクリップボードへコピーし、結果をヘッダーの
+   * ステータス行に出す。未保存ノート（noteId なし）では何もしない。
+   */
+  copyPublicLink: () => void;
   isDirty: () => boolean;
   isPublic: boolean;
   setIsPublic: (v: boolean) => void;
@@ -195,6 +211,15 @@ export function useNoteEditor({
       el.style.opacity = "1";
     }
   }, []);
+
+  // 共有リンクのコピー。エディタは canvas / outline の2ビューがあるので、
+  // 「URLの組み立て → コピー → フィードバック」はここに一本化して両方から使う。
+  const copyPublicLink = useCallback(() => {
+    if (!noteId) return;
+    void copyText(publicNoteUrl(window.location.origin, noteId)).then((ok) =>
+      updateSaveStatus(ok ? COPY_LINK_SUCCESS : COPY_LINK_FAILURE)
+    );
+  }, [noteId, updateSaveStatus]);
 
   const saveNote = useCallback(
     async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
@@ -368,6 +393,7 @@ export function useNoteEditor({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    copyPublicLink,
     isDirty,
     isPublic,
     setIsPublic,

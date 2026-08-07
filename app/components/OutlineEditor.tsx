@@ -70,6 +70,7 @@ export default function OutlineEditor({
     dispatch,
     saveNote,
     saveStatusRef,
+    copyPublicLink,
     isPublic,
     setIsPublic,
     undo,
@@ -340,6 +341,7 @@ export default function OutlineEditor({
         {noteId && !readOnly && (
           <span
             ref={saveStatusRef}
+            data-testid="save-status"
             className="shrink-0 whitespace-nowrap text-xs text-slate-500"
           />
         )}
@@ -350,6 +352,7 @@ export default function OutlineEditor({
               setIsPublic(next);
               saveNote(model, next);
             }}
+            onCopyLink={copyPublicLink}
           />
         )}
         {!noteId && !readOnly && onSaveToAccount && (
