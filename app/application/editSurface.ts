@@ -2,11 +2,20 @@
  * Application layer: the editing-surface contract every node type must obey.
  *
  * THE INVARIANT (keyboard-escape): wherever the editing focus lives — the
- * shared keymap textarea or a node-specific input — an unmodified ArrowUp /
- * ArrowDown must either move the caret between lines inside the node or move
- * the selection to the adjacent node. It must NEVER fall through to native
- * single-line handling and do nothing, which traps the keyboard inside the
- * field ("閉じ込め").
+ * shared keymap textarea or a node-specific input — an unmodified arrow key
+ * must either move the caret inside the node or move the selection to the
+ * adjacent node. It must NEVER fall through to native handling and do nothing,
+ * which traps the keyboard inside the field ("閉じ込め").
+ *
+ *  - ArrowUp / ArrowDown: walk lines within the node, cross to the
+ *    previous / next node from the first / last line. A single-line field has
+ *    no line to walk, so there they always cross.
+ *  - ArrowLeft / ArrowRight: walk characters within the node, cross to the
+ *    previous / next node from the caret's start / end edge.
+ *
+ * Both hold regardless of the `arrowBehavior` preference: that setting only
+ * rebinds ←/→ in SELECTION mode (fold vs. move to parent/child), while this
+ * invariant governs EDITING mode, where ←/→ are caret keys in every config.
  *
  * Two mechanisms enforce it:
  *  - EDIT_SURFACE below: every NodeType must declare which surface edits it.
@@ -75,9 +84,21 @@ export interface AuxKeyEvent {
   altKey: boolean;
   metaKey: boolean;
   ctrlKey: boolean;
+  shiftKey: boolean;
   preventDefault: () => void;
   /** React synthetic events carry the DOM event here; used for the IME guard. */
   nativeEvent?: { isComposing?: boolean };
+  /**
+   * The input the key landed in — needed to tell "caret mid-text" (native
+   * ←/→) from "caret at an edge" (cross to the neighbour). Required, not
+   * optional, so a new aux input can't silently omit it and lose the
+   * horizontal half of the invariant. `HTMLInputElement` satisfies it.
+   */
+  currentTarget: {
+    value: string;
+    selectionStart: number | null;
+    selectionEnd: number | null;
+  };
 }
 
 /**
@@ -87,8 +108,12 @@ export interface AuxKeyEvent {
  *  - Enter / Escape  → exit editing (back to selection-mode navigation)
  *  - plain ↑ / ↓     → move to the previous / next node (a single-line input
  *                      has no line to move within, so arrows always cross)
- *  - anything else   → "pass": leave it to the native input (←/→ caret moves,
- *                      typing, shortcuts)
+ *  - plain ← / →     → cross to the previous / next node when the caret sits
+ *                      at the start / end edge; native caret move otherwise.
+ *                      Mirrors edit-left / edit-right in editorKeymap so the
+ *                      URL box escapes exactly like the shared textarea.
+ *  - anything else   → "pass": leave it to the native input (typing,
+ *                      Shift-selection, ⌘/Ctrl word jumps, shortcuts)
  *
  * Returns "handled" after calling preventDefault, mirroring editorKeymap.
  */
@@ -113,6 +138,30 @@ export function handleAuxInputKeys(
     e.preventDefault();
     dispatch({ type: "moveDown" });
     return "handled";
+  }
+  // ←/→ are caret keys, so they only cross at the edges — but a single-line
+  // input silently ignores ← at position 0 and → at the end, which is exactly
+  // the trap this invariant forbids. Shift extends a selection and ⌘/Ctrl/Alt
+  // jump by word; both stay native (the invariant covers unmodified arrows).
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !mod && !e.shiftKey) {
+    const { value, selectionStart, selectionEnd } = e.currentTarget;
+    // No readable caret (an input type that doesn't expose one): escape rather
+    // than pass, since "can't tell" must not resolve to "possibly trapped".
+    const caret =
+      selectionStart === null || selectionEnd === null ? null : selectionStart;
+    // A non-empty range collapses to one side natively — that IS caret
+    // movement, so let it happen and cross on the next press.
+    if (caret !== null && selectionStart !== selectionEnd) return "pass";
+    if (e.key === "ArrowLeft" && (caret === null || caret === 0)) {
+      e.preventDefault();
+      dispatch({ type: "arrowLeftEdge" });
+      return "handled";
+    }
+    if (e.key === "ArrowRight" && (caret === null || caret === value.length)) {
+      e.preventDefault();
+      dispatch({ type: "arrowRightEdge" });
+      return "handled";
+    }
   }
   return "pass";
 }
