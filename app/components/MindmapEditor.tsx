@@ -40,7 +40,6 @@ import {
   LINE_HEIGHT,
   lineHeightFor,
   DEFAULT_FONT_SIZE,
-  NODE_MAX_CONTENT_WIDTH,
 } from "../lib/measureText";
 import {
   measureEmptyWidth,
@@ -65,15 +64,14 @@ import {
   MD_CARD_LEAD,
   MD_CARD_BADGE,
   MD_TITLE_MAX_W,
-  linkTitleMaxWidth,
 } from "../application/nodeUtils";
 import {
   KEY_FONT_SIZE,
-  KEY_GAP,
   CARD_HINT_H,
   ADD_FIELD_LABEL,
   ADD_FIELD_FONT_SIZE,
   addFieldButtonWidth,
+  rowKeyColOffset,
 } from "../application/objectCard";
 import { parseField, inferValueKind } from "../application/objectField";
 import type { NumFormat } from "../domain/model";
@@ -2126,16 +2124,14 @@ export function MindmapEditorView({
       // the bold weight's extra width, since objectCardGeom already sizes the
       // box with bold:true.
       const measuredBold = !!(node.card || node.bold);
-      // Same content-width cap the box was measured with (measureModelNode), so
-      // the caret's visual lines are exactly the ones the box was sized for. A
-      // link node's title shares its row with the favicon, hence the narrower cap.
+      // The very cap measureModelNode sized this node's box with (carried on
+      // the node, so the per-kind decision is made in exactly one place), which
+      // makes the caret's visual lines the ones the box was measured for.
       const data = buildLineData(
         displayRaw,
         node.fontSize ?? DEFAULT_FONT_SIZE,
         measuredBold,
-        node.type === "link"
-          ? linkTitleMaxWidth(!!node.favicon)
-          : NODE_MAX_CONTENT_WIDTH
+        node.contentMaxWidth
       );
       lineDataMap.set(node.id, data);
       textWidths.set(
@@ -2233,9 +2229,9 @@ export function MindmapEditorView({
       const lineCount = data.lines.length;
       const blockHeight = lineCount * lineHeightPx;
       // Draw the VISUAL lines the box was measured from (hard breaks + soft
-      // wraps at the width cap), pre-joined so Konva does no wrapping of its
-      // own — text, box and caret then agree by construction.
-      const drawnText = isEmpty ? "empty" : data.lines.join("\n");
+      // wraps at the width cap), pre-joined at wrap time so Konva does no
+      // wrapping of its own — text, box and caret agree by construction.
+      const drawnText = isEmpty ? "empty" : data.visualText;
       // Favicon only when a non-active link node has one.
       const favEntry =
         asLink && node.favicon ? getImageEntry(node.favicon) : undefined;
@@ -2352,8 +2348,7 @@ export function MindmapEditorView({
             })
           );
         }
-        const valueX =
-          node.x + nodePadding + (r.key !== null ? r.keyColW + KEY_GAP : 0);
+        const valueX = node.x + nodePadding + rowKeyColOffset(r.key, r.keyColW);
         if (r.kind === "image") {
           const d = imageDisplaySize(node.text);
           if (d.status === "loaded" && d.img && r.thumbW && r.thumbH) {
@@ -2382,16 +2377,17 @@ export function MindmapEditorView({
             );
           }
         } else {
-          const placeholder =
-            r.display === "" ? (r.key !== null ? "—" : "empty") : null;
           // Pre-wrapped by objectCardGeom to the room this column actually has,
           // so a long value grows the row's height instead of the card's width.
+          // No lines at all means the row has no value: show a placeholder.
+          const placeholder =
+            r.displayLines.length === 0 ? (r.key !== null ? "—" : "empty") : null;
           const valueText = placeholder ?? r.displayLines.join("\n");
-          const displayLines = placeholder ? 1 : r.displayLines.length;
+          const lineCount = placeholder ? 1 : r.displayLines.length;
           group.add(
             new Konva.Text({
               x: valueX,
-              y: node.y - (displayLines * lineHeightPx) / 2 + 2,
+              y: node.y - (lineCount * lineHeightPx) / 2 + 2,
               text: valueText,
               fontSize: DEFAULT_FONT_SIZE,
               fontFamily: "sans-serif",

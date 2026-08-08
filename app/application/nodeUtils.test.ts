@@ -1,16 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
-import { measureModelNode, flattenToNodes, nodeBoxWidth } from "./nodeUtils";
-import {
-  NODE_MAX_CONTENT_WIDTH,
-  NODE_PADDING,
-  LINE_HEIGHT,
-} from "../lib/measureText";
+import { measureModelNode, flattenToNodes } from "./nodeUtils";
+import { NODE_MAX_CONTENT_WIDTH, LINE_HEIGHT } from "../lib/measureText";
 
 // "node" project: no DOM, so text measurement is the deterministic estimate and
 // images fall back to the loading placeholder (240×160, already under the cap).
 const LONG = "x".repeat(600);
-const MAX_BOX = NODE_MAX_CONTENT_WIDTH + NODE_PADDING * 2;
 
 function model(over: Partial<MindMapModel>): MindMapModel {
   return { id: "n", text: "", children: [], ...over };
@@ -39,11 +34,10 @@ describe("measureModelNode width cap", () => {
 
   for (const [name, m] of kinds) {
     it(`keeps a ${name} node inside the cap`, () => {
+      // nodeBoxWidth only adds the fixed padding, so the content bound is the
+      // whole story; measureText.test.ts pins the padded box once.
       expect(measureModelNode(m).width).toBeLessThanOrEqual(
         NODE_MAX_CONTENT_WIDTH
-      );
-      expect(nodeBoxWidth(measureModelNode(m).width, true)).toBeLessThanOrEqual(
-        MAX_BOX
       );
     });
   }

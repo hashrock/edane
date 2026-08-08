@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { MindMapNode } from "./nodeUtils";
 import { nodeBoxWidth, nodeBoxHeight } from "./nodeUtils";
 import { resolveDropTarget } from "./dragDrop";
+import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
 
 /**
  * Hand-laid-out flat array mimicking layoutMindMap's output:
@@ -27,6 +28,7 @@ function node(
     type: "text",
     width: 60,
     height: 20,
+    contentMaxWidth: NODE_MAX_CONTENT_WIDTH,
     collapsed: false,
     childCount: children.length,
   };
@@ -160,7 +162,6 @@ describe("resolveDropTarget: cards can't be dropped inside cards", () => {
           index: 0,
           top: 0,
           key: "k",
-          display: "v",
           displayLines: ["v"],
           kind: "text",
           keyColW: 20,

@@ -15,12 +15,6 @@ import { NODE_MAX_CONTENT_WIDTH } from "./measureText";
 
 /** Image nodes never render taller than this (CSS `max-height: 200px`). */
 export const IMAGE_MAX_HEIGHT = 200;
-/**
- * …nor wider than a node's content cap. An image can't reflow like text, so
- * the node-width limit is honoured by scaling the whole image down (aspect
- * preserved) — a wide panorama shrinks instead of stretching the node.
- */
-export const IMAGE_MAX_WIDTH = NODE_MAX_CONTENT_WIDTH;
 /** Vertical padding added around the image to form the node box. */
 export const IMAGE_V_PAD = 14;
 
@@ -84,14 +78,18 @@ export type ImageDisplay =
   | { status: "loaded"; w: number; h: number; img: HTMLImageElement }
   | { status: "error"; w: number; h: number };
 
-/** Display size for an image URL, scaled to fit IMAGE_MAX_HEIGHT × IMAGE_MAX_WIDTH. */
+/**
+ * Display size for an image URL. Scaled to fit IMAGE_MAX_HEIGHT and — since an
+ * image can't reflow the way text does — the shared node content cap, so a wide
+ * panorama shrinks (aspect preserved) instead of stretching its node.
+ */
 export function imageDisplaySize(url: string): ImageDisplay {
   const entry = getImageEntry(url);
   if (entry?.status === "loaded") {
     const scale = Math.min(
       1,
       IMAGE_MAX_HEIGHT / entry.naturalHeight,
-      IMAGE_MAX_WIDTH / entry.naturalWidth
+      NODE_MAX_CONTENT_WIDTH / entry.naturalWidth
     );
     return {
       w: Math.max(1, entry.naturalWidth * scale),

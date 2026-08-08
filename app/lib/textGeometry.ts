@@ -81,6 +81,8 @@ export interface LineData {
   lineOffsets: number[][];
   /** Absolute start index of each line in the full string. */
   lineStarts: number[];
+  /** `lines` joined with "\n" — the exact string the canvas draws. */
+  visualText: string;
   /** Line box height in px for this node's font size. */
   lineHeight: number;
 }
@@ -103,9 +105,19 @@ export function buildLineData(
   maxWidth: number = NODE_MAX_CONTENT_WIDTH
 ): LineData {
   const font = nodeFontString(fontSize, bold);
-  const { lines, lineStarts } = wrapNodeText(text, { fontSize, bold, maxWidth });
+  const { lines, lineStarts, visualText } = wrapNodeText(text, {
+    fontSize,
+    bold,
+    maxWidth,
+  });
   const lineOffsets = lines.map((l) => measureOffsets(l, font));
-  return { lines, lineOffsets, lineStarts, lineHeight: lineHeightFor(fontSize) };
+  return {
+    lines,
+    lineOffsets,
+    lineStarts,
+    visualText,
+    lineHeight: lineHeightFor(fontSize),
+  };
 }
 
 /** Absolute string offset → { line, column-within-line }. */

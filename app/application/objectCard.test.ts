@@ -10,9 +10,9 @@ import {
   ROW_MIN_H,
   ROW_THUMB_MAX_H,
   ROW_BADGE_W,
-  KEY_GAP,
+  rowKeyColOffset,
 } from "./objectCard";
-import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
+import { NODE_MAX_CONTENT_WIDTH, measureNodeBox } from "../lib/measureText";
 
 function card(children: MindMapModel[]): MindMapModel {
   return { id: "card", text: "商品A", type: "object", children };
@@ -146,13 +146,10 @@ describe("objectCardGeom", () => {
       ])
     );
     const r = g.rows[0];
-    const valueW = Math.max(
-      ...r.displayLines.map((l) => l.length * 14 * 0.6),
-      0
-    );
-    expect(g.keyColW + KEY_GAP + valueW + ROW_BADGE_W).toBeLessThanOrEqual(
-      NODE_MAX_CONTENT_WIDTH + 0.001
-    );
+    const valueW = Math.max(0, ...r.displayLines.map((l) => measureNodeBox(l).width));
+    expect(
+      rowKeyColOffset(r.key, g.keyColW) + valueW + ROW_BADGE_W
+    ).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH + 0.001);
   });
 
   it("positions the title block from the card top", () => {

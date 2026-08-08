@@ -16,14 +16,18 @@ const MODEL: MindMapModel = {
 };
 
 // Harness that exposes the shared engine so assertions can read live state.
-function Harness() {
-  const engine = useNoteEditor({
-    initialContent: JSON.stringify(MODEL),
-    initialTitle: "Root",
-  });
-  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
-  return <OutlineEditor engine={engine} />;
+function harnessFor(model: MindMapModel) {
+  return function Harness() {
+    const engine = useNoteEditor({
+      initialContent: JSON.stringify(model),
+      initialTitle: "Root",
+    });
+    (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
+    return <OutlineEditor engine={engine} />;
+  };
 }
+
+const Harness = harnessFor(MODEL);
 
 // A model containing a link node and an image node, for the custom-node editor.
 const CUSTOM_MODEL: MindMapModel = {
@@ -40,14 +44,7 @@ const CUSTOM_MODEL: MindMapModel = {
   ],
 };
 
-function CustomHarness() {
-  const engine = useNoteEditor({
-    initialContent: JSON.stringify(CUSTOM_MODEL),
-    initialTitle: "Root",
-  });
-  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
-  return <OutlineEditor engine={engine} />;
-}
+const CustomHarness = harnessFor(CUSTOM_MODEL);
 
 function engine(): NoteEditorEngine {
   const e = (window as unknown as { __engine?: NoteEditorEngine }).__engine;
@@ -98,14 +95,7 @@ const LONG_MODEL: MindMapModel = {
   ],
 };
 
-function LongHarness() {
-  const engine = useNoteEditor({
-    initialContent: JSON.stringify(LONG_MODEL),
-    initialTitle: "Root",
-  });
-  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
-  return <OutlineEditor engine={engine} />;
-}
+const LongHarness = harnessFor(LONG_MODEL);
 
 describe("OutlineEditor row width cap (browser e2e)", () => {
   it("wraps a long item at the same content cap as a canvas node", async () => {

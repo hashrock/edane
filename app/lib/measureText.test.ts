@@ -5,17 +5,16 @@ import {
   nodeBoxWidth,
   NODE_MAX_CONTENT_WIDTH,
   NODE_PADDING,
-  DEFAULT_FONT_SIZE,
   LINE_HEIGHT,
 } from "./measureText";
 
-// These run under the "node" project (no DOM), so wrapping goes through the
-// deterministic character estimate: fontSize * 0.6 px per character.
-const CHAR_W = DEFAULT_FONT_SIZE * 0.6;
-const PER_LINE = Math.floor(NODE_MAX_CONTENT_WIDTH / CHAR_W);
-
+// These run under the "node" project (no DOM), so wrapping goes through a
+// deterministic character estimate. Rather than restate that estimate, ask the
+// public API how many characters of an unbroken run fit on one line — the
+// tests then hold for the browser measurement too.
 /** A single unbroken run of `n` characters (no space to break on). */
 const run = (n: number) => "x".repeat(n);
+const PER_LINE = wrapNodeText(run(2000)).lines[0].length;
 
 describe("wrapNodeText", () => {
   it("leaves short text on one line", () => {

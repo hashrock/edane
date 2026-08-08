@@ -118,23 +118,37 @@ export interface EditingOverride {
   text: string;
 }
 
-/** Row content that does NOT depend on the shared key-column width. */
+/**
+ * Everything about a row that does NOT depend on the shared key-column width,
+ * including the raw `key: value` sizing (measured at the FULL cap, because
+ * that is what the shared caret geometry — buildLineData — wraps it at while
+ * the row is being edited, and the pill isn't drawn then).
+ */
 interface RowParse {
   key: string | null;
   display: string;
   kind: ValueKind;
   keyW: number;
   hasHiddenChildren: boolean;
-  thumbW?: number;
-  thumbH?: number;
+  rawW: number;
+  rawLines: number;
+  /** Image rows only; its presence is what marks the row as a thumbnail. */
+  thumb?: { w: number; h: number };
 }
 
-/** Row sizes, resolved once the shared key column width is known. */
-interface RowCalc extends RowParse {
+/** Row sizes that fall out once the shared key column width is known. */
+interface RowSize {
   height: number;
-  rawW: number;
   dispW: number;
   displayLines: string[];
+}
+
+/**
+ * Width a row's value column gives up to the key column — the one place this
+ * offset is defined, shared by the width budget below and the canvas draw.
+ */
+export function rowKeyColOffset(key: string | null, keyColW: number): number {
+  return key !== null ? keyColW + KEY_GAP : 0;
 }
 
 function parseRow(child: MindMapModel, raw: string): RowParse {
@@ -144,14 +158,19 @@ function parseRow(child: MindMapModel, raw: string): RowParse {
   if (type === "image") {
     const d = imageDisplaySize(raw);
     const scale = Math.min(1, ROW_THUMB_MAX_W / d.w, ROW_THUMB_MAX_H / d.h);
+    const thumb = {
+      w: Math.max(1, d.w * scale),
+      h: Math.max(1, d.h * scale),
+    };
     return {
       key: null,
       display: "",
       kind: "image",
       keyW: 0,
       hasHiddenChildren,
-      thumbW: Math.max(1, d.w * scale),
-      thumbH: Math.max(1, d.h * scale),
+      rawW: thumb.w,
+      rawLines: 1,
+      thumb,
     };
   }
 
@@ -177,44 +196,41 @@ function parseRow(child: MindMapModel, raw: string): RowParse {
   const keyW = key
     ? Math.min(measureNodeBox(key, { fontSize: KEY_FONT_SIZE }).width, KEY_COL_MAX)
     : 0;
-  return { key, display, kind, keyW, hasHiddenChildren };
+  const rawBox = measureNodeBox(raw);
+  return {
+    key,
+    display,
+    kind,
+    keyW,
+    hasHiddenChildren,
+    rawW: rawBox.width,
+    rawLines: rawBox.lineCount,
+  };
 }
 
 /**
- * Size a row against the width still available to it. Values wrap into the
- * room left by the key column and the hidden-children pill, so however long a
- * field gets the card can never grow past NODE_MAX_CONTENT_WIDTH; the row just
- * gets taller.
+ * Size a row's value against the width still available to it. Values wrap into
+ * the room left by the key column and the hidden-children pill, so however long
+ * a field gets the card can never grow past NODE_MAX_CONTENT_WIDTH; the row
+ * just gets taller.
  */
-function measureRow(p: RowParse, raw: string, keyColW: number): RowCalc {
-  if (p.kind === "image") {
-    const thumbW = p.thumbW ?? 1;
-    return {
-      ...p,
-      height: (p.thumbH ?? 1) + ROW_V_PAD,
-      rawW: thumbW,
-      dispW: thumbW,
-      displayLines: [],
-    };
+function measureRow(p: RowParse, keyColW: number): RowSize {
+  if (p.thumb) {
+    return { height: p.thumb.h + ROW_V_PAD, dispW: p.thumb.w, displayLines: [] };
   }
 
   const valueMax =
     NODE_MAX_CONTENT_WIDTH -
-    (p.key !== null ? keyColW + KEY_GAP : 0) -
+    rowKeyColOffset(p.key, keyColW) -
     (p.hasHiddenChildren ? ROW_BADGE_W : 0);
   // The row must fit BOTH renderings: the two-column display and the raw
-  // `key: value` text shown while the row is being edited. The raw text is
-  // measured at the FULL cap because that is what the shared caret geometry
-  // (buildLineData) wraps it at — and the pill isn't drawn while editing.
-  const rawBox = measureNodeBox(raw);
+  // `key: value` text shown while the row is being edited.
   const disp = wrapNodeText(p.display === "" ? "empty" : p.display, {
     maxWidth: Math.max(1, valueMax),
   });
-  const lineCount = Math.max(rawBox.lineCount, disp.lines.length);
+  const lineCount = Math.max(p.rawLines, disp.lines.length);
   return {
-    ...p,
     height: Math.max(ROW_MIN_H, lineCount * LINE_HEIGHT + ROW_V_PAD),
-    rawW: rawBox.width,
     dispW: disp.width,
     displayLines: p.display === "" ? [] : disp.lines,
   };
@@ -237,35 +253,34 @@ export function objectCardGeom(
 
   // Two passes: the key column is shared across rows, and how much width a
   // value has left to wrap into depends on it.
-  const raws = node.children.map((child) =>
-    editing?.id === child.id ? editing.text : child.text
+  const parsed = node.children.map((child) =>
+    parseRow(child, editing?.id === child.id ? editing.text : child.text)
   );
-  const parsed = node.children.map((child, i) => parseRow(child, raws[i]));
   const keyColW = parsed.reduce((w, p) => Math.max(w, p.keyW), 0);
-  const calcs = parsed.map((p, i) => measureRow(p, raws[i], keyColW));
 
   let width = Math.max(CARD_MIN_CONTENT_W, titleBox.width);
   const rows: CardRowGeom[] = [];
   let top = sepY + CARD_ROWS_TOP;
-  calcs.forEach((c, i) => {
+  parsed.forEach((p, i) => {
+    const size = measureRow(p, keyColW);
     const colsW =
-      (c.key !== null ? keyColW + KEY_GAP : 0) +
-      c.dispW +
-      (c.hasHiddenChildren ? ROW_BADGE_W : 0);
-    width = Math.max(width, c.rawW, colsW);
+      rowKeyColOffset(p.key, keyColW) +
+      size.dispW +
+      (p.hasHiddenChildren ? ROW_BADGE_W : 0);
+    width = Math.max(width, p.rawW, colsW);
     rows.push({
       id: node.children[i].id,
       index: i,
-      key: c.key,
-      display: c.display,
-      displayLines: c.displayLines,
-      kind: c.kind,
+      key: p.key,
+      display: p.display,
+      displayLines: size.displayLines,
+      kind: p.kind,
       top,
-      height: c.height,
-      thumbW: c.thumbW,
-      thumbH: c.thumbH,
+      height: size.height,
+      thumbW: p.thumb?.w,
+      thumbH: p.thumb?.h,
     });
-    top += c.height;
+    top += size.height;
   });
   if (rows.length === 0) {
     top += CARD_HINT_H;

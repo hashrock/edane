@@ -107,9 +107,16 @@ export interface WrappedText {
   lineStarts: number[];
   /** Widest visual line's measured width (px); never exceeds the cap. */
   width: number;
+  /**
+   * `lines` joined back with "\n" — the exact string to render. Built once at
+   * wrap time so the per-redraw draw path is a field read, not a join.
+   */
+  visualText: string;
 }
 
 const _wrapCache = new Map<string, WrappedText>();
+/** Derived box per wrap result, so a cache hit stays allocation-free. */
+const _boxCache = new WeakMap<WrappedText, NodeBox>();
 
 function canMeasure(): boolean {
   return (
@@ -162,6 +169,43 @@ function trimLineEnd(text: string): string {
   return text.replace(/[ \t]+$/, "");
 }
 
+function measureText(s: string, font: string): number {
+  return measureNaturalWidth(
+    prepareWithSegments(s, font, { whiteSpace: "pre-wrap" })
+  );
+}
+
+/** Advance width of one space, memoised per font (see wrapOneLine). */
+const _spaceWidths = new Map<string, number>();
+function spaceWidth(font: string): number {
+  let w = _spaceWidths.get(font);
+  if (w === undefined) {
+    w = measureText(" ", font);
+    _spaceWidths.set(font, w);
+  }
+  return w;
+}
+
+/**
+ * Where in `line` the visual line `text` starts, given the previous line ended
+ * at `pos`. A break only ever eats whitespace, so the answer is `pos` or just
+ * past a whitespace run — a bounded probe. (`indexOf` would also find it, but
+ * scans the whole remaining string when pretext's text isn't a literal
+ * substring — e.g. a CR that `pre-wrap` normalised away — turning a paste with
+ * CRLF endings into an O(n²) walk.)
+ */
+function lineStartAt(line: string, text: string, pos: number): number {
+  let start = pos;
+  while (
+    start < line.length &&
+    !line.startsWith(text, start) &&
+    /\s/.test(line[start])
+  ) {
+    start++;
+  }
+  return line.startsWith(text, start) ? start : pos;
+}
+
 /** Soft-wrap ONE hard line (no `\n` inside) to `maxWidth`. */
 function wrapOneLine(
   line: string,
@@ -171,36 +215,33 @@ function wrapOneLine(
 ): Piece[] {
   if (!canMeasure()) return estimatePieces(line, fontSize, maxWidth);
 
-  const measure = (s: string) =>
-    measureNaturalWidth(prepareWithSegments(s, font, { whiteSpace: "pre-wrap" }));
-
   const prepared = prepareWithSegments(line, font, { whiteSpace: "pre-wrap" });
   const natural = measureNaturalWidth(prepared);
   // Fast path (and the only path for an empty line, which pretext lays out as
   // zero lines): nothing to break.
   if (natural <= maxWidth) return [{ text: line, start: 0, width: natural }];
 
-  // pretext reports each visual line's text but not its offset in the source;
-  // the only characters it drops are the whitespace consumed at a break, so a
-  // forward scan recovers the offsets. `indexOf` failing (an exotic case such
-  // as a materialised soft hyphen) degrades to a contiguous guess rather than
-  // a wrong one.
   const { lines } = layoutWithLines(prepared, maxWidth, 1);
   const pieces: Piece[] = [];
   let pos = 0;
   lines.forEach((l, i) => {
-    const found = line.indexOf(l.text, pos);
-    const start = found < 0 ? pos : found;
+    const start = lineStartAt(line, l.text, pos);
     pos = start + l.text.length;
     // pretext reports the PAINTED width, which still counts the space the
     // break ate — leaving it in would push the box a few px past the cap and
     // make it disagree with the caret's own measurement of the drawn line.
+    // Latin prose breaks on a space almost every time, so subtracting the
+    // (constant) space advance beats re-preparing the trimmed line; only the
+    // rare tab falls back to a real measurement.
     const text = i === lines.length - 1 ? l.text : trimLineEnd(l.text);
-    pieces.push({
-      text,
-      start,
-      width: text === l.text ? l.width : measure(text),
-    });
+    const dropped = l.text.slice(text.length);
+    const width =
+      dropped === ""
+        ? l.width
+        : dropped.includes("\t")
+          ? measureText(text, font)
+          : l.width - dropped.length * spaceWidth(font);
+    pieces.push({ text, start, width });
   });
   return pieces;
 }
@@ -212,14 +253,30 @@ function wrapOneLine(
  * This is the single wrapping authority — {@link measureNodeBox} (layout) and
  * lib/textGeometry's `buildLineData` (caret geometry + canvas draw) both go
  * through it, so the box, the drawn text and the caret can never disagree
- * about where a line breaks. Cached per text + font + cap: only the actively
- * edited node's text changes between renders, so every other node is an O(1)
- * hit.
+ * about where a line breaks. Cached: only the actively edited node's text
+ * changes between renders, so every other node is an O(1) hit.
  */
 export function wrapNodeText(text: string, opts?: MeasureOpts): WrappedText {
   const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
   const bold = opts?.bold ?? false;
   const maxWidth = opts?.maxWidth ?? NODE_MAX_CONTENT_WIDTH;
+  // Hard-break-only layout is cap-INDEPENDENT and already answers every call
+  // whose text fits, so it is cached once per text + font and shared across
+  // every cap. Without this, a cap that moves for reasons unrelated to the text
+  // — an object card's key column widening as a sibling key is typed, a link
+  // gaining a favicon, verticalMove asking for `Infinity` — would miss the
+  // cache for every row/node it touches and re-measure text that never changed.
+  const natural = wrapAt(text, fontSize, bold, Infinity);
+  if (natural.width <= maxWidth) return natural;
+  return wrapAt(text, fontSize, bold, maxWidth);
+}
+
+function wrapAt(
+  text: string,
+  fontSize: number,
+  bold: boolean,
+  maxWidth: number
+): WrappedText {
   const key = `${fontSize}|${bold ? 1 : 0}|${maxWidth}|${text}`;
   const cached = _wrapCache.get(key);
   if (cached) return cached;
@@ -238,7 +295,12 @@ export function wrapNodeText(text: string, opts?: MeasureOpts): WrappedText {
     base += hard.length + 1; // +1 for the consumed "\n"
   }
 
-  const wrapped: WrappedText = { lines, lineStarts, width };
+  const wrapped: WrappedText = {
+    lines,
+    lineStarts,
+    width,
+    visualText: lines.length === 1 ? lines[0] : lines.join("\n"),
+  };
   if (_wrapCache.size > 4000) _wrapCache.clear();
   _wrapCache.set(key, wrapped);
   return wrapped;
@@ -249,12 +311,18 @@ export function wrapNodeText(text: string, opts?: MeasureOpts): WrappedText {
  * normal-weight baseline and the {@link NODE_MAX_CONTENT_WIDTH} cap.
  */
 export function measureNodeBox(text: string, opts?: MeasureOpts): NodeBox {
-  const fontSize = opts?.fontSize ?? DEFAULT_FONT_SIZE;
-  const lineHeight = lineHeightFor(fontSize);
-  const { lines, width } = wrapNodeText(text, opts);
-  return {
-    width,
-    height: Math.max(MIN_BOX_HEIGHT, lines.length * lineHeight + BOX_V_PAD),
-    lineCount: lines.length,
+  const wrapped = wrapNodeText(text, opts);
+  const hit = _boxCache.get(wrapped);
+  if (hit) return hit;
+  const lineHeight = lineHeightFor(opts?.fontSize ?? DEFAULT_FONT_SIZE);
+  const box: NodeBox = {
+    width: wrapped.width,
+    height: Math.max(
+      MIN_BOX_HEIGHT,
+      wrapped.lines.length * lineHeight + BOX_V_PAD
+    ),
+    lineCount: wrapped.lines.length,
   };
+  _boxCache.set(wrapped, box);
+  return box;
 }

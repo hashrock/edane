@@ -36,9 +36,32 @@ export const MD_CARD_BADGE = 34;
 export const MD_TITLE_MAX_W =
   NODE_MAX_CONTENT_WIDTH - MD_CARD_LEAD - MD_CARD_BADGE;
 
-/** Width a link node's title may occupy: the cap minus its favicon column. */
-export function linkTitleMaxWidth(hasFavicon: boolean): number {
-  return NODE_MAX_CONTENT_WIDTH - (hasFavicon ? FAVICON_SIZE + FAVICON_GAP : 0);
+/**
+ * Width cap for a node's own TEXT: the shared content cap minus whatever chrome
+ * its kind draws alongside (a favicon column, the markdown card's glyph and
+ * badge). Both the measurement below and the canvas draw/caret read it — via
+ * `MindMapNode.contentMaxWidth` — so neither can wrap at a width the other
+ * didn't size for.
+ *
+ * Exhaustive over `NodeType` (`assertNever`), so a new kind has to declare its
+ * cap here instead of silently inheriting the full width.
+ */
+export function nodeContentMaxWidth(m: MindMapModel): number {
+  const type: NodeType = m.type ?? "text";
+  switch (type) {
+    case "link":
+      return (
+        NODE_MAX_CONTENT_WIDTH - (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0)
+      );
+    case "markdown":
+      return MD_TITLE_MAX_W;
+    case "image":
+    case "text":
+    case "object":
+      return NODE_MAX_CONTENT_WIDTH;
+    default:
+      return assertNever(type);
+  }
 }
 
 /** Flat node for rendering (computed from domain model via layout). */
@@ -54,6 +77,12 @@ export interface MindMapNode {
   width: number;
   /** Measured box height (px), incl. multi-line text; filled in by layout. */
   height: number;
+  /**
+   * Width this node's text was wrapped at (see {@link nodeContentMaxWidth}).
+   * The draw/caret path re-derives the visual lines from the raw text, so it
+   * must use the very cap the box was measured with.
+   */
+  contentMaxWidth: number;
   /** Whether this node is collapsed (its descendants are hidden). */
   collapsed: boolean;
   /** Number of direct children in the model (even when collapsed). */
@@ -76,8 +105,10 @@ export interface MindMapNode {
     /** Row top relative to the card's TOP edge (px). */
     top: number;
     key: string | null;
-    display: string;
-    /** `display` pre-wrapped to the value column (see CardRowGeom). */
+    /**
+     * The row's value, pre-wrapped to the value column (see CardRowGeom).
+     * Empty when the row has no value — the draw shows a placeholder instead.
+     */
     displayLines: string[];
     kind: ValueKind;
     keyColW: number;
@@ -151,7 +182,11 @@ export function measureModelNode(
     return { width: geom.width, height: geom.height };
   }
   if (editingText != null) {
-    const box = measureNodeBox(editingText, { fontSize: m.fontSize, bold: m.bold });
+    const box = measureNodeBox(editingText, {
+      fontSize: m.fontSize,
+      bold: m.bold,
+      maxWidth: nodeContentMaxWidth(m),
+    });
     return { width: box.width, height: box.height };
   }
   const type: NodeType = m.type ?? "text";
@@ -165,7 +200,7 @@ export function measureModelNode(
       const box = measureNodeBox(display, {
         fontSize: m.fontSize,
         bold: m.bold,
-        maxWidth: linkTitleMaxWidth(!!m.favicon),
+        maxWidth: nodeContentMaxWidth(m),
       });
       return {
         width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
@@ -190,7 +225,11 @@ export function measureModelNode(
     }
     case "text":
     case "object": {
-      const box = measureNodeBox(m.text, { fontSize: m.fontSize, bold: m.bold });
+      const box = measureNodeBox(m.text, {
+        fontSize: m.fontSize,
+        bold: m.bold,
+        maxWidth: nodeContentMaxWidth(m),
+      });
       return { width: box.width, height: box.height };
     }
     default:
@@ -236,6 +275,8 @@ export function flattenToNodes(
         children: [],
         width: geom.width,
         height: geom.height,
+        // The card's editable text is its title, which wraps at the full cap.
+        contentMaxWidth: NODE_MAX_CONTENT_WIDTH,
         collapsed: false,
         childCount: m.children.length,
         type,
@@ -260,6 +301,9 @@ export function flattenToNodes(
           // The hit box spans the card's width so the whole line activates.
           width: geom.width,
           height: row.height,
+          // A row that is being text-edited shows its raw `key: value` text,
+          // which objectCardGeom also measured at the full cap.
+          contentMaxWidth: NODE_MAX_CONTENT_WIDTH,
           collapsed: false,
           childCount: child.children.length,
           type: child.type ?? "text",
@@ -272,7 +316,6 @@ export function flattenToNodes(
             index: i,
             top: row.top,
             key: row.key,
-            display: row.display,
             displayLines: row.displayLines,
             kind: row.kind,
             keyColW: geom.keyColW,
@@ -299,6 +342,7 @@ export function flattenToNodes(
       children: collapsed ? [] : m.children.map((c) => c.id),
       width,
       height,
+      contentMaxWidth: nodeContentMaxWidth(m),
       collapsed,
       childCount: m.children.length,
       type,

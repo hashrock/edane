@@ -48,6 +48,10 @@ interface Props {
 // narrow screen.
 const INDENT = 18;
 
+// Same content-width cap as a canvas node box. Hoisted so the row map doesn't
+// allocate a fresh style object per row per keystroke.
+const ROW_CONTENT_STYLE = { maxWidth: NODE_MAX_CONTENT_WIDTH };
+
 /**
  * Mobile / narrow-viewport layout: a vertically-scrolling, indented outline —
  * an outline text editor rather than a mind map. It drives the exact same
@@ -429,17 +433,16 @@ export default function OutlineEditor({
                     </button>
 
                     {/* Content */}
-                    {/* Same content-width cap as a canvas node box: the row
-                        text already wraps at the viewport on a phone, and on a
-                        wide screen this stops a long item from running the
-                        full width. The overlaid textarea measures THIS element
-                        (see the overlay effect), so the edit width follows the
-                        display width automatically. */}
+                    {/* The row text already wraps at the viewport on a phone;
+                        ROW_CONTENT_STYLE's cap is what stops a long item from
+                        running the full width on a wide screen. The overlaid
+                        textarea measures THIS element (see the overlay effect),
+                        so the edit width follows the display width. */}
                     <div
                       ref={isEditingThis ? activeRowRef : null}
                       onClick={() => activateRow(node.id)}
                       className="min-w-0 flex-1 cursor-text py-0.5"
-                      style={{ maxWidth: NODE_MAX_CONTENT_WIDTH }}
+                      style={ROW_CONTENT_STYLE}
                     >
                       {type === "image" ? (
                         node.text ? (

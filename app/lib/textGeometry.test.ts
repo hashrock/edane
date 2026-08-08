@@ -9,12 +9,13 @@ import {
   nearestCol,
   verticalMove,
 } from "./textGeometry";
-import { NODE_MAX_CONTENT_WIDTH, DEFAULT_FONT_SIZE } from "./measureText";
+import { wrapNodeText } from "./measureText";
 
 // These run under the "node" project (no DOM), so measurement goes through the
 // deterministic fallback: 8px per character, and 40px for the "empty" hint.
-// Soft wrapping estimates a slightly different fontSize * 0.6 per character.
-const PER_LINE = Math.floor(NODE_MAX_CONTENT_WIDTH / (DEFAULT_FONT_SIZE * 0.6));
+// Soft wrapping uses its own estimate, so ask it how many characters of an
+// unbroken run fit on one line rather than restating the factor here.
+const PER_LINE = wrapNodeText("x".repeat(2000)).lines[0].length;
 
 describe("measureOffsets (fallback)", () => {
   it("returns cumulative prefix widths starting at 0", () => {
