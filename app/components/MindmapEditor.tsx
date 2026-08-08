@@ -16,11 +16,9 @@ import {
   cloneWithNewIds,
   generateId,
 } from "../domain/model";
-import {
-  looksLikeMarkdown,
-  markdownToModel,
-  modelToMarkdown,
-} from "../application/markdown";
+import { markdownToModel, modelToMarkdown } from "../application/markdown";
+import { planPaste } from "../application/pastePlan";
+import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
   BRANCH_MIME,
@@ -769,8 +767,8 @@ export function MindmapEditorView({
 
   // Copy/cut/paste operate on whole branches via the internal clipboard while a
   // node is merely selected; inside text editing they fall back to the native
-  // textarea behaviour (and, for paste, to turning external indented text into
-  // nodes).
+  // textarea behaviour — for paste that means the clipboard text lands at the
+  // caret as-is, with no Markdown dialog and no node splitting (see planPaste).
   const hasTextRange = (st: EditorState) =>
     st.view.cursorPos !== st.view.selectionEnd;
 
@@ -837,17 +835,33 @@ export function MindmapEditorView({
 
       const st = stateRef.current;
       const text = e.clipboardData.getData("text");
-
       // An edane branch on the system clipboard carries full-fidelity JSON in a
-      // custom MIME alongside its Markdown text/plain. Since both ride the same
-      // clipboard, the JSON's presence means "this is our own branch" — paste it
-      // as a child (node kinds/formatting intact) ahead of the Markdown path,
-      // even across tabs. In editing mode fall through to native text paste.
+      // custom MIME alongside its Markdown text/plain, so the JSON's presence
+      // means "this is our own branch" (even across tabs).
       const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
-      if (jsonBranch && !st.view.editing) {
-        e.preventDefault();
+
+      // Which of the paste flavours applies is a pure decision — including the
+      // rule that editing mode always means a plain text paste at the caret.
+      const plan = planPaste({
+        editing: st.view.editing,
+        text,
+        hasBranchJson: !!jsonBranch,
+        hasInternalClipboard: !!st.document.clipboard,
+      });
+
+      // "native": let the textarea insert the text at the caret (replacing the
+      // selection), like typing. "none": nothing to paste.
+      if (plan === "native" || plan === "none") return;
+      e.preventDefault();
+
+      if (plan === "branch-json" || plan === "branch-clipboard") {
+        // `node` present = the clipboard's own subtree; absent = the internal
+        // branch clipboard (see the reducer's pasteBranch).
         const next = dispatch(
-          { type: "pasteBranch", node: jsonBranch },
+          {
+            type: "pasteBranch",
+            node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+          },
           "paste-branch"
         );
         flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
@@ -856,38 +870,18 @@ export function MindmapEditorView({
         return;
       }
 
-      // External Markdown → open the choice dialog (decompose / markdown node /
-      // plain text). The internal branch clipboard carries no text, so a
-      // cut/copied branch still pastes as a branch below.
-      if (looksLikeMarkdown(text)) {
-        e.preventDefault();
+      if (plan === "markdown-dialog") {
+        // Offer decompose / markdown node / plain text.
         const targetId = st.view.activeNodeId || st.document.model.id;
         setMdPaste({ text, targetId });
         return;
       }
 
-      if (!st.view.editing) {
-        // Selection mode: paste the internal branch clipboard as a child, or
-        // fall back to external indented text → nodes.
-        if (st.document.clipboard) {
-          e.preventDefault();
-          const next = dispatch({ type: "pasteBranch" }, "paste-branch");
-          flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
-          if (noteId && next.document.model !== st.document.model)
-            saveNote(next.document.model);
-          return;
-        }
-        if (!text) return;
-        e.preventDefault();
+      if (plan === "text-as-nodes") {
         pasteTextAsNodes(text);
         return;
       }
-
-      // Editing mode: multi-line external text becomes nodes; single-line text
-      // is left to the native textarea.
-      if (!text || !text.includes("\n")) return;
-      e.preventDefault();
-      pasteTextAsNodes(text);
+      return assertNever(plan);
     },
     [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
   );

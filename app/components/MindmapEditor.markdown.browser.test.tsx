@@ -36,18 +36,54 @@ function hiddenInput(): HTMLTextAreaElement {
   )!;
 }
 
-function pasteMarkdown(md: string) {
+/**
+ * Fire a paste of Markdown at the editing textarea. Returns whether the editor
+ * called preventDefault — i.e. whether it took the paste over instead of
+ * leaving the text insertion to the textarea.
+ */
+function pasteMarkdown(md: string): { prevented: boolean } {
   const input = hiddenInput();
   input.focus();
   const dt = new DataTransfer();
   dt.setData("text/plain", md);
-  input.dispatchEvent(
+  const notPrevented = input.dispatchEvent(
     new ClipboardEvent("paste", {
       clipboardData: dt,
       bubbles: true,
       cancelable: true,
     })
   );
+  return { prevented: !notPrevented };
+}
+
+function canvas(): HTMLElement {
+  return document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
+}
+
+/** Select node `id` on the canvas (selection mode, no caret in the text). */
+async function selectNode(id: string) {
+  const point = await waitFor(() => api().getNodeClickPoint(id));
+  await waitFor(() => api().getRedrawStats().redrawCount > 0);
+  await userEvent.click(canvas(), {
+    position: { x: Math.round(point.x), y: Math.round(point.y) },
+  });
+  await waitFor(() => api().getActiveNodeId() === id);
+}
+
+/** Select node `id` and enter text editing on it (caret in the textarea). */
+async function editNode(id: string) {
+  await selectNode(id);
+  await userEvent.keyboard("[Space]");
+  await waitFor(() => api().getSelection().editing === true);
+}
+
+/** Give the dialog a chance to appear before asserting it did not. */
+async function settle() {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 30));
+}
+
+function dialogShown(): boolean {
+  return !!document.body.textContent?.includes("Markdownを検出しました");
 }
 
 /** All node texts, depth-first. */
@@ -66,7 +102,7 @@ beforeEach(() => {
 });
 
 describe("MindmapEditor markdown paste", () => {
-  it("offers a dialog when pasted text looks like markdown", async () => {
+  it("offers a dialog when pasted text looks like markdown in selection mode", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
@@ -126,20 +162,11 @@ describe("MindmapEditor markdown paste", () => {
     expect(heading.type).toBeUndefined();
   });
 
-  it("lands in selection mode and reverts in one undo when pasted while editing", async () => {
+  it("lands in selection mode and reverts in one undo", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    // Enter edit mode on "Alpha" so the paste happens while editing.
-    const point = await waitFor(() => api().getNodeClickPoint("a"));
-    await waitFor(() => api().getRedrawStats().redrawCount > 0);
-    const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
-    await userEvent.click(canvas, {
-      position: { x: Math.round(point.x), y: Math.round(point.y) },
-    });
-    await waitFor(() => api().getActiveNodeId() === "a");
-    await userEvent.keyboard("[Space]");
-    await waitFor(() => api().getSelection().editing === true);
+    await selectNode("a");
 
     const before = api().getModel().children.length; // 1
 
@@ -152,7 +179,7 @@ describe("MindmapEditor markdown paste", () => {
     btn.click();
     await waitFor(() => allNodes(api().getModel()).find((n) => n.text === "Heading"));
 
-    // Paste must drop back to selection mode — otherwise the caret sits inside a
+    // Paste must stay in selection mode — otherwise the caret sits inside a
     // pasted node and the next keystroke becomes a separate undo step.
     expect(api().getSelection().editing).toBe(false);
 
@@ -160,5 +187,57 @@ describe("MindmapEditor markdown paste", () => {
     await userEvent.keyboard("{Meta>}z{/Meta}");
     await waitFor(() => api().getModel().children.length === before);
     expect(allNodes(api().getModel()).some((n) => n.text === "Heading")).toBe(false);
+  });
+});
+
+describe("MindmapEditor markdown paste while editing", () => {
+  it("pastes straight into the text: no dialog, no new nodes, native insertion", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await editNode("a");
+    const nodesBefore = allNodes(api().getModel()).length;
+
+    const { prevented } = pasteMarkdown("# Heading\n- one\n- two");
+
+    // Not prevented = the textarea does the insertion itself, so the text lands
+    // at the caret (replacing any selection) like ordinary typing.
+    expect(prevented).toBe(false);
+    await settle();
+    expect(dialogShown()).toBe(false);
+    // Nothing was decomposed into nodes and editing continues on the same node.
+    expect(allNodes(api().getModel()).length).toBe(nodesBefore);
+    expect(api().getSelection()).toMatchObject({
+      activeNodeId: "a",
+      editing: true,
+    });
+  });
+
+  it("keeps single-line markdown (inline link / bold) native too", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await editNode("a");
+
+    expect(pasteMarkdown("see [docs](https://x.dev)").prevented).toBe(false);
+    expect(pasteMarkdown("this is **bold**").prevented).toBe(false);
+    await settle();
+    expect(dialogShown()).toBe(false);
+  });
+
+  it("still offers the dialog once editing is left", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await editNode("a");
+    pasteMarkdown("# Heading\n- one");
+    await settle();
+    expect(dialogShown()).toBe(false);
+
+    // Escape drops back to selection mode; the same paste now asks.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => api().getSelection().editing === false);
+    expect(pasteMarkdown("# Heading\n- one").prevented).toBe(true);
+    await waitFor(() => dialogShown());
   });
 });
