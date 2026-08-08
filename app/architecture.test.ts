@@ -13,10 +13,20 @@
  */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, resolve, relative, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const APP_ROOT = dirname(fileURLToPath(import.meta.url));
+
+// Root-level files split into two kinds:
+// - shared: plain type/declaration files with no framework or server
+//   imports of their own, safe for any layer to depend on.
+// - composition root (everything else at the app root, e.g. server.ts /
+//   root-view.tsx / client.tsx): bootstraps the app and pulls in
+//   Hono/react-dom/etc. No layer may reach into these, or a layer could
+//   transitively import a UI framework through a re-export and the
+//   UI-framework-specifier check below would never see it.
+const ROOT_SHARED_FILES = new Set(["user.ts", "global.d.ts"]);
 
 // Layer -> buckets it may import from (besides itself). Buckets not listed
 // here (server.ts, root-view.tsx, client.tsx, user.ts, global.d.ts — the
@@ -82,7 +92,8 @@ describe("dependency direction", () => {
         const target = resolveImport(file, spec);
         if (!target) continue;
         const toBucket = bucketOf(target);
-        if (toBucket === fromBucket || toBucket === "root" || rule.includes(toBucket)) continue;
+        const isSharedRoot = toBucket === "root" && ROOT_SHARED_FILES.has(basename(target));
+        if (toBucket === fromBucket || isSharedRoot || rule.includes(toBucket)) continue;
         violations.push(
           `${relative(APP_ROOT, file)} (${fromBucket}) imports ${relative(APP_ROOT, target)} (${toBucket}); ` +
             `${fromBucket} may only import [${rule.join(", ") || "nothing"}]`
