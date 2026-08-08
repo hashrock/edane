@@ -110,7 +110,9 @@ export function buildKeymap(
       label: "兄弟ノードを追加",
       keys: "Enter",
       when: "selection",
-      match: (e) => e.key === "Enter",
+      // Plain Enter only: the ⌘/Ctrl chord is sel-edit's "start editing"
+      // (excluded here so the two don't depend on table order).
+      match: (e) => e.key === "Enter" && !mod(e),
       run: () => {
         deps.dispatch({ type: "insertSiblingAfter" }, "insert-sibling");
         return "handled";
@@ -119,10 +121,17 @@ export function buildKeymap(
     {
       id: "sel-edit",
       label: "編集を開始",
-      keys: "Space / F2",
+      keys: "Space / F2 / ⌘/Ctrl + Enter",
       when: "selection",
-      match: (e) => e.key === " " || e.key === "F2",
+      // ⌘/Ctrl + Enter is the chorded twin of Space: plain Enter is taken by
+      // insert-sibling, and the chord has no native browser action inside the
+      // page (Cmd/Ctrl+Enter only means "complete the URL" in the address bar),
+      // so it can't collide with a browser shortcut.
+      match: (e) =>
+        e.key === " " || e.key === "F2" || (mod(e) && e.key === "Enter"),
       run: () => {
+        // No cursor args → the reducer's default: whole text selected, exactly
+        // like Space, so a follow-up keystroke replaces the text either way.
         deps.dispatch({ type: "startEditing" });
         return "handled";
       },
@@ -168,8 +177,10 @@ export function buildKeymap(
               );
               if (next !== ctx.state) deps.saveNote(next.document.model);
             }
-            // The (now-visible) first child is the next node in flat order.
-            deps.dispatch({ type: "moveDown" });
+            // Land on the child the user last visited in this branch (the
+            // first one until they've been inside), so ← then → is a
+            // round-trip rather than a jump back to the top of the branch.
+            deps.dispatch({ type: "moveToChild" });
             return "handled";
           },
         }
@@ -189,8 +200,9 @@ export function buildKeymap(
                 );
                 if (next !== ctx.state) deps.saveNote(next.document.model);
               } else {
-                // Expanded: the first child is the next node in flat order.
-                deps.dispatch({ type: "moveDown" });
+                // Already expanded: descend, resuming at the last-visited
+                // child (see the navigate branch above).
+                deps.dispatch({ type: "moveToChild" });
               }
             }
             return "handled";

@@ -16,11 +16,9 @@ import {
   cloneWithNewIds,
   generateId,
 } from "../domain/model";
-import {
-  looksLikeMarkdown,
-  markdownToModel,
-  modelToMarkdown,
-} from "../application/markdown";
+import { markdownToModel, modelToMarkdown } from "../application/markdown";
+import { planPaste } from "../application/pastePlan";
+import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
   BRANCH_MIME,
@@ -316,6 +314,7 @@ export function MindmapEditorView({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    copyPublicLink,
     undoManagerRef,
     undo,
     redo,
@@ -418,6 +417,14 @@ export function MindmapEditorView({
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<DragState | null>(null);
+  // Re-click on the already-selected node: the intent to enter edit mode is
+  // recorded at mousedown but only committed on release, so a press that turns
+  // into a drag (branch move / text selection) never flips into editing. Holds
+  // the node and the caret position resolved from the click point; consumed and
+  // cleared by the stage's mouseup handler.
+  const clickEditIntentRef = useRef<{ nodeId: string; charIdx: number } | null>(
+    null
+  );
   const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -783,8 +790,8 @@ export function MindmapEditorView({
 
   // Copy/cut/paste operate on whole branches via the internal clipboard while a
   // node is merely selected; inside text editing they fall back to the native
-  // textarea behaviour (and, for paste, to turning external indented text into
-  // nodes).
+  // textarea behaviour — for paste that means the clipboard text lands at the
+  // caret as-is, with no Markdown dialog and no node splitting (see planPaste).
   const hasTextRange = (st: EditorState) =>
     st.view.cursorPos !== st.view.selectionEnd;
 
@@ -851,17 +858,33 @@ export function MindmapEditorView({
 
       const st = stateRef.current;
       const text = e.clipboardData.getData("text");
-
       // An edane branch on the system clipboard carries full-fidelity JSON in a
-      // custom MIME alongside its Markdown text/plain. Since both ride the same
-      // clipboard, the JSON's presence means "this is our own branch" — paste it
-      // as a child (node kinds/formatting intact) ahead of the Markdown path,
-      // even across tabs. In editing mode fall through to native text paste.
+      // custom MIME alongside its Markdown text/plain, so the JSON's presence
+      // means "this is our own branch" (even across tabs).
       const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
-      if (jsonBranch && !st.view.editing) {
-        e.preventDefault();
+
+      // Which of the paste flavours applies is a pure decision — including the
+      // rule that editing mode always means a plain text paste at the caret.
+      const plan = planPaste({
+        editing: st.view.editing,
+        text,
+        hasBranchJson: !!jsonBranch,
+        hasInternalClipboard: !!st.document.clipboard,
+      });
+
+      // "native": let the textarea insert the text at the caret (replacing the
+      // selection), like typing. "none": nothing to paste.
+      if (plan === "native" || plan === "none") return;
+      e.preventDefault();
+
+      if (plan === "branch-json" || plan === "branch-clipboard") {
+        // `node` present = the clipboard's own subtree; absent = the internal
+        // branch clipboard (see the reducer's pasteBranch).
         const next = dispatch(
-          { type: "pasteBranch", node: jsonBranch },
+          {
+            type: "pasteBranch",
+            node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+          },
           "paste-branch"
         );
         flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
@@ -870,38 +893,18 @@ export function MindmapEditorView({
         return;
       }
 
-      // External Markdown → open the choice dialog (decompose / markdown node /
-      // plain text). The internal branch clipboard carries no text, so a
-      // cut/copied branch still pastes as a branch below.
-      if (looksLikeMarkdown(text)) {
-        e.preventDefault();
+      if (plan === "markdown-dialog") {
+        // Offer decompose / markdown node / plain text.
         const targetId = st.view.activeNodeId || st.document.model.id;
         setMdPaste({ text, targetId });
         return;
       }
 
-      if (!st.view.editing) {
-        // Selection mode: paste the internal branch clipboard as a child, or
-        // fall back to external indented text → nodes.
-        if (st.document.clipboard) {
-          e.preventDefault();
-          const next = dispatch({ type: "pasteBranch" }, "paste-branch");
-          flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
-          if (noteId && next.document.model !== st.document.model)
-            saveNote(next.document.model);
-          return;
-        }
-        if (!text) return;
-        e.preventDefault();
+      if (plan === "text-as-nodes") {
         pasteTextAsNodes(text);
         return;
       }
-
-      // Editing mode: multi-line external text becomes nodes; single-line text
-      // is left to the native textarea.
-      if (!text || !text.includes("\n")) return;
-      e.preventDefault();
-      pasteTextAsNodes(text);
+      return assertNever(plan);
     },
     [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
   );
@@ -1714,6 +1717,8 @@ export function MindmapEditorView({
 
       stage.on("mouseup touchend", () => {
         const drag = dragStateRef.current;
+        const intent = clickEditIntentRef.current;
+        clickEditIntentRef.current = null;
         if (drag) {
           if (drag.mode === "move") {
             stopAutoScroll();
@@ -1721,6 +1726,29 @@ export function MindmapEditorView({
             if (drag.moved && drag.drop) {
               commitMoveRef.current(drag.nodeId, drag.drop);
             }
+          }
+          // Re-click on the already-selected node: enter edit mode now that the
+          // press turned out to be a click rather than a drag. The caret lands
+          // where the click did (a drag would have been a text selection or a
+          // branch move instead).
+          if (!drag.moved && intent && intent.nodeId === drag.nodeId) {
+            // Move the hidden textarea's own selection first: the mousedown
+            // render left a queued "select" event for the whole-text range it
+            // had just applied, and handleSelect reads the live DOM when that
+            // event lands — after this dispatch it would push the stale range
+            // back into the state and undo the caret set here.
+            inputRef.current?.setSelectionRange(
+              intent.charIdx,
+              intent.charIdx
+            );
+            dispatch({
+              type: "activateNode",
+              nodeId: intent.nodeId,
+              cursorPos: intent.charIdx,
+              selectionEnd: intent.charIdx,
+              editing: true,
+            });
+            focusEditorSoon();
           }
           wasDraggingRef.current = true;
           dragStateRef.current = null;
@@ -1735,6 +1763,7 @@ export function MindmapEditorView({
       const onWindowMouseUp = () => {
         stage.draggable(true);
         const drag = dragStateRef.current;
+        clickEditIntentRef.current = null;
         if (!drag) return;
         if (drag.mode === "move") {
           stopAutoScroll();
@@ -2649,6 +2678,16 @@ export function MindmapEditorView({
         const cur = stateRef.current;
         const editingThis =
           cur.view.editing && cur.view.activeNodeId === node.id;
+        // Clicking the node that is already selected (but not yet edited)
+        // enters edit mode without waiting for a double click. The state change
+        // is deferred to mouseup so the same press can still start a drag; a
+        // drag that passes the threshold drops the intent (see mouseup).
+        clickEditIntentRef.current =
+          prefsRef.current.selectionMode &&
+          !cur.view.editing &&
+          cur.view.activeNodeId === node.id
+            ? { nodeId: node.id, charIdx }
+            : null;
         if (editingThis || !prefsRef.current.selectionMode) {
           // Always-edit preference: any click lands the caret at the clicked
           // position instead of passing through a select-first step.
@@ -3367,6 +3406,7 @@ export function MindmapEditorView({
             <>
               <span
                 ref={saveStatusRef}
+                data-testid="save-status"
                 className="whitespace-nowrap text-slate-500"
               />
               <PublicityDropdown
@@ -3375,6 +3415,7 @@ export function MindmapEditorView({
                   setIsPublic(next);
                   saveNote(model, next);
                 }}
+                onCopyLink={copyPublicLink}
               />
             </>
           )}
