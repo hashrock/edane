@@ -36,6 +36,7 @@ function stateForTree(model: MindMapModel, count: number): EditorState {
       editingText: text,
       cursorPos: text.length,
       selectionEnd: text.length,
+      lastChildByParent: {},
     },
   };
 }

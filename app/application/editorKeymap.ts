@@ -168,8 +168,10 @@ export function buildKeymap(
               );
               if (next !== ctx.state) deps.saveNote(next.document.model);
             }
-            // The (now-visible) first child is the next node in flat order.
-            deps.dispatch({ type: "moveDown" });
+            // Land on the child the user last visited in this branch (the
+            // first one until they've been inside), so ← then → is a
+            // round-trip rather than a jump back to the top of the branch.
+            deps.dispatch({ type: "moveToChild" });
             return "handled";
           },
         }
@@ -189,8 +191,9 @@ export function buildKeymap(
                 );
                 if (next !== ctx.state) deps.saveNote(next.document.model);
               } else {
-                // Expanded: the first child is the next node in flat order.
-                deps.dispatch({ type: "moveDown" });
+                // Already expanded: descend, resuming at the last-visited
+                // child (see the navigate branch above).
+                deps.dispatch({ type: "moveToChild" });
               }
             }
             return "handled";

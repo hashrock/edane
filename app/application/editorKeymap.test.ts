@@ -39,6 +39,7 @@ function state(
       editingText,
       cursorPos: 0,
       selectionEnd: 0,
+      lastChildByParent: {},
     },
   };
 }
@@ -66,6 +67,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}) {
           editingText: "",
           cursorPos: 0,
           selectionEnd: 0,
+          lastChildByParent: {},
         },
       } as EditorState;
     }),
@@ -150,10 +152,10 @@ describe("preference: arrowBehavior = collapse", () => {
     expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
   });
 
-  it("Right on an expanded parent moves into the first child", () => {
+  it("Right on an expanded parent descends to the last-visited child", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
-    expect(dispatched).toEqual([{ type: "moveDown" }]);
+    expect(dispatched).toEqual([{ type: "moveToChild" }]);
   });
 
   it("Right on a leaf is swallowed (handled, no dispatch)", () => {
@@ -444,10 +446,10 @@ describe("preference: arrowBehavior = navigate", () => {
     arrowBehavior: "navigate",
   };
 
-  it("Right moves into the first child of an expanded parent", () => {
+  it("Right descends to the last-visited child of an expanded parent", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
-    expect(dispatched).toEqual([{ type: "moveDown" }]);
+    expect(dispatched).toEqual([{ type: "moveToChild" }]);
   });
 
   it("Right auto-expands a collapsed parent before moving in", () => {
@@ -457,7 +459,7 @@ describe("preference: arrowBehavior = navigate", () => {
     run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([
       { type: "toggleCollapse", nodeId: "a" },
-      { type: "moveDown" },
+      { type: "moveToChild" },
     ]);
   });
 

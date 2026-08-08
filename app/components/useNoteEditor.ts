@@ -104,6 +104,7 @@ export function useNoteEditor({
         editingText: model.text,
         cursorPos: 0,
         selectionEnd: 0,
+        lastChildByParent: {},
       },
     };
   });

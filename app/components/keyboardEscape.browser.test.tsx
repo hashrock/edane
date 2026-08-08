@@ -13,10 +13,19 @@ import type { MindMapModel, NodeType } from "../domain/model";
  *   While a node is being edited — whatever node type, whatever editor layout,
  *   wherever the focus actually lives (shared textarea, URL box, …) — a
  *   bounded number of unmodified ArrowDown presses must reach the NEXT node,
- *   and ArrowUp presses the PREVIOUS node. The keyboard must never be trapped
- *   inside the editing field.
+ *   and ArrowUp presses the PREVIOUS node. Likewise ArrowRight / ArrowLeft:
+ *   they walk the caret through the text and then cross to the next /
+ *   previous node. The keyboard must never be trapped inside the editing
+ *   field.
  *
- * The suite is generated from a fixture map keyed by NodeType (`satisfies`
+ * Vertical and horizontal are separate suites because they escape by different
+ * mechanisms (line walk vs. caret walk) and cost a different number of presses
+ * — but both are asserted the same way: "a bounded number of presses reaches
+ * the neighbour". The horizontal half holds under either `arrowBehavior`
+ * setting, since that preference only rebinds ←/→ in SELECTION mode while
+ * these tests drive EDITING mode.
+ *
+ * The suites are generated from a fixture map keyed by NodeType (`satisfies`
  * keeps it exhaustive): adding a NodeType without deciding its arrow-key
  * behaviour fails to compile here and in EDIT_SURFACE. Keys are sent to
  * `document.activeElement` (that's what userEvent.keyboard does), so whichever
@@ -82,13 +91,25 @@ function countNodes(n: MindMapModel): number {
   return 1 + n.children.reduce((s, c) => s + countNodes(c), 0);
 }
 
-/** Upper bound on presses needed to escape: one per text line, one per
- *  descendant row (object cards), one to cross, plus slack. If this many
+function totalChars(n: MindMapModel): number {
+  return n.text.length + n.children.reduce((s, c) => s + totalChars(c), 0);
+}
+
+/** Upper bound on presses needed to escape vertically: one per text line, one
+ *  per descendant row (object cards), one to cross, plus slack. If this many
  *  presses don't reach the neighbour, the keyboard is trapped. */
 function pressBudget(target: MindMapModel): number {
   const lines = target.text.split("\n").length;
   const rows = countNodes(target) - 1;
   return lines + rows + 3;
+}
+
+/** Same, horizontally: ←/→ step one CHARACTER at a time, so the budget is the
+ *  text length of every node the caret walks through (the target plus, going
+ *  right, its object-card rows), one press per crossing, plus slack for an
+ *  initial range selection collapsing instead of moving. */
+function hPressBudget(target: MindMapModel): number {
+  return totalChars(target) + countNodes(target) + 3;
 }
 
 // --- Shared helpers --------------------------------------------------------
@@ -112,7 +133,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Press `key` on whatever currently owns the focus until the active node is
  *  `wantId`, at most `budget` times; assert we got there. */
 async function pressToReach(
-  key: "{ArrowUp}" | "{ArrowDown}",
+  key: "{ArrowUp}" | "{ArrowDown}" | "{ArrowLeft}" | "{ArrowRight}",
   wantId: string,
   budget: number,
   getActive: () => string | null
@@ -210,6 +231,37 @@ describe("keyboard-escape invariant — canvas (MindmapEditor)", () => {
   }
 });
 
+/**
+ * `modal-panel` surfaces are exempt from the HORIZONTAL half: edit intent opens
+ * the side panel and drops the editor back to selection mode, so no text field
+ * owns the keyboard and ←/→ are selection bindings (fold / move to parent,
+ * per `arrowBehavior`) rather than caret keys. There is nothing to be trapped
+ * in — that contract is what the vertical suite above already verifies.
+ */
+const CARET_TYPES = (layout: EditorLayout) =>
+  NODE_TYPES.filter((t) => EDIT_SURFACE[layout][t].kind !== "modal-panel");
+
+describe("keyboard-escape invariant (horizontal) — canvas (MindmapEditor)", () => {
+  for (const type of CARET_TYPES("canvas")) {
+    const target = TARGETS[type];
+    const budget = hPressBudget(target);
+
+    it(`${type}: 編集中の ArrowRight ${budget}回以内で次ノードへ到達する`, async () => {
+      await canvasEditTarget(target);
+      await pressToReach("{ArrowRight}", "next", budget, () =>
+        api().getActiveNodeId()
+      );
+    });
+
+    it(`${type}: 編集中の ArrowLeft ${budget}回以内で前ノードへ到達する`, async () => {
+      await canvasEditTarget(target);
+      await pressToReach("{ArrowLeft}", "prev", budget, () =>
+        api().getActiveNodeId()
+      );
+    });
+  }
+});
+
 // --- Outline (OutlineEditor, the mobile layout) -----------------------------
 
 function OutlineHarness({ content }: { content: string }) {
@@ -252,6 +304,23 @@ describe("keyboard-escape invariant — outline (OutlineEditor)", () => {
     it(`${type}: 編集中の ArrowUp ${budget}回以内で前ノードへ到達する`, async () => {
       await outlineEditTarget(target);
       await pressToReach("{ArrowUp}", "prev", budget, outlineActive);
+    });
+  }
+});
+
+describe("keyboard-escape invariant (horizontal) — outline (OutlineEditor)", () => {
+  for (const type of CARET_TYPES("outline")) {
+    const target = TARGETS[type];
+    const budget = hPressBudget(target);
+
+    it(`${type}: 編集中の ArrowRight ${budget}回以内で次ノードへ到達する`, async () => {
+      await outlineEditTarget(target);
+      await pressToReach("{ArrowRight}", "next", budget, outlineActive);
+    });
+
+    it(`${type}: 編集中の ArrowLeft ${budget}回以内で前ノードへ到達する`, async () => {
+      await outlineEditTarget(target);
+      await pressToReach("{ArrowLeft}", "prev", budget, outlineActive);
     });
   }
 });

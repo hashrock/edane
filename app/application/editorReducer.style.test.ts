@@ -25,6 +25,7 @@ function makeState(
       editingText: activeNodeId ? findNode(model, activeNodeId)?.text ?? "" : "",
       cursorPos: 0,
       selectionEnd: 0,
+      lastChildByParent: {},
     },
   };
 }
