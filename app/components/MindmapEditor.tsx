@@ -300,6 +300,7 @@ export function MindmapEditorView({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    copyPublicLink,
     undoManagerRef,
     undo,
     redo,
@@ -3178,6 +3179,7 @@ export function MindmapEditorView({
             <>
               <span
                 ref={saveStatusRef}
+                data-testid="save-status"
                 className="whitespace-nowrap text-slate-500"
               />
               <PublicityDropdown
@@ -3186,6 +3188,7 @@ export function MindmapEditorView({
                   setIsPublic(next);
                   saveNote(model, next);
                 }}
+                onCopyLink={copyPublicLink}
               />
             </>
           )}

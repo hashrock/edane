@@ -7,6 +7,13 @@ export interface ContextMenuAction {
   danger?: boolean;
   /** Optional leading icon. */
   icon?: React.ReactNode;
+  /**
+   * 押せない状態。項目を消すのではなく残したまま無効化するので、なぜ押せないかを
+   * {@link disabledReason} で必ず添えること。
+   */
+  disabled?: boolean;
+  /** 無効な理由。ラベルの下に小さく出る。 */
+  disabledReason?: string;
 }
 
 /** A horizontal divider between categories. */
@@ -79,7 +86,8 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
           <button
             key={i}
             type="button"
-            className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-100 ${
+            disabled={item.disabled}
+            className={`flex w-full items-start gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent ${
               item.danger ? "text-red-600" : "text-slate-700"
             }`}
             onClick={() => {
@@ -88,9 +96,18 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
             }}
           >
             {item.icon && (
-              <span className="flex w-4 shrink-0 justify-center">{item.icon}</span>
+              <span className="flex w-4 shrink-0 justify-center pt-0.5">
+                {item.icon}
+              </span>
             )}
-            {item.label}
+            <span className="flex-1">
+              {item.label}
+              {item.disabled && item.disabledReason && (
+                <span className="mt-0.5 block text-xs text-slate-400">
+                  {item.disabledReason}
+                </span>
+              )}
+            </span>
           </button>
         )
       )}

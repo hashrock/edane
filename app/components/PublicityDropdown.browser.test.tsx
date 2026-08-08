@@ -4,7 +4,14 @@ import { userEvent } from "vitest/browser";
 import { useState } from "react";
 import PublicityDropdown from "./PublicityDropdown";
 
-function Harness({ initial = false }: { initial?: boolean }) {
+function Harness({
+  initial = false,
+  copyLink = false,
+}: {
+  initial?: boolean;
+  /** 「リンクをコピー」を出すかどうか（本番では noteId があるときだけ）。 */
+  copyLink?: boolean;
+}) {
   const [isPublic, setIsPublic] = useState(initial);
   return (
     <PublicityDropdown
@@ -13,6 +20,7 @@ function Harness({ initial = false }: { initial?: boolean }) {
         calls().push(next);
         setIsPublic(next);
       }}
+      onCopyLink={copyLink ? () => copyCalls().push(1) : undefined}
     />
   );
 }
@@ -21,6 +29,12 @@ function calls(): boolean[] {
   const w = window as unknown as { __calls?: boolean[] };
   if (!w.__calls) w.__calls = [];
   return w.__calls;
+}
+
+function copyCalls(): number[] {
+  const w = window as unknown as { __copyCalls?: number[] };
+  if (!w.__copyCalls) w.__copyCalls = [];
+  return w.__copyCalls;
 }
 
 async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
@@ -136,5 +150,76 @@ describe("PublicityDropdown (browser e2e)", () => {
     await waitFor(isOpen);
     await userEvent.click(menuItems()[1]); // 公開 (already active)
     expect(calls()).toEqual([]);
+  });
+});
+
+const copyItem = () =>
+  popover()?.querySelector<HTMLButtonElement>('[data-testid="copy-link"]') ??
+  null;
+
+describe("PublicityDropdown リンクをコピー (browser e2e)", () => {
+  it("is absent when no onCopyLink is given (unsaved / guest note)", async () => {
+    calls().length = 0;
+    copyCalls().length = 0;
+    render(<Harness initial={true} />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+    expect(copyItem()).toBeNull();
+  });
+
+  it("copies and closes the menu when the note is public", async () => {
+    calls().length = 0;
+    copyCalls().length = 0;
+    render(<Harness initial={true} copyLink />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+
+    const item = copyItem()!;
+    expect(item.textContent).toContain("リンクをコピー");
+    expect(item.disabled).toBe(false);
+    await userEvent.click(item);
+    expect(copyCalls()).toEqual([1]);
+    await waitFor(() => !isOpen());
+  });
+
+  // 非公開では「項目ごと消す」ではなく「無効化して理由を見せる」。理由まで出す
+  // ことで、公開へ切り替えれば共有できると同じメニュー内で気づける。
+  it("stays visible but disabled with a reason while the note is private", async () => {
+    calls().length = 0;
+    copyCalls().length = 0;
+    render(<Harness initial={false} copyLink />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+
+    const item = copyItem()!;
+    expect(item).not.toBeNull();
+    expect(item.disabled).toBe(true);
+    expect(item.textContent).toContain("非公開のため共有できません");
+
+    // 押しても何も起きず、メニューも開いたまま。
+    item.click();
+    expect(copyCalls()).toEqual([]);
+    expect(isOpen()).toBe(true);
+  });
+
+  it("becomes enabled as soon as the note is switched to public", async () => {
+    calls().length = 0;
+    copyCalls().length = 0;
+    render(<Harness initial={false} copyLink />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+    expect(copyItem()!.disabled).toBe(true);
+
+    await userEvent.click(menuItems()[1]); // 公開へ切り替え（メニューは閉じる）
+    await waitFor(() => !isOpen());
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+
+    const item = await waitFor(() => {
+      const el = copyItem();
+      return el && !el.disabled ? el : null;
+    });
+    await userEvent.click(item);
+    expect(copyCalls()).toEqual([1]);
   });
 });
