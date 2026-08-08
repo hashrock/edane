@@ -30,6 +30,7 @@ function orphanState(model: MindMapModel): EditorState {
       editingText: "ghost",
       cursorPos: 5,
       selectionEnd: 5,
+      lastChildByParent: {},
     },
   };
 }
@@ -130,6 +131,7 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
         editingText: "",
         cursorPos: 0,
         selectionEnd: 0,
+        lastChildByParent: {},
       },
     };
     const next = editorReducer(s, { type: "backspaceAtStart" });
@@ -161,6 +163,7 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
         editingText: "A1",
         cursorPos: 2,
         selectionEnd: 2,
+        lastChildByParent: {},
       },
     };
     const next = editorReducer(s, { type: "cutBranch" });
@@ -192,6 +195,7 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
         editingText: "A1",
         cursorPos: 2,
         selectionEnd: 2,
+        lastChildByParent: {},
       },
     };
     const next = editorReducer(s, { type: "deleteNode", nodeId: "a1" });

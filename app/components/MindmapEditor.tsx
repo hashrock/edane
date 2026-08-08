@@ -16,11 +16,9 @@ import {
   cloneWithNewIds,
   generateId,
 } from "../domain/model";
-import {
-  looksLikeMarkdown,
-  markdownToModel,
-  modelToMarkdown,
-} from "../application/markdown";
+import { markdownToModel, modelToMarkdown } from "../application/markdown";
+import { planPaste } from "../application/pastePlan";
+import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
   BRANCH_MIME,
@@ -33,7 +31,8 @@ import {
   stageTransform,
   applyStageTransform,
 } from "./stagePanZoom";
-import { zoomAt } from "../lib/panZoom";
+import { zoomAt, panBy } from "../lib/panZoom";
+import { edgeScrollVelocity } from "../lib/dragAutoScroll";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import { useTextInputHandlers } from "./useTextInputHandlers";
 import { layoutMindMap } from "../lib/treeLayout";
@@ -85,6 +84,8 @@ import {
   worldViewport,
   centerOffset,
   ensureVisibleOffset,
+  type Vec,
+  type ViewTransform,
 } from "../lib/viewport";
 import ContextMenu, {
   type ContextMenuAction,
@@ -101,7 +102,7 @@ import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
 import MarkdownPasteDialog from "./MarkdownPasteDialog";
-import type { EditorState } from "../application/editorReducer";
+import type { EditorState, ViewState } from "../application/editorReducer";
 import {
   buildKeymap,
   runKeymap,
@@ -197,7 +198,18 @@ type DragState =
       descendants: number;
       /** Current drop resolution (null = would not drop anywhere). */
       drop: DropTarget | null;
+      /**
+       * Everything Escape has to put back (see the cancel handler). The
+       * selection is captured *before* mousedown moves it onto the grabbed
+       * node, and the transform before edge auto-scroll can pan away from it,
+       * so cancelling rewinds the whole gesture — not just the pending move.
+       */
+      viewBefore: ViewState;
+      transformBefore: ViewTransform;
     };
+
+/** The "move" half of {@link DragState}, once narrowed. */
+type MoveDragState = Extract<DragState, { mode: "move" }>;
 
 /** Number of descendants (incl. hidden ones) of a node in the model. */
 function countDescendants(model: MindMapModel, nodeId: string): number {
@@ -305,6 +317,7 @@ export function MindmapEditorView({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    copyPublicLink,
     undoManagerRef,
     undo,
     redo,
@@ -407,6 +420,14 @@ export function MindmapEditorView({
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<DragState | null>(null);
+  // Re-click on the already-selected node: the intent to enter edit mode is
+  // recorded at mousedown but only committed on release, so a press that turns
+  // into a drag (branch move / text selection) never flips into editing. Holds
+  // the node and the caret position resolved from the click point; consumed and
+  // cleared by the stage's mouseup handler.
+  const clickEditIntentRef = useRef<{ nodeId: string; charIdx: number } | null>(
+    null
+  );
   const dragLayerRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -772,8 +793,8 @@ export function MindmapEditorView({
 
   // Copy/cut/paste operate on whole branches via the internal clipboard while a
   // node is merely selected; inside text editing they fall back to the native
-  // textarea behaviour (and, for paste, to turning external indented text into
-  // nodes).
+  // textarea behaviour — for paste that means the clipboard text lands at the
+  // caret as-is, with no Markdown dialog and no node splitting (see planPaste).
   const hasTextRange = (st: EditorState) =>
     st.view.cursorPos !== st.view.selectionEnd;
 
@@ -840,17 +861,33 @@ export function MindmapEditorView({
 
       const st = stateRef.current;
       const text = e.clipboardData.getData("text");
-
       // An edane branch on the system clipboard carries full-fidelity JSON in a
-      // custom MIME alongside its Markdown text/plain. Since both ride the same
-      // clipboard, the JSON's presence means "this is our own branch" — paste it
-      // as a child (node kinds/formatting intact) ahead of the Markdown path,
-      // even across tabs. In editing mode fall through to native text paste.
+      // custom MIME alongside its Markdown text/plain, so the JSON's presence
+      // means "this is our own branch" (even across tabs).
       const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
-      if (jsonBranch && !st.view.editing) {
-        e.preventDefault();
+
+      // Which of the paste flavours applies is a pure decision — including the
+      // rule that editing mode always means a plain text paste at the caret.
+      const plan = planPaste({
+        editing: st.view.editing,
+        text,
+        hasBranchJson: !!jsonBranch,
+        hasInternalClipboard: !!st.document.clipboard,
+      });
+
+      // "native": let the textarea insert the text at the caret (replacing the
+      // selection), like typing. "none": nothing to paste.
+      if (plan === "native" || plan === "none") return;
+      e.preventDefault();
+
+      if (plan === "branch-json" || plan === "branch-clipboard") {
+        // `node` present = the clipboard's own subtree; absent = the internal
+        // branch clipboard (see the reducer's pasteBranch).
         const next = dispatch(
-          { type: "pasteBranch", node: jsonBranch },
+          {
+            type: "pasteBranch",
+            node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+          },
           "paste-branch"
         );
         flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
@@ -859,38 +896,18 @@ export function MindmapEditorView({
         return;
       }
 
-      // External Markdown → open the choice dialog (decompose / markdown node /
-      // plain text). The internal branch clipboard carries no text, so a
-      // cut/copied branch still pastes as a branch below.
-      if (looksLikeMarkdown(text)) {
-        e.preventDefault();
+      if (plan === "markdown-dialog") {
+        // Offer decompose / markdown node / plain text.
         const targetId = st.view.activeNodeId || st.document.model.id;
         setMdPaste({ text, targetId });
         return;
       }
 
-      if (!st.view.editing) {
-        // Selection mode: paste the internal branch clipboard as a child, or
-        // fall back to external indented text → nodes.
-        if (st.document.clipboard) {
-          e.preventDefault();
-          const next = dispatch({ type: "pasteBranch" }, "paste-branch");
-          flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
-          if (noteId && next.document.model !== st.document.model)
-            saveNote(next.document.model);
-          return;
-        }
-        if (!text) return;
-        e.preventDefault();
+      if (plan === "text-as-nodes") {
         pasteTextAsNodes(text);
         return;
       }
-
-      // Editing mode: multi-line external text becomes nodes; single-line text
-      // is left to the native textarea.
-      if (!text || !text.includes("\n")) return;
-      e.preventDefault();
-      pasteTextAsNodes(text);
+      return assertNever(plan);
     },
     [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
   );
@@ -1296,7 +1313,7 @@ export function MindmapEditorView({
   useEffect(() => {
     if (!canvasRef.current) return;
     const container = canvasRef.current;
-    let removeWindowMouseUp: (() => void) | null = null;
+    let detachWindowDragListeners: (() => void) | null = null;
     let detachPanZoom: (() => void) | null = null;
 
     import("konva").then((mod) => {
@@ -1516,6 +1533,128 @@ export function MindmapEditorView({
         }
       });
 
+      /**
+       * Re-resolve the drop target and redraw the ghost/marker for a pointer at
+       * `pointer` (screen). Called both on real pointer movement and on every
+       * auto-scroll frame — panning under a stationary pointer changes which
+       * world point it sits over, so the preview has to be recomputed there too.
+       */
+      const updateMovePreview = (drag: MoveDragState, pointer: Vec) => {
+        const scale = stage.scaleX();
+        const worldX = (pointer.x - stage.x()) / scale;
+        const worldY = (pointer.y - stage.y()) / scale;
+
+        if (!drag.excluded || !drag.parentOf) {
+          // First real move: snapshot the drag context once. The flat array
+          // is stable for the whole drag (no dispatches until drop).
+          const flat = nodesRef.current;
+          const byId = new Map(flat.map((n) => [n.id, n]));
+          const parentOf = new Map<string, string>();
+          for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
+          // Card field rows aren't in their card's flat `children` (layout
+          // leaves) — wire their parenthood explicitly so drop resolution
+          // sees them as the card's children.
+          for (const n of flat) if (n.cardRow) parentOf.set(n.id, n.cardRow.cardId);
+          const excluded = new Set<string>();
+          (function collect(id: string) {
+            excluded.add(id);
+            byId.get(id)?.children.forEach(collect);
+          })(drag.nodeId);
+          // Dragging a card must exclude its rows too (dropping a card onto
+          // its own row would be a cycle).
+          for (const n of flat)
+            if (n.cardRow && excluded.has(n.cardRow.cardId)) excluded.add(n.id);
+          drag.excluded = excluded;
+          drag.parentOf = parentOf;
+          buildGhost(drag.nodeId, drag.descendants);
+        }
+        drag.drop = resolveDropTarget(
+          nodesRef.current,
+          drag.nodeId,
+          drag.excluded,
+          drag.parentOf,
+          worldX,
+          worldY
+        );
+        ghost?.position({ x: worldX - drag.grabDX, y: worldY - drag.grabDY });
+        updateDropMarker(drag.drop);
+        const cursor = drag.drop ? "grabbing" : "no-drop";
+        const el = stage.container();
+        if (el.style.cursor !== cursor) el.style.cursor = cursor;
+        dragLayer.batchDraw();
+      };
+
+      // --- Edge auto-scroll while a branch is being dragged ---
+      // Holding the pointer in a band along any viewport edge pans the stage
+      // that way (speed ramps with depth — see lib/dragAutoScroll), so a branch
+      // can be carried to an off-screen drop target in one gesture. The loop
+      // runs for as long as a real "move" drag lives, even while the pointer is
+      // perfectly still, which is exactly when auto-scroll has to keep going.
+      let autoScrollRaf: number | null = null;
+      let autoScrollPrevTs = 0;
+      // Screen-space pointer position of the last mousemove (auto-scroll needs
+      // it between moves; stage.getPointerPosition() is only refreshed by real
+      // pointer events).
+      let autoScrollPointer: Vec | null = null;
+      // Pan accumulated since the last viewport refill. The culled redraw is a
+      // full React render + canvas rebuild, so it must not run every frame; the
+      // cull margin (0.6 viewport on each side) covers far more than this, so
+      // refilling every REFILL_AFTER px keeps freshly-revealed nodes drawn well
+      // before the pre-rendered band runs out.
+      const REFILL_AFTER = 160;
+      let scrolledSinceRefill = 0;
+      // Longest frame delta we integrate. A backgrounded tab or a long redraw
+      // would otherwise resume with a huge dt and teleport the view.
+      const MAX_FRAME_S = 0.05;
+
+      const stopAutoScroll = () => {
+        if (autoScrollRaf !== null) cancelAnimationFrame(autoScrollRaf);
+        autoScrollRaf = null;
+        autoScrollPointer = null;
+        if (scrolledSinceRefill !== 0) {
+          scrolledSinceRefill = 0;
+          setViewportTick((t) => t + 1);
+        }
+      };
+
+      const autoScrollTick = (ts: number) => {
+        const drag = dragStateRef.current;
+        if (!drag || drag.mode !== "move" || !drag.moved || !autoScrollPointer) {
+          stopAutoScroll();
+          return;
+        }
+        autoScrollRaf = requestAnimationFrame(autoScrollTick);
+        const dt = Math.min((ts - autoScrollPrevTs) / 1000, MAX_FRAME_S);
+        autoScrollPrevTs = ts;
+        if (dt <= 0) return;
+
+        const v = edgeScrollVelocity(autoScrollPointer, {
+          width: stage.width(),
+          height: stage.height(),
+        });
+        if (v.x === 0 && v.y === 0) return;
+
+        const dx = v.x * dt;
+        const dy = v.y * dt;
+        applyStageTransform(stage, panBy(stageTransform(stage), dx, dy));
+        updateGrid();
+        layer.batchDraw();
+        // The pointer hasn't moved but the world under it has.
+        updateMovePreview(drag, autoScrollPointer);
+
+        scrolledSinceRefill += Math.hypot(dx, dy);
+        if (scrolledSinceRefill >= REFILL_AFTER) {
+          scrolledSinceRefill = 0;
+          setViewportTick((t) => t + 1);
+        }
+      };
+
+      const startAutoScroll = () => {
+        if (autoScrollRaf !== null) return;
+        autoScrollPrevTs = performance.now();
+        autoScrollRaf = requestAnimationFrame(autoScrollTick);
+      };
+
       // Drag from a node: on the node being edited it selects a text range
       // (never crossing to another node); on any other non-root node it picks
       // the branch up and moves it (see the "move" branch below).
@@ -1534,51 +1673,16 @@ export function MindmapEditorView({
           drag.moved = true;
         }
 
+        if (drag.mode === "move") {
+          autoScrollPointer = { x: pointer.x, y: pointer.y };
+          startAutoScroll();
+          updateMovePreview(drag, pointer);
+          return;
+        }
+
         const scale = stage.scaleX();
         const worldX = (pointer.x - stage.x()) / scale;
         const worldY = (pointer.y - stage.y()) / scale;
-
-        if (drag.mode === "move") {
-          if (!drag.excluded || !drag.parentOf) {
-            // First real move: snapshot the drag context once. The flat array
-            // is stable for the whole drag (no dispatches until drop).
-            const flat = nodesRef.current;
-            const byId = new Map(flat.map((n) => [n.id, n]));
-            const parentOf = new Map<string, string>();
-            for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
-            // Card field rows aren't in their card's flat `children` (layout
-            // leaves) — wire their parenthood explicitly so drop resolution
-            // sees them as the card's children.
-            for (const n of flat) if (n.cardRow) parentOf.set(n.id, n.cardRow.cardId);
-            const excluded = new Set<string>();
-            (function collect(id: string) {
-              excluded.add(id);
-              byId.get(id)?.children.forEach(collect);
-            })(drag.nodeId);
-            // Dragging a card must exclude its rows too (dropping a card onto
-            // its own row would be a cycle).
-            for (const n of flat)
-              if (n.cardRow && excluded.has(n.cardRow.cardId)) excluded.add(n.id);
-            drag.excluded = excluded;
-            drag.parentOf = parentOf;
-            buildGhost(drag.nodeId, drag.descendants);
-          }
-          drag.drop = resolveDropTarget(
-            nodesRef.current,
-            drag.nodeId,
-            drag.excluded,
-            drag.parentOf,
-            worldX,
-            worldY
-          );
-          ghost?.position({ x: worldX - drag.grabDX, y: worldY - drag.grabDY });
-          updateDropMarker(drag.drop);
-          const cursor = drag.drop ? "grabbing" : "no-drop";
-          const el = stage.container();
-          if (el.style.cursor !== cursor) el.style.cursor = cursor;
-          dragLayer.batchDraw();
-          return;
-        }
 
         const node = nodesRef.current.find((n) => n.id === drag.nodeId);
         if (!node) return;
@@ -1616,31 +1720,134 @@ export function MindmapEditorView({
 
       stage.on("mouseup touchend", () => {
         const drag = dragStateRef.current;
+        const intent = clickEditIntentRef.current;
+        clickEditIntentRef.current = null;
         if (drag) {
           if (drag.mode === "move") {
+            stopAutoScroll();
             clearMovePreview();
             if (drag.moved && drag.drop) {
               commitMoveRef.current(drag.nodeId, drag.drop);
             }
           }
+          // Re-click on the already-selected node: enter edit mode now that the
+          // press turned out to be a click rather than a drag. The caret lands
+          // where the click did (a drag would have been a text selection or a
+          // branch move instead).
+          if (!drag.moved && intent && intent.nodeId === drag.nodeId) {
+            // Move the hidden textarea's own selection first: the mousedown
+            // render left a queued "select" event for the whole-text range it
+            // had just applied, and handleSelect reads the live DOM when that
+            // event lands — after this dispatch it would push the stale range
+            // back into the state and undo the caret set here.
+            inputRef.current?.setSelectionRange(
+              intent.charIdx,
+              intent.charIdx
+            );
+            dispatch({
+              type: "activateNode",
+              nodeId: intent.nodeId,
+              cursorPos: intent.charIdx,
+              selectionEnd: intent.charIdx,
+              editing: true,
+            });
+            focusEditorSoon();
+          }
           wasDraggingRef.current = true;
           dragStateRef.current = null;
-          stage.draggable(true);
         }
+        stage.draggable(true);
       });
 
       // Releasing the pointer outside the canvas never reaches the stage's own
       // mouseup — treat it as a drag cancel so the preview can't get stuck.
+      // Also the single place that re-arms stage panning, so a drag cancelled
+      // mid-press (Escape) can't leave the stage undraggable.
       const onWindowMouseUp = () => {
-        const drag = dragStateRef.current;
-        if (!drag) return;
-        if (drag.mode === "move") clearMovePreview();
-        dragStateRef.current = null;
         stage.draggable(true);
+        const drag = dragStateRef.current;
+        clickEditIntentRef.current = null;
+        if (!drag) return;
+        if (drag.mode === "move") {
+          stopAutoScroll();
+          clearMovePreview();
+        }
+        dragStateRef.current = null;
       };
       window.addEventListener("mouseup", onWindowMouseUp);
-      removeWindowMouseUp = () =>
+
+      /**
+       * Escape during a branch drag: abandon the move and rewind the gesture.
+       *
+       * "Rewind" is taken literally — nothing the drag did survives:
+       *   - no dispatch of `moveBranch`, so the document (and with it the undo
+       *     history) is never touched. The drop only ever happens on mouseup,
+       *     so cancelling is simply *not* committing;
+       *   - the selection goes back to whatever it was before mousedown moved
+       *     it onto the grabbed node;
+       *   - the view goes back to the transform captured at mousedown. Edge
+       *     auto-scroll can carry the view a long way from where the
+       *     branch actually still lives, and leaving the user stranded there
+       *     after "cancel" is disorienting; the pan happened only because of
+       *     the drag, so it unwinds with it. (A wheel/pinch pan performed
+       *     mid-drag is rewound too — it's the same one gesture.)
+       *
+       * Escape is also "leave edit mode" (keymap edit-escape). No conflict: the
+       * event is swallowed here ONLY while a real move drag is in flight, which
+       * is the innermost transient state and so the one Escape should unwind
+       * first. A second Escape, after the drag is gone, exits editing as usual.
+       * Arrow keys are never touched, so the keyboard-escape invariant holds.
+       */
+      const onWindowKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        const drag = dragStateRef.current;
+        if (!drag || drag.mode !== "move" || !drag.moved) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        stopAutoScroll();
+        clearMovePreview();
+        dragStateRef.current = null;
+        // The pointer is still down: swallow the click that the coming mouseup
+        // will synthesize, so it can't re-select or exit editing behind our
+        // back. `stage.draggable` is re-armed by onWindowMouseUp on release.
+        wasDraggingRef.current = true;
+
+        const t = stageTransform(stage);
+        if (
+          t.scale !== drag.transformBefore.scale ||
+          t.offsetX !== drag.transformBefore.offsetX ||
+          t.offsetY !== drag.transformBefore.offsetY
+        ) {
+          applyStageTransform(stage, drag.transformBefore);
+          updateGrid();
+          layer.batchDraw();
+          setZoomPercent(Math.round(stage.scaleX() * 100));
+          setViewportTick((tick) => tick + 1);
+        }
+
+        // View-only dispatch (no undoType, document untouched) — the undo
+        // history stays exactly as the drag found it.
+        const before = drag.viewBefore;
+        if (before.activeNodeId) {
+          dispatch({
+            type: "activateNode",
+            nodeId: before.activeNodeId,
+            cursorPos: before.cursorPos,
+            selectionEnd: before.selectionEnd,
+            editing: before.editing,
+          });
+        }
+      };
+      // Capture phase: the hidden textarea's own Escape binding (edit-escape)
+      // must not also fire for the keystroke that cancelled the drag.
+      window.addEventListener("keydown", onWindowKeyDown, true);
+
+      detachWindowDragListeners = () => {
         window.removeEventListener("mouseup", onWindowMouseUp);
+        window.removeEventListener("keydown", onWindowKeyDown, true);
+        stopAutoScroll();
+      };
 
       const resizeObserver = new ResizeObserver(() => {
         stage.width(container.clientWidth);
@@ -1664,7 +1871,7 @@ export function MindmapEditorView({
     });
 
     return () => {
-      removeWindowMouseUp?.();
+      detachWindowDragListeners?.();
       detachPanZoom?.();
       if (konvaStageRef.current) {
         konvaStageRef.current.destroy();
@@ -2491,6 +2698,16 @@ export function MindmapEditorView({
         const cur = stateRef.current;
         const editingThis =
           cur.view.editing && cur.view.activeNodeId === node.id;
+        // Clicking the node that is already selected (but not yet edited)
+        // enters edit mode without waiting for a double click. The state change
+        // is deferred to mouseup so the same press can still start a drag; a
+        // drag that passes the threshold drops the intent (see mouseup).
+        clickEditIntentRef.current =
+          prefsRef.current.selectionMode &&
+          !cur.view.editing &&
+          cur.view.activeNodeId === node.id
+            ? { nodeId: node.id, charIdx }
+            : null;
         if (editingThis || !prefsRef.current.selectionMode) {
           // Always-edit preference: any click lands the caret at the clicked
           // position instead of passing through a select-first step.
@@ -2533,6 +2750,11 @@ export function MindmapEditorView({
             parentOf: null,
             descendants: countDescendants(modelRef.current, node.id),
             drop: null,
+            // `cur` is the state from *before* the select/activate dispatch
+            // above, which is what Escape must put back (see the cancel
+            // handler). The transform is still untouched at mousedown.
+            viewBefore: cur.view,
+            transformBefore: stageTransform(stage),
           };
         }
         if (stage) stage.draggable(false);
@@ -3204,6 +3426,7 @@ export function MindmapEditorView({
             <>
               <span
                 ref={saveStatusRef}
+                data-testid="save-status"
                 className="whitespace-nowrap text-slate-500"
               />
               <PublicityDropdown
@@ -3212,6 +3435,7 @@ export function MindmapEditorView({
                   setIsPublic(next);
                   saveNote(model, next);
                 }}
+                onCopyLink={copyPublicLink}
               />
             </>
           )}

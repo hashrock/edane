@@ -1,14 +1,25 @@
 import { Head, Link, router } from "@inertiajs/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ContextMenu from "../../components/ContextMenu";
 import {
+  LinkIcon,
   MoreVerticalIcon,
   PencilIcon,
   PinIcon,
   TrashIcon,
 } from "../../components/icons";
 import { takePendingNote } from "../../application/guestNote";
+import {
+  COPY_LINK_FAILURE,
+  COPY_LINK_SUCCESS,
+  PRIVATE_NOTE_COPY_REASON,
+  publicNoteUrl,
+} from "../../application/publicNoteLink";
+import { copyText } from "../../lib/clipboard";
 import type { SessionUser } from "../../user";
+
+/** コピー結果を出しておく時間（ms）。 */
+const FLASH_MS = 2500;
 
 type Note = {
   id: string;
@@ -32,6 +43,11 @@ export default function NotesIndex({
   );
   const [importing, setImporting] = useState(false);
   const [query, setQuery] = useState("");
+  // コピー結果の一言。エディタのヘッダー（saveStatus）と同じ「見出し行に小さく
+  // 出して勝手に消える」パターンに揃えている（専用のトースト機構は持たない）。
+  // 同じ文言を連続で出しても表示時間を測り直せるよう、毎回別オブジェクトにする。
+  const [flash, setFlash] = useState<{ seq: number; text: string } | null>(null);
+  const flashSeq = useRef(0);
 
   // Client-side title search over the already-loaded list (no API needed).
   const filtered = useMemo(() => {
@@ -51,6 +67,22 @@ export default function NotesIndex({
   const trashNote = (note: Note) => {
     router.post(`/notes/${note.id}/trash`, {}, { preserveScroll: true });
   };
+
+  const copyLink = (note: Note) => {
+    void copyText(publicNoteUrl(window.location.origin, note.id)).then((ok) =>
+      setFlash({
+        seq: ++flashSeq.current,
+        text: ok ? COPY_LINK_SUCCESS : COPY_LINK_FAILURE,
+      })
+    );
+  };
+
+  // 出しっぱなしにせず自動で消す。
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), FLASH_MS);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   const openMenu = (note: Note, e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -148,12 +180,22 @@ export default function NotesIndex({
         <section>
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-xl font-bold tracking-tight">マイノート</h2>
-            <Link
-              href="/notes/new"
-              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
-            >
-              + 新規作成
-            </Link>
+            <div className="flex items-center gap-3">
+              {flash && (
+                <span
+                  role="status"
+                  className="whitespace-nowrap text-xs text-slate-500"
+                >
+                  {flash.text}
+                </span>
+              )}
+              <Link
+                href="/notes/new"
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+              >
+                + 新規作成
+              </Link>
+            </div>
           </div>
           {notes.length > 0 && (
             <input
@@ -236,6 +278,15 @@ export default function NotesIndex({
               label: "編集する",
               icon: <PencilIcon />,
               onSelect: () => router.visit(`/notes/${menu.note.id}/edit`),
+            },
+            {
+              label: "リンクをコピー",
+              icon: <LinkIcon />,
+              // 非公開でも項目は残して理由を見せる（PRIVATE_NOTE_COPY_REASON の
+              // コメント参照）。
+              disabled: !menu.note.isPublic,
+              disabledReason: PRIVATE_NOTE_COPY_REASON,
+              onSelect: () => copyLink(menu.note),
             },
             {
               label: menu.note.pinned ? "固定を解除" : "先頭に固定して表示",

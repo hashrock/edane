@@ -39,6 +39,7 @@ function state(
       editingText,
       cursorPos: 0,
       selectionEnd: 0,
+      lastChildByParent: {},
     },
   };
 }
@@ -66,6 +67,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}) {
           editingText: "",
           cursorPos: 0,
           selectionEnd: 0,
+          lastChildByParent: {},
         },
       } as EditorState;
     }),
@@ -150,10 +152,10 @@ describe("preference: arrowBehavior = collapse", () => {
     expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
   });
 
-  it("Right on an expanded parent moves into the first child", () => {
+  it("Right on an expanded parent descends to the last-visited child", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
-    expect(dispatched).toEqual([{ type: "moveDown" }]);
+    expect(dispatched).toEqual([{ type: "moveToChild" }]);
   });
 
   it("Right on a leaf is swallowed (handled, no dispatch)", () => {
@@ -240,6 +242,34 @@ describe("cross-mode collapse chord (Cmd/Ctrl + .)", () => {
     });
     expect(dispatched).toEqual([{ type: "startEditing" }]);
     expect(preventDefault).toHaveBeenCalled();
+  });
+
+  // Plain Enter is insert-sibling, so the chord is the Enter-flavoured way into
+  // edit mode. Same payload as Space: no cursor args → whole text selected.
+  it("Cmd+Enter starts editing instead of inserting a sibling", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "Enter",
+      metaKey: true,
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("Ctrl+Enter starts editing too (windows/linux)", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "Enter", ctrlKey: true });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+  });
+
+  it("Cmd+Shift+Enter still starts editing (shift is ignored)", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), {
+      key: "Enter",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
   });
 });
 
@@ -444,10 +474,10 @@ describe("preference: arrowBehavior = navigate", () => {
     arrowBehavior: "navigate",
   };
 
-  it("Right moves into the first child of an expanded parent", () => {
+  it("Right descends to the last-visited child of an expanded parent", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", false), { key: "ArrowRight" }, {}, prefs);
-    expect(dispatched).toEqual([{ type: "moveDown" }]);
+    expect(dispatched).toEqual([{ type: "moveToChild" }]);
   });
 
   it("Right auto-expands a collapsed parent before moving in", () => {
@@ -457,7 +487,7 @@ describe("preference: arrowBehavior = navigate", () => {
     run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([
       { type: "toggleCollapse", nodeId: "a" },
-      { type: "moveDown" },
+      { type: "moveToChild" },
     ]);
   });
 

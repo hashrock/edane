@@ -50,6 +50,7 @@ function state(
       editingText: text,
       cursorPos: text.length,
       selectionEnd: text.length,
+      lastChildByParent: {},
     },
   };
 }

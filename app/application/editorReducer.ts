@@ -66,6 +66,20 @@ export interface ViewState {
   editingText: string;
   cursorPos: number;
   selectionEnd: number;
+  /**
+   * Per-parent memory of the last child that held the focus, keyed by parent
+   * id. `moveToChild` (→ in selection mode) returns there instead of always
+   * dropping onto the first child, so walking ← up and → back down lands where
+   * you left off — the Finder column-view model.
+   *
+   * Navigation state, not document state: never persisted with the note, and
+   * intentionally not restored by undo (see undoManager — undo swaps the
+   * document, the view memory keeps describing where the user has been).
+   * Entries are never pruned; a stale one is filtered out at lookup time by
+   * checking it against the live children, which also covers the node being
+   * deleted or moved to another parent.
+   */
+  lastChildByParent: Record<string, string>;
 }
 
 export interface EditorState {
@@ -122,6 +136,7 @@ export type EditorAction =
   | { type: "cmdShiftRight"; pos: number; selEnd: number }
   | { type: "arrowLeftEdge" }
   | { type: "arrowRightEdge" }
+  | { type: "moveToChild" }
   // --- text input ---
   | {
       type: "typeText";
@@ -579,6 +594,7 @@ function documentReducer(
     case "moveUp":
     case "moveDown":
     case "moveToParent":
+    case "moveToChild":
     case "cmdLeft":
     case "cmdRight":
     case "cmdShiftLeft":
@@ -629,6 +645,29 @@ function documentReducer(
  * Move focus to a node, resolving its text from the (new) document model.
  * Defaults the cursor to the end of the text. Preserves the current edit mode.
  */
+/**
+ * Update {@link ViewState.lastChildByParent} for a node that is about to take
+ * the focus. Called from every focus path (focusView plus the click/drag
+ * literals below) rather than only from `moveToParent`, so the memory records
+ * wherever the user actually ended up in a branch — arrowing down through
+ * siblings then pressing ← returns via → to the sibling they stopped on, not
+ * to the one they entered from.
+ *
+ * Returns the existing record unchanged when nothing moves, keeping the object
+ * identity stable so React sees no spurious change.
+ */
+function rememberChild(
+  view: ViewState,
+  model: MindMapModel,
+  nodeId: string
+): ViewState["lastChildByParent"] {
+  const info = findParentAndIndex(model, nodeId);
+  if (!info) return view.lastChildByParent; // the root has no parent to key on
+  if (view.lastChildByParent[info.parent.id] === nodeId)
+    return view.lastChildByParent;
+  return { ...view.lastChildByParent, [info.parent.id]: nodeId };
+}
+
 function focusView(
   view: ViewState,
   model: MindMapModel,
@@ -648,6 +687,7 @@ function focusView(
     editingText: text,
     cursorPos: pos,
     selectionEnd: sel,
+    lastChildByParent: rememberChild(view, model, nodeId),
   };
 }
 
@@ -726,7 +766,36 @@ function viewReducer(
       if (!view.activeNodeId) return view;
       const info = findParentAndIndex(model, view.activeNodeId);
       if (!info) return view; // root has no parent
-      return focusView(view, model, info.parent.id);
+      // Record the child we are LEAVING, not just the parent we arrive at.
+      // rememberChild covers every path that navigated into the child, but
+      // recording the departure here makes ← → a round-trip even when the
+      // focus was placed on the child without passing through focusView.
+      const leaving: ViewState = {
+        ...view,
+        lastChildByParent: {
+          ...view.lastChildByParent,
+          [info.parent.id]: view.activeNodeId,
+        },
+      };
+      return focusView(leaving, model, info.parent.id);
+    }
+
+    case "moveToChild": {
+      if (!view.activeNodeId) return view;
+      const node = findNode(model, view.activeNodeId);
+      if (!node || node.children.length === 0) return view;
+      // Expanding a folded branch is the caller's job (the keymap does it, and
+      // saves the resulting fold state); refuse rather than drop the focus on
+      // a node the fold is hiding.
+      if (node.collapsed) return view;
+      // Return to where the user last was in this branch. The remembered id is
+      // checked against the live children, so one that was deleted or moved
+      // elsewhere silently falls back to the first child.
+      const remembered = view.lastChildByParent[node.id];
+      const target = node.children.some((c) => c.id === remembered)
+        ? remembered
+        : node.children[0].id;
+      return focusView(view, model, target);
     }
 
     case "arrowRightEdge": {
@@ -820,6 +889,7 @@ function viewReducer(
         editingText: node.text,
         cursorPos: action.cursorPos,
         selectionEnd: action.selectionEnd,
+        lastChildByParent: rememberChild(view, model, action.nodeId),
       };
     }
 
@@ -864,6 +934,7 @@ function viewReducer(
         editingText: node.text,
         cursorPos: 0,
         selectionEnd: node.text.length,
+        lastChildByParent: rememberChild(view, model, action.nodeId),
       };
     }
 
@@ -879,6 +950,7 @@ function viewReducer(
         editingText: node.text,
         cursorPos: start,
         selectionEnd: end,
+        lastChildByParent: rememberChild(view, model, action.nodeId),
       };
     }
 

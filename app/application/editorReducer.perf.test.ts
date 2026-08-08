@@ -35,6 +35,7 @@ function measureInsertMs(count: number, iterations: number): number {
       editingText: text,
       cursorPos: text.length,
       selectionEnd: text.length,
+      lastChildByParent: {},
     },
   };
   const action = {
