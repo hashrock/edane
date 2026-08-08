@@ -11,6 +11,8 @@
  * sizing falls back to a placeholder box.
  */
 
+import { NODE_MAX_CONTENT_WIDTH } from "./measureText";
+
 /** Image nodes never render taller than this (CSS `max-height: 200px`). */
 export const IMAGE_MAX_HEIGHT = 200;
 /** Vertical padding added around the image to form the node box. */
@@ -76,14 +78,19 @@ export type ImageDisplay =
   | { status: "loaded"; w: number; h: number; img: HTMLImageElement }
   | { status: "error"; w: number; h: number };
 
-/** Display size for an image URL, scaled to respect IMAGE_MAX_HEIGHT. */
+/**
+ * Display size for an image URL. Scaled to fit IMAGE_MAX_HEIGHT and — since an
+ * image can't reflow the way text does — the shared node content cap, so a wide
+ * panorama shrinks (aspect preserved) instead of stretching its node.
+ */
 export function imageDisplaySize(url: string): ImageDisplay {
   const entry = getImageEntry(url);
   if (entry?.status === "loaded") {
-    const scale =
-      entry.naturalHeight > IMAGE_MAX_HEIGHT
-        ? IMAGE_MAX_HEIGHT / entry.naturalHeight
-        : 1;
+    const scale = Math.min(
+      1,
+      IMAGE_MAX_HEIGHT / entry.naturalHeight,
+      NODE_MAX_CONTENT_WIDTH / entry.naturalWidth
+    );
     return {
       w: Math.max(1, entry.naturalWidth * scale),
       h: Math.max(1, entry.naturalHeight * scale),

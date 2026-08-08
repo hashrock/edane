@@ -9,7 +9,10 @@ import {
   CARD_HINT_H,
   ROW_MIN_H,
   ROW_THUMB_MAX_H,
+  ROW_BADGE_W,
+  rowKeyColOffset,
 } from "./objectCard";
+import { NODE_MAX_CONTENT_WIDTH, measureNodeBox } from "../lib/measureText";
 
 function card(children: MindMapModel[]): MindMapModel {
   return { id: "card", text: "商品A", type: "object", children };
@@ -109,6 +112,44 @@ describe("objectCardGeom", () => {
     expect(gTitle.width).toBeGreaterThan(g0.width);
     const gRow = objectCardGeom(base, { id: "r1", text: "a: b\nもう一行" });
     expect(gRow.rows[0].height).toBeGreaterThan(g0.rows[0].height);
+  });
+
+  it("stops widening at the node content cap and grows downwards instead", () => {
+    const long = "x".repeat(600);
+    const narrow = objectCardGeom(card([{ id: "r1", text: "キー: v", children: [] }]));
+    const wide = objectCardGeom(card([{ id: "r1", text: `キー: ${long}`, children: [] }]));
+    expect(wide.width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
+    expect(wide.rows[0].height).toBeGreaterThan(narrow.rows[0].height);
+    // The value column is pre-wrapped for the draw, so the row's height and the
+    // text it renders come from the same line list.
+    expect(wide.rows[0].displayLines.length).toBeGreaterThan(1);
+  });
+
+  it("caps a long title too", () => {
+    const g = objectCardGeom({
+      id: "card",
+      text: "あ".repeat(400),
+      type: "object",
+      children: [],
+    });
+    expect(g.width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
+  });
+
+  it("leaves the value column room for the key column and the hidden-child pill", () => {
+    const g = objectCardGeom(
+      card([
+        {
+          id: "r1",
+          text: `とてもながいキー: ${"x".repeat(600)}`,
+          children: [{ id: "g", text: "hidden", children: [] }],
+        },
+      ])
+    );
+    const r = g.rows[0];
+    const valueW = Math.max(0, ...r.displayLines.map((l) => measureNodeBox(l).width));
+    expect(
+      rowKeyColOffset(r.key, g.keyColW) + valueW + ROW_BADGE_W
+    ).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH + 0.001);
   });
 
   it("positions the title block from the card top", () => {

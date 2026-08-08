@@ -4,6 +4,7 @@ import { userEvent } from "vitest/browser";
 import OutlineEditor from "./OutlineEditor";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
 import type { MindMapModel } from "../domain/model";
+import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
 
 const MODEL: MindMapModel = {
   id: "root",
@@ -15,14 +16,18 @@ const MODEL: MindMapModel = {
 };
 
 // Harness that exposes the shared engine so assertions can read live state.
-function Harness() {
-  const engine = useNoteEditor({
-    initialContent: JSON.stringify(MODEL),
-    initialTitle: "Root",
-  });
-  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
-  return <OutlineEditor engine={engine} />;
+function harnessFor(model: MindMapModel) {
+  return function Harness() {
+    const engine = useNoteEditor({
+      initialContent: JSON.stringify(model),
+      initialTitle: "Root",
+    });
+    (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
+    return <OutlineEditor engine={engine} />;
+  };
 }
+
+const Harness = harnessFor(MODEL);
 
 // A model containing a link node and an image node, for the custom-node editor.
 const CUSTOM_MODEL: MindMapModel = {
@@ -39,14 +44,7 @@ const CUSTOM_MODEL: MindMapModel = {
   ],
 };
 
-function CustomHarness() {
-  const engine = useNoteEditor({
-    initialContent: JSON.stringify(CUSTOM_MODEL),
-    initialTitle: "Root",
-  });
-  (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
-  return <OutlineEditor engine={engine} />;
-}
+const CustomHarness = harnessFor(CUSTOM_MODEL);
 
 function engine(): NoteEditorEngine {
   const e = (window as unknown as { __engine?: NoteEditorEngine }).__engine;
@@ -82,6 +80,63 @@ async function activeTextarea(): Promise<HTMLTextAreaElement> {
     document.querySelector<HTMLTextAreaElement>("textarea")
   );
 }
+
+
+// A long single-line item, for the row width cap.
+const LONG_MODEL: MindMapModel = {
+  id: "root",
+  text: "Root",
+  children: [
+    {
+      id: "long",
+      text: "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(6),
+      children: [],
+    },
+  ],
+};
+
+const LongHarness = harnessFor(LONG_MODEL);
+
+describe("OutlineEditor row width cap (browser e2e)", () => {
+  it("wraps a long item at the same content cap as a canvas node", async () => {
+    render(<LongHarness />);
+    const row = await waitFor(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
+        li.textContent?.includes("consectetur")
+      )
+    );
+    const content = row.querySelector<HTMLElement>(".cursor-text")!;
+    expect(content.getBoundingClientRect().width).toBeLessThanOrEqual(
+      NODE_MAX_CONTENT_WIDTH
+    );
+    // Capped horizontally → the text went vertical instead.
+    const span = content.querySelector("span")!;
+    expect(span.getBoundingClientRect().height).toBeGreaterThan(24);
+  });
+
+  it("gives the overlaid editor exactly the display width", async () => {
+    render(<LongHarness />);
+    const row = await waitFor(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
+        li.textContent?.includes("consectetur")
+      )
+    );
+    const content = row.querySelector<HTMLElement>(".cursor-text")!;
+    await userEvent.click(content);
+    await waitFor(() => engine().state.view.activeNodeId === "long");
+    const ta = await activeTextarea();
+    // Display and edit widths must not diverge: the caret would otherwise sit
+    // on lines the static row never renders. (The overlay is measured just
+    // before it mounts, so it can lag the row by the width of a scrollbar that
+    // its own height brings in — a pre-existing artefact of the overlay, not a
+    // wrapping mismatch.)
+    const taW = ta.getBoundingClientRect().width;
+    expect(taW).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
+    expect(Math.abs(taW - content.getBoundingClientRect().width)).toBeLessThan(
+      20
+    );
+  });
+});
 
 describe("OutlineEditor custom nodes (browser e2e)", () => {
   it("editing a link node keeps the preview and shows a URL box below", async () => {

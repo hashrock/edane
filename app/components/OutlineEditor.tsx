@@ -18,7 +18,10 @@ import {
   type KeyBinding,
 } from "../application/editorKeymap";
 import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
-import { DEFAULT_FONT_SIZE } from "../lib/measureText";
+import {
+  DEFAULT_FONT_SIZE,
+  NODE_MAX_CONTENT_WIDTH,
+} from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
 import ViewControls from "./ViewControls";
@@ -44,6 +47,10 @@ interface Props {
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
 // narrow screen.
 const INDENT = 18;
+
+// Same content-width cap as a canvas node box. Hoisted so the row map doesn't
+// allocate a fresh style object per row per keystroke.
+const ROW_CONTENT_STYLE = { maxWidth: NODE_MAX_CONTENT_WIDTH };
 
 /**
  * Mobile / narrow-viewport layout: a vertically-scrolling, indented outline —
@@ -426,10 +433,16 @@ export default function OutlineEditor({
                     </button>
 
                     {/* Content */}
+                    {/* The row text already wraps at the viewport on a phone;
+                        ROW_CONTENT_STYLE's cap is what stops a long item from
+                        running the full width on a wide screen. The overlaid
+                        textarea measures THIS element (see the overlay effect),
+                        so the edit width follows the display width. */}
                     <div
                       ref={isEditingThis ? activeRowRef : null}
                       onClick={() => activateRow(node.id)}
                       className="min-w-0 flex-1 cursor-text py-0.5"
+                      style={ROW_CONTENT_STYLE}
                     >
                       {type === "image" ? (
                         node.text ? (
