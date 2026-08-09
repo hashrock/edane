@@ -49,6 +49,7 @@ import {
   moveBranch,
 } from "../domain/model";
 import { objectSiblingTemplate } from "./objectField";
+import { assertNever } from "../lib/assertNever";
 
 export interface DocumentState {
   model: MindMapModel;
@@ -636,6 +637,9 @@ function documentReducer(
 
     case "replace":
       return { document: action.state.document };
+
+    default:
+      return assertNever(action);
   }
 }
 
@@ -985,6 +989,9 @@ function viewReducer(
 
     case "replace":
       return view; // handled directly by editorReducer
+
+    default:
+      return assertNever(action);
   }
 }
 
