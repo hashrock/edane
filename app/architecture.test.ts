@@ -86,7 +86,10 @@ describe("dependency direction", () => {
       if (!rule) continue; // composition-root files may import anything
 
       const content = readFileSync(file, "utf-8");
-      const specs = [...content.matchAll(/from\s+["'](\.[^"']+)["']/g)].map((m) => m[1]);
+      const specs = [
+        ...content.matchAll(/from\s+["'](\.[^"']+)["']/g),
+        ...content.matchAll(/import\(\s*["'](\.[^"']+)["']\s*\)/g),
+      ].map((m) => m[1]);
 
       for (const spec of specs) {
         const target = resolveImport(file, spec);
@@ -112,7 +115,10 @@ describe("dependency direction", () => {
       if (!NO_UI_FRAMEWORK_LAYERS.has(fromBucket)) continue;
 
       const content = readFileSync(file, "utf-8");
-      const specs = [...content.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+      const specs = [
+        ...content.matchAll(/from\s+["']([^"']+)["']/g),
+        ...content.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g),
+      ].map((m) => m[1]);
 
       for (const spec of specs) {
         if (spec.startsWith(".")) continue; // resolved & checked above
