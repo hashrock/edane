@@ -6,10 +6,13 @@
  * Text typing is batched via a debounce timer.
  */
 
-import type { DocumentState } from "./editorReducer";
+import type { DocumentState, UndoType } from "./editorReducer";
+
+/** UndoType plus the one label UndoManager itself generates (batched text edits). */
+export type UndoCommandType = UndoType | "text";
 
 export interface UndoableCommand {
-  type: string;
+  type: UndoCommandType;
   stateBefore: DocumentState;
   stateAfter: DocumentState;
 }
@@ -31,7 +34,7 @@ export class UndoManager {
   // atomically. Supports nesting via a depth counter.
   private txDepth = 0;
   private txBefore: DocumentState | null = null;
-  private txType = "";
+  private txType: UndoCommandType | null = null;
 
   /** Set a callback to get the current state when committing pending text */
   setCommitCallback(fn: () => DocumentState) {
@@ -94,7 +97,7 @@ export class UndoManager {
   }
 
   /** Push a structural command with before/after states */
-  push(type: string, stateBefore: DocumentState, stateAfter: DocumentState) {
+  push(type: UndoCommandType, stateBefore: DocumentState, stateAfter: DocumentState) {
     // Inside a transaction, individual pushes are absorbed by the enclosing
     // transaction's single before/after pair.
     if (this.txDepth > 0) return;
@@ -106,7 +109,7 @@ export class UndoManager {
    * Begin grouping subsequent dispatches into one undo entry. Must be paired
    * with endTransaction(). `before` is the state captured before the group.
    */
-  beginTransaction(type: string, before: DocumentState) {
+  beginTransaction(type: UndoCommandType, before: DocumentState) {
     if (this.txDepth === 0) {
       this.commitPendingText();
       this.txBefore = before;
@@ -119,7 +122,7 @@ export class UndoManager {
   endTransaction(after: DocumentState) {
     if (this.txDepth === 0) return;
     this.txDepth--;
-    if (this.txDepth === 0 && this.txBefore) {
+    if (this.txDepth === 0 && this.txBefore && this.txType) {
       if (this.txBefore !== after) {
         this.pushCommand({
           type: this.txType,
@@ -128,7 +131,7 @@ export class UndoManager {
         });
       }
       this.txBefore = null;
-      this.txType = "";
+      this.txType = null;
     }
   }
 
@@ -165,7 +168,7 @@ export class UndoManager {
     this.pendingTextBefore = null;
     this.txDepth = 0;
     this.txBefore = null;
-    this.txType = "";
+    this.txType = null;
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
