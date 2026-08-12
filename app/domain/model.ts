@@ -382,6 +382,11 @@ export function cloneWithNewIds(node: MindMapModel): MindMapModel {
  * {@link visibleChildrenOf}); the sibling being collapsed doesn't hide
  * itself, so the node being indented could otherwise vanish from
  * `getFlatOrder` while still being the active node.
+ *
+ * Also a no-op when the previous sibling is an object card and the node
+ * being indented is itself one ({@link violatesObjectCardNesting}) — same
+ * adjacency rule setNodeType and dragDrop's isCardIntoCard enforce, applied
+ * here so Tab can't create the nested-card state they refuse to create.
  */
 export function indentNode(
   model: MindMapModel,
@@ -391,14 +396,22 @@ export function indentNode(
   if (cloned.id === nodeId) return cloned;
   const result = findParentAndIndex(cloned, nodeId);
   if (!result || result.index === 0) return cloned;
-  const [node] = result.parent.children.splice(result.index, 1);
+  const node = result.parent.children[result.index];
   const prevSibling = result.parent.children[result.index - 1];
+  if (violatesObjectCardNesting(prevSibling.type, node.type)) return cloned;
+  result.parent.children.splice(result.index, 1);
   prevSibling.collapsed = false;
   prevSibling.children.push(node);
   return cloned;
 }
 
-/** Dedent: move node to parent's level, after parent */
+/**
+ * Dedent: move node to parent's level, after parent. Also a no-op when the
+ * grandparent is an object card and the node being dedented is itself one
+ * ({@link violatesObjectCardNesting}) — dedenting a card row's child up to
+ * become a direct sibling of the row would otherwise land a card directly
+ * inside a card, the same state setNodeType and dragDrop already refuse.
+ */
 export function dedentNode(
   model: MindMapModel,
   nodeId: string
@@ -409,7 +422,9 @@ export function dedentNode(
   if (!result) return cloned;
   const grandResult = findParentAndIndex(cloned, result.parent.id);
   if (!grandResult) return cloned;
-  const [node] = result.parent.children.splice(result.index, 1);
+  const node = result.parent.children[result.index];
+  if (violatesObjectCardNesting(grandResult.parent.type, node.type)) return cloned;
+  result.parent.children.splice(result.index, 1);
   grandResult.parent.children.splice(grandResult.index + 1, 0, node);
   return cloned;
 }
