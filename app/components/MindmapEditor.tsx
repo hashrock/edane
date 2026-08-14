@@ -136,6 +136,20 @@ function isNonPrimaryButton(e: { evt?: { button?: unknown } }): boolean {
 // so selection doesn't jump to a neighbouring (e.g. same-Y parent) node.
 const DRAG_THRESHOLD = 4;
 
+// Labels for the context menu's "convert to…" group, keyed by NodeType.
+// `satisfies Record<NodeType, string>` makes this exhaustive: adding a
+// NodeType refuses to compile here until it's given a label, so the new
+// type can't silently stay unreachable from the conversion menu (the same
+// idiom as STORED_NODE_TYPE_SET in domain/model.ts and EDIT_SURFACE in
+// application/editSurface.ts).
+const NODE_TYPE_LABEL = {
+  text: "テキストにする",
+  image: "画像にする（URL）",
+  link: "リンクにする（URL）",
+  markdown: "Markdownにする",
+  object: "オブジェクトカードにする",
+} as const satisfies Record<NodeType, string>;
+
 // Zoom factor per click of the floating +/− buttons. Deliberately coarser than
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
 const ZOOM_BUTTON_STEP = 1.2;
@@ -1109,12 +1123,12 @@ export function MindmapEditorView({
         if (noteId) saveNote(next.document.model);
         focusEditorSoon();
       };
-      if (type !== "text") typeGroup.push({ label: "テキストにする", onSelect: setType("text") });
-      if (type !== "image") typeGroup.push({ label: "画像にする（URL）", onSelect: setType("image") });
-      if (type !== "link") typeGroup.push({ label: "リンクにする（URL）", onSelect: setType("link") });
-      if (type !== "markdown") typeGroup.push({ label: "Markdownにする", onSelect: setType("markdown") });
-      if (type !== "object")
-        typeGroup.push({ label: "オブジェクトカードにする", onSelect: setType("object") });
+      for (const [nodeType, label] of Object.entries(NODE_TYPE_LABEL) as [
+        NodeType,
+        string,
+      ][]) {
+        if (nodeType !== type) typeGroup.push({ label, onSelect: setType(nodeType) });
+      }
     }
     groups.push(typeGroup);
 
