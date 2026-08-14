@@ -537,6 +537,20 @@ describe("indentNode edge cases", () => {
     expect(a.collapsed).toBe(false);
     expect(getFlatOrder(result)).toEqual(["root", "a", "a1", "b"]);
   });
+
+  it("is a no-op when indenting an object card under an object-card previous sibling", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "card1", text: "Card1", type: "object", children: [] },
+        { id: "card2", text: "Card2", type: "object", children: [] },
+      ],
+    };
+    const result = indentNode(model, "card2");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+    expect(findNode(result, "card1")!.children).toHaveLength(0);
+  });
 });
 
 describe("dedentNode edge cases", () => {
@@ -556,6 +570,30 @@ describe("dedentNode edge cases", () => {
     const model = sampleModel();
     const result = dedentNode(model, "nonexistent");
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+  });
+
+  it("is a no-op when dedenting an object card up into a direct child of its object-card grandparent", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "card",
+          text: "Card",
+          type: "object",
+          children: [
+            {
+              id: "row",
+              text: "row",
+              children: [{ id: "nested", text: "Nested", type: "object", children: [] }],
+            },
+          ],
+        },
+      ],
+    };
+    const result = dedentNode(model, "nested");
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+    expect(findNode(result, "row")!.children).toHaveLength(1);
   });
 });
 
