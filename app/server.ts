@@ -15,7 +15,7 @@ import { resolveEditPageAccess } from "./utils/noteEditAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
 import { extractLinkPreview } from "./utils/linkPreview";
-import { IMAGE_STORAGE_LIMIT_BYTES } from "./domain/imageStorage";
+import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
 import type { Env } from "./global.d";
 
 const DEV_USER = {
@@ -248,7 +248,7 @@ app.get("/api/images", async (c) => {
     .from(images)
     .where(eq(images.userId, user.id))
     .orderBy(desc(images.createdAt));
-  const used = rows.reduce((sum, r) => sum + r.size, 0);
+  const used = totalImageBytes(rows.map((r) => r.size));
   return c.json({
     images: rows.map((r) => ({
       id: r.id,
@@ -281,8 +281,8 @@ app.post("/api/images", async (c) => {
     .select({ size: images.size })
     .from(images)
     .where(eq(images.userId, user.id));
-  const used = existing.reduce((sum, r) => sum + r.size, 0);
-  if (used + file.size > IMAGE_STORAGE_LIMIT_BYTES) {
+  const used = totalImageBytes(existing.map((r) => r.size));
+  if (exceedsImageQuota(used, file.size)) {
     return c.json(
       { error: "Storage limit exceeded", used, limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size },
       413
