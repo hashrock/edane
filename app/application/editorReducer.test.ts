@@ -1063,17 +1063,24 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
     ).toBe("b");
   });
 
-  it("is a no-op (same state) on the root's ↑ and on the tree's last branch", () => {
+  // ↓ stops on the tree's trailing edge — the root, its last child, ITS last
+  // child, and so on — because climbing finds no ancestor with a next sibling.
+  // Those nodes can still HAVE children; ↓ just won't descend, → will.
+  it("is a no-op (same state) along the tree's trailing edge", () => {
     const model = siblingModel();
+    model.children[2].children = [{ id: "c1", text: "C1", children: [] }];
+    for (const id of ["root", "c", "c1"]) {
+      const s = stateAt(model, id);
+      expect(editorReducer(s, { type: "moveDownSiblingFirst" })).toBe(s);
+    }
+    // "c" is on that edge while still having a child to descend into.
+    expect(
+      editorReducer(stateAt(model, "c"), { type: "moveToChild" }).view
+        .activeNodeId
+    ).toBe("c1");
+    // Nothing above the root either.
     const root = stateAt(model, "root");
-    // Nothing above the root.
     expect(editorReducer(root, { type: "moveUpSiblingFirst" })).toBe(root);
-    // ...and nothing below it either: ↓ does not descend, and the root has no
-    // siblings. → is how you get into the tree.
-    expect(editorReducer(root, { type: "moveDownSiblingFirst" })).toBe(root);
-    const last = stateAt(model, "c");
-    expect(getFlatOrder(model).at(-1)).toBe("c");
-    expect(editorReducer(last, { type: "moveDownSiblingFirst" })).toBe(last);
   });
 
   // An object card renders its children as rows inside the card box, so the
@@ -1142,6 +1149,18 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
         editorReducer(stateAt(model, "r2"), { type: "moveDownSiblingFirst" })
           .view.activeNodeId
       ).toBe("t");
+    });
+
+    // Deliberate: ↓ on the title always means "the first row", with no memory
+    // of having been inside. You leave the card by walking its rows.
+    it("re-enters the card when ↓ is pressed on the title again", () => {
+      const model = cardModel();
+      let s = stateAt(model, "card");
+      s = editorReducer(s, { type: "moveDownSiblingFirst" }); // r1
+      s = editorReducer(s, { type: "moveToParent" }); // back to the title
+      expect(s.view.activeNodeId).toBe("card");
+      s = editorReducer(s, { type: "moveDownSiblingFirst" });
+      expect(s.view.activeNodeId).toBe("r1");
     });
 
     it("does not step into an empty card", () => {

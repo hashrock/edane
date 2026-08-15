@@ -794,6 +794,13 @@ function viewReducer(
       // column and ↓ must step into the card rather than over it. A folded card
       // hides its rows (visibleChildrenOf agrees) and a row's own subtree is
       // never drawn, so the exception stops at the card's direct children.
+      //
+      // This is deliberately memoryless: ← back to the title and ↓ again
+      // re-enters the card rather than continuing past it, because what sits
+      // directly below the title on screen is the first row — always. Leaving
+      // the card means walking its rows (or folding it). Making ↓ "remember"
+      // that the rows were already visited would put the meaning of a key back
+      // into hidden state, which is the class of bug this rule exists to kill.
       if (
         dir === 1 &&
         node?.type === "object" &&
@@ -813,7 +820,9 @@ function viewReducer(
       }
       // Down: the next sibling, else climb until an ancestor has one — i.e.
       // step over the whole subtree we are in and land on the next thing at
-      // any level. Only the last node of the tree runs out of ancestors.
+      // any level. This runs out on the tree's trailing edge: the root, its
+      // last child, ITS last child, and so on. Those nodes may still have
+      // children (↓ just refuses to descend into them) — → is how you get in.
       for (let at = info; at; at = findParentAndIndex(model, at.parent.id)) {
         const next = at.parent.children[at.index + 1];
         if (next) return focusView(view, model, next.id);
