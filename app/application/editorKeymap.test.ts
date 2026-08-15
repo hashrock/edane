@@ -415,8 +415,8 @@ describe("selection ↑/↓ per layout", () => {
     run(deps, st(), { key: "ArrowUp" }, {}, undefined, "canvas");
     run(deps, st(), { key: "ArrowDown" }, {}, undefined, "canvas");
     expect(dispatched).toEqual([
-      { type: "moveToPrevSibling" },
-      { type: "moveToNextSibling" },
+      { type: "moveUpSiblingFirst" },
+      { type: "moveDownSiblingFirst" },
     ]);
   });
 
@@ -442,7 +442,7 @@ describe("selection ↑/↓ per layout", () => {
   it("defaults to the canvas layout", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", false), { key: "ArrowUp" });
-    expect(dispatched).toEqual([{ type: "moveToPrevSibling" }]);
+    expect(dispatched).toEqual([{ type: "moveUpSiblingFirst" }]);
   });
 });
 

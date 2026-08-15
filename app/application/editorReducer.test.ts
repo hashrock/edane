@@ -961,7 +961,7 @@ describe("moveToParent", () => {
   });
 });
 
-describe("moveToPrevSibling / moveToNextSibling", () => {
+describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
   /** Root → A(A1, A2), B, C */
   function siblingModel(): MindMapModel {
     return {
@@ -985,39 +985,62 @@ describe("moveToPrevSibling / moveToNextSibling", () => {
   it("moves between siblings", () => {
     const model = siblingModel();
     expect(
-      editorReducer(stateAt(model, "c"), { type: "moveToPrevSibling" }).view
+      editorReducer(stateAt(model, "c"), { type: "moveUpSiblingFirst" }).view
         .activeNodeId
     ).toBe("b");
     expect(
-      editorReducer(stateAt(model, "b"), { type: "moveToNextSibling" }).view
+      editorReducer(stateAt(model, "b"), { type: "moveDownSiblingFirst" }).view
         .activeNodeId
     ).toBe("c");
   });
 
-  it("never crosses into another branch (the flat order would)", () => {
+  it("prefers the sibling over the flat order's neighbour", () => {
     // B's predecessor in the flat order is A2, one level down inside A.
     const model = siblingModel();
     expect(
       getFlatOrder(model)[getFlatOrder(model).indexOf("b") - 1]
     ).toBe("a2");
     expect(
-      editorReducer(stateAt(model, "b"), { type: "moveToPrevSibling" }).view
+      editorReducer(stateAt(model, "b"), { type: "moveUpSiblingFirst" }).view
         .activeNodeId
     ).toBe("a");
   });
 
-  it("is a no-op (same state) at either end of the sibling list", () => {
+  // Preferring siblings must never dead-end: once they run out, ↑/↓ leave the
+  // branch on the flat order, so holding ↓ still walks the whole tree.
+  it("leaves the branch on the flat order when the siblings run out", () => {
     const model = siblingModel();
-    const first = stateAt(model, "a");
-    expect(editorReducer(first, { type: "moveToPrevSibling" })).toBe(first);
-    const last = stateAt(model, "c");
-    expect(editorReducer(last, { type: "moveToNextSibling" })).toBe(last);
+    // Last child of A: no next sibling, so ↓ steps out to A's next sibling.
+    expect(
+      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
+        .activeNodeId
+    ).toBe("b");
+    // First child of A: ↑ steps out to the parent.
+    expect(
+      editorReducer(stateAt(model, "a1"), { type: "moveUpSiblingFirst" }).view
+        .activeNodeId
+    ).toBe("a");
+    // First top-level node: ↑ reaches the root.
+    expect(
+      editorReducer(stateAt(model, "a"), { type: "moveUpSiblingFirst" }).view
+        .activeNodeId
+    ).toBe("root");
   });
 
-  it("is a no-op (same state) on the root, which has no siblings", () => {
+  it("descends from the root, which has no siblings of its own", () => {
     const s = stateAt(siblingModel(), "root");
-    expect(editorReducer(s, { type: "moveToPrevSibling" })).toBe(s);
-    expect(editorReducer(s, { type: "moveToNextSibling" })).toBe(s);
+    expect(
+      editorReducer(s, { type: "moveDownSiblingFirst" }).view.activeNodeId
+    ).toBe("a");
+    // Nothing above the root: the one place ↑ has nowhere to go.
+    expect(editorReducer(s, { type: "moveUpSiblingFirst" })).toBe(s);
+  });
+
+  it("is a no-op (same state) on the last node of the whole tree", () => {
+    const model = siblingModel();
+    const last = stateAt(model, "c");
+    expect(getFlatOrder(model).at(-1)).toBe("c");
+    expect(editorReducer(last, { type: "moveDownSiblingFirst" })).toBe(last);
   });
 
   // An object card renders its children as rows inside the card box, so the
@@ -1047,25 +1070,25 @@ describe("moveToPrevSibling / moveToNextSibling", () => {
     it("walks title → rows → the node after the card", () => {
       const model = cardModel();
       let s = stateAt(model, "card");
-      s = editorReducer(s, { type: "moveToNextSibling" });
+      s = editorReducer(s, { type: "moveDownSiblingFirst" });
       expect(s.view.activeNodeId).toBe("r1");
-      s = editorReducer(s, { type: "moveToNextSibling" });
+      s = editorReducer(s, { type: "moveDownSiblingFirst" });
       expect(s.view.activeNodeId).toBe("r2");
-      s = editorReducer(s, { type: "moveToNextSibling" });
+      s = editorReducer(s, { type: "moveDownSiblingFirst" });
       expect(s.view.activeNodeId).toBe("t");
     });
 
     it("walks back up out of the card", () => {
       const model = cardModel();
       let s = stateAt(model, "r1");
-      s = editorReducer(s, { type: "moveToPrevSibling" });
+      s = editorReducer(s, { type: "moveUpSiblingFirst" });
       expect(s.view.activeNodeId).toBe("card");
     });
 
     it("skips the rows of a folded card", () => {
       const s = stateAt(cardModel(true), "card");
       expect(
-        editorReducer(s, { type: "moveToNextSibling" }).view.activeNodeId
+        editorReducer(s, { type: "moveDownSiblingFirst" }).view.activeNodeId
       ).toBe("t");
     });
   });
@@ -1074,7 +1097,7 @@ describe("moveToPrevSibling / moveToNextSibling", () => {
     // Walking siblings must feed lastChildByParent the same way moveDown does.
     const model = siblingModel();
     let s = stateAt(model, "b");
-    s = editorReducer(s, { type: "moveToNextSibling" }); // c
+    s = editorReducer(s, { type: "moveDownSiblingFirst" }); // c
     s = editorReducer(s, { type: "moveToParent" }); // root
     expect(editorReducer(s, { type: "moveToChild" }).view.activeNodeId).toBe(
       "c"

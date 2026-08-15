@@ -128,13 +128,13 @@ export type EditorAction =
   // --- navigation ---
   | { type: "moveUp" }
   | { type: "moveDown" }
-  // Sibling-only vertical navigation: the canvas's ↑/↓ in selection mode. Where
-  // moveUp/moveDown walk the flat (outline) order and therefore cross branches,
-  // these stay among the active node's siblings and simply stop at the ends —
-  // the Finder column model the → / lastChildByParent memory already follows,
-  // where changing level is ← / →'s job.
-  | { type: "moveToPrevSibling" }
-  | { type: "moveToNextSibling" }
+  // Sibling-first vertical navigation: the canvas's ↑/↓ in selection mode.
+  // moveUp/moveDown walk the flat (outline) order, which on a two-dimensional
+  // canvas means dropping into a neighbouring branch; these prefer the node's
+  // own siblings — what actually sits above and below it — and fall back to the
+  // flat order once the siblings run out, so ↑/↓ never dead-end mid-tree.
+  | { type: "moveUpSiblingFirst" }
+  | { type: "moveDownSiblingFirst" }
   // Move focus to the active node's parent (Left in selection mode on a leaf /
   // collapsed node).
   | { type: "moveToParent" }
@@ -601,8 +601,8 @@ function documentReducer(
     // Pure view actions: the document never changes.
     case "moveUp":
     case "moveDown":
-    case "moveToPrevSibling":
-    case "moveToNextSibling":
+    case "moveUpSiblingFirst":
+    case "moveDownSiblingFirst":
     case "moveToParent":
     case "moveToChild":
     case "cmdLeft":
@@ -775,39 +775,36 @@ function viewReducer(
       return view;
     }
 
-    case "moveToPrevSibling":
-    case "moveToNextSibling": {
+    case "moveUpSiblingFirst":
+    case "moveDownSiblingFirst": {
       if (!view.activeNodeId) return view;
+      const dir = action.type === "moveUpSiblingFirst" ? -1 : 1;
       const info = findParentAndIndex(model, view.activeNodeId);
-      if (!info) return view; // the root has no siblings
-      const dir = action.type === "moveToPrevSibling" ? -1 : 1;
-      // An object card draws its children as rows INSIDE its own box, so the
-      // card title and its rows are one visual column rather than two levels.
-      // Walking that column is the flat order's job — staying among siblings
-      // there would make ↓ skip the whole card and strand the rows, which only
-      // ← / → could then reach. Entering it needs the card expanded (a folded
-      // card hides its rows; visibleChildrenOf agrees).
       const node = findNode(model, view.activeNodeId);
-      const insideCard = info.parent.type === "object";
+      // An object card draws its children as rows INSIDE its own box, so the
+      // card title and its rows are one visual column rather than two levels:
+      // ↓ has to step INTO the card, not over it. Only when it is expanded (a
+      // folded card hides its rows; visibleChildrenOf agrees).
       const entersCard =
         dir === 1 &&
         node?.type === "object" &&
         !node.collapsed &&
         node.children.length > 0;
-      if (insideCard || entersCard) {
-        const order = getFlatOrder(model);
-        const idx = order.indexOf(view.activeNodeId);
-        const next = order[idx + dir];
-        return next ? focusView(view, model, next) : view;
-      }
-      const target = info.parent.children[info.index + dir];
-      // Stop at the first / last sibling rather than escaping the branch: the
-      // caller only binds this in selection mode, where ← / → still reach every
-      // other node, so refusing to move can't trap the keyboard.
-      if (!target) return view;
       // Siblings share a parent, so if the active node is visible they all are
       // — no collapsed check needed here (unlike moveToChild).
-      return focusView(view, model, target.id);
+      const sibling =
+        !entersCard && info
+          ? info.parent.children[info.index + dir]
+          : undefined;
+      if (sibling) return focusView(view, model, sibling.id);
+      // No sibling that way: fall back to the flat order so ↑/↓ always keep
+      // going. That covers stepping out of the last child of a branch, into a
+      // card's rows, and off the root (which has no siblings at all). Only the
+      // very first / last node of the whole tree has nowhere left to go.
+      const order = getFlatOrder(model);
+      const idx = order.indexOf(view.activeNodeId);
+      const next = order[idx + dir];
+      return next ? focusView(view, model, next) : view;
     }
 
     case "moveToParent": {

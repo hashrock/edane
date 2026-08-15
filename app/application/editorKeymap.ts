@@ -118,10 +118,11 @@ export function buildKeymap(
   // ↑/↓ in selection mode follow the layout, not a preference. On the canvas
   // siblings are what sit above and below each other, so walking the flat
   // (depth-first) order jumps into a neighbouring branch — the outline draws
-  // that same order as one vertical column, where it is exactly right. Editing
-  // mode keeps using moveUp/moveDown in BOTH layouts: the keyboard-escape
-  // invariant requires ↑/↓ to always reach an adjacent node, and stopping at
-  // the first sibling would trap the caret (see editSurface.ts).
+  // that same order as one vertical column, where it is exactly right. The
+  // canvas pair still falls back to the flat order at the ends of a sibling
+  // list, so ↑/↓ keep moving either way. Editing mode uses plain
+  // moveUp/moveDown in BOTH layouts (the keyboard-escape invariant wants the
+  // adjacent node, not the adjacent sibling — see editSurface.ts).
   const siblingArrows = layout === "canvas";
   const selectionBindings: KeyBinding[] = [
     {
@@ -153,24 +154,26 @@ export function buildKeymap(
     },
     {
       id: "sel-up",
-      label: siblingArrows ? "前の兄弟ノードへ" : "上のノードへ",
+      label: siblingArrows ? "上のノードへ（兄弟優先）" : "上のノードへ",
       keys: "↑",
       when: "selection",
       match: (e) => e.key === "ArrowUp" && !e.altKey,
       run: () => {
-        deps.dispatch({ type: siblingArrows ? "moveToPrevSibling" : "moveUp" });
+        deps.dispatch({
+          type: siblingArrows ? "moveUpSiblingFirst" : "moveUp",
+        });
         return "handled";
       },
     },
     {
       id: "sel-down",
-      label: siblingArrows ? "次の兄弟ノードへ" : "下のノードへ",
+      label: siblingArrows ? "下のノードへ（兄弟優先）" : "下のノードへ",
       keys: "↓",
       when: "selection",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
       run: () => {
         deps.dispatch({
-          type: siblingArrows ? "moveToNextSibling" : "moveDown",
+          type: siblingArrows ? "moveDownSiblingFirst" : "moveDown",
         });
         return "handled";
       },
