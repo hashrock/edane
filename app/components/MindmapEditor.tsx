@@ -1279,7 +1279,8 @@ export function MindmapEditorView({
           redo,
           verticalMove,
         },
-        prefs
+        prefs,
+        "canvas"
       ),
     [dispatch, saveNote, undo, redo, prefs]
   );

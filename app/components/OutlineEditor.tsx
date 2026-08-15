@@ -18,6 +18,7 @@ import {
   type KeyBinding,
 } from "../application/editorKeymap";
 import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
+import { DEFAULT_PREFERENCES } from "../application/editorPreferences";
 import {
   DEFAULT_FONT_SIZE,
   NODE_MAX_CONTENT_WIDTH,
@@ -131,16 +132,23 @@ export default function OutlineEditor({
   // --- Keymap (shared with the canvas view) ---
   const keymap = useMemo<KeyBinding[]>(
     () =>
-      buildKeymap({
-        dispatch,
-        saveNote: (m) => saveNote(m),
-        // No command palette / help overlay on the mobile layout.
-        openPalette: () => {},
-        openHelp: () => {},
-        undo,
-        redo,
-        verticalMove: verticalMoveInText,
-      }),
+      buildKeymap(
+        {
+          dispatch,
+          saveNote: (m) => saveNote(m),
+          // No command palette / help overlay on the mobile layout.
+          openPalette: () => {},
+          openHelp: () => {},
+          undo,
+          redo,
+          verticalMove: verticalMoveInText,
+        },
+        // The mobile layout has no settings dialog, so it runs on the defaults;
+        // "outline" keeps ↑/↓ walking the flat order drawn as one column (the
+        // canvas moves between siblings instead).
+        DEFAULT_PREFERENCES,
+        "outline"
+      ),
     [dispatch, saveNote, undo, redo]
   );
 

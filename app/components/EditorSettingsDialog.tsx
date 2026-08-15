@@ -147,6 +147,29 @@ export default function EditorSettingsDialog({
           </section>
           <section>
             <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              選択中の Enter キー
+            </h3>
+            <div className="space-y-1.5">
+              {radio(
+                "enterBehavior",
+                prefs.enterBehavior === "insert-sibling",
+                !prefs.selectionMode,
+                "兄弟ノードを追加",
+                "編集の開始は Space / F2 / ⌘/Ctrl + Enter",
+                () => onChange({ ...prefs, enterBehavior: "insert-sibling" })
+              )}
+              {radio(
+                "enterBehavior",
+                prefs.enterBehavior === "edit",
+                !prefs.selectionMode,
+                "編集を開始",
+                "兄弟ノードの追加は ⌘/Ctrl + Enter に移る",
+                () => onChange({ ...prefs, enterBehavior: "edit" })
+              )}
+            </div>
+          </section>
+          <section>
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
               選択中の ← / → キー
             </h3>
             <div className="space-y-1.5">

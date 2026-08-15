@@ -12,6 +12,7 @@ import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
 } from "./editorPreferences";
+import type { EditorLayout } from "./editSurface";
 
 /** Root → A(children: A1) , B */
 function model(): MindMapModel {
@@ -87,7 +88,8 @@ function run(
   st: EditorState,
   fake: FakeKey,
   ctxPatch: Partial<KeyContext> = {},
-  prefs: EditorPreferences = DEFAULT_PREFERENCES
+  prefs: EditorPreferences = DEFAULT_PREFERENCES,
+  layout: EditorLayout = "canvas"
 ) {
   const preventDefault = vi.fn();
   const e = { preventDefault, ...fake } as unknown as KeyContext["e"];
@@ -99,7 +101,7 @@ function run(
     selEnd: 0,
     ...ctxPatch,
   };
-  runKeymap(buildKeymap(deps, prefs), ctx, prefs);
+  runKeymap(buildKeymap(deps, prefs, layout), ctx, prefs);
   return { preventDefault };
 }
 
@@ -286,6 +288,56 @@ describe("reorder and bold (cross-mode)", () => {
     expect(dispatched).toEqual([{ type: "moveNodeDown" }]);
   });
 
+  it("Alt+ArrowRight indents, in selection mode", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "b", false), { key: "ArrowRight", altKey: true });
+    expect(dispatched).toEqual([{ type: "tab", shift: false }]);
+  });
+
+  it("Alt+ArrowLeft outdents, in editing mode", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a1", true), { key: "ArrowLeft", altKey: true });
+    expect(dispatched).toEqual([{ type: "tab", shift: true }]);
+  });
+
+  // Alt+←→ must win over the caret bindings that match the same arrow keys,
+  // in both modes — otherwise the caret moves instead of the node.
+  it("Alt+←→ take precedence over the plain arrow bindings", () => {
+    for (const editing of [false, true]) {
+      const { deps, dispatched } = makeDeps();
+      run(deps, state(model(), "a1", editing, "A1"), {
+        key: "ArrowLeft",
+        altKey: true,
+      });
+      run(deps, state(model(), "a1", editing, "A1"), {
+        key: "ArrowRight",
+        altKey: true,
+      });
+      expect(dispatched).toEqual([
+        { type: "tab", shift: true },
+        { type: "tab", shift: false },
+      ]);
+    }
+  });
+
+  // The pair keeps working with tabBehavior = insert-child, where Tab no longer
+  // indents and these are the only re-parenting keys.
+  it("Alt+←→ still indent/outdent with tabBehavior = insert-child", () => {
+    const { deps, dispatched } = makeDeps();
+    const prefs: EditorPreferences = {
+      ...DEFAULT_PREFERENCES,
+      tabBehavior: "insert-child",
+    };
+    run(
+      deps,
+      state(model(), "b", false),
+      { key: "ArrowRight", altKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "tab", shift: false }]);
+  });
+
   it("Cmd+B toggles bold on a text node", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "a", true), { key: "b", metaKey: true });
@@ -349,6 +401,129 @@ describe("editing-mode passes vs handles", () => {
     });
     expect(dispatched).toEqual([]);
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+// ↑/↓ in selection mode follow the layout, not a preference: siblings on the
+// canvas (what actually sits above/below), the flat order in the outline (drawn
+// as one column). Editing mode must keep crossing nodes in BOTH layouts or the
+// keyboard-escape invariant breaks.
+describe("selection ↑/↓ per layout", () => {
+  it("canvas moves between siblings", () => {
+    const { deps, dispatched } = makeDeps();
+    const st = () => state(model(), "a", false);
+    run(deps, st(), { key: "ArrowUp" }, {}, undefined, "canvas");
+    run(deps, st(), { key: "ArrowDown" }, {}, undefined, "canvas");
+    expect(dispatched).toEqual([
+      { type: "moveToPrevSibling" },
+      { type: "moveToNextSibling" },
+    ]);
+  });
+
+  it("outline keeps walking the flat order", () => {
+    const { deps, dispatched } = makeDeps();
+    const st = () => state(model(), "a", false);
+    run(deps, st(), { key: "ArrowUp" }, {}, undefined, "outline");
+    run(deps, st(), { key: "ArrowDown" }, {}, undefined, "outline");
+    expect(dispatched).toEqual([{ type: "moveUp" }, { type: "moveDown" }]);
+  });
+
+  it("editing-mode ↑/↓ still cross to the adjacent node in both layouts", () => {
+    for (const layout of ["canvas", "outline"] as const) {
+      const { deps, dispatched } = makeDeps();
+      // verticalMove returns null (makeDeps' default) = past the node's edge.
+      const st = () => state(model(), "a1", true, "A1");
+      run(deps, st(), { key: "ArrowUp" }, {}, undefined, layout);
+      run(deps, st(), { key: "ArrowDown" }, {}, undefined, layout);
+      expect(dispatched).toEqual([{ type: "moveUp" }, { type: "moveDown" }]);
+    }
+  });
+
+  it("defaults to the canvas layout", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "ArrowUp" });
+    expect(dispatched).toEqual([{ type: "moveToPrevSibling" }]);
+  });
+});
+
+// Enter is a user preference like ←/→, so each behaviour is pinned to its own
+// setting rather than riding on DEFAULT_PREFERENCES.
+describe("preference: enterBehavior = insert-sibling (default)", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    enterBehavior: "insert-sibling",
+  };
+
+  it("plain Enter inserts a sibling", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "Enter" }, {}, prefs);
+    expect(dispatched).toEqual([{ type: "insertSiblingAfter" }]);
+  });
+
+  it("Cmd+Enter starts editing", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", false),
+      { key: "Enter", metaKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+  });
+});
+
+describe("preference: enterBehavior = edit", () => {
+  const prefs: EditorPreferences = {
+    ...DEFAULT_PREFERENCES,
+    enterBehavior: "edit",
+  };
+
+  it("plain Enter starts editing", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", false), { key: "Enter" }, {}, prefs);
+    expect(dispatched).toEqual([{ type: "startEditing" }]);
+  });
+
+  it("Cmd+Enter inserts a sibling (the two are swapped)", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", false),
+      { key: "Enter", metaKey: true },
+      {},
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "insertSiblingAfter" }]);
+  });
+
+  it("Space and F2 still start editing", () => {
+    for (const key of [" ", "F2"]) {
+      const { deps, dispatched } = makeDeps();
+      run(deps, state(model(), "a", false), { key }, {}, prefs);
+      expect(dispatched).toEqual([{ type: "startEditing" }]);
+    }
+  });
+
+  it("Enter while editing still splits the node", () => {
+    const { deps, dispatched } = makeDeps();
+    run(
+      deps,
+      state(model(), "a", true, "hi"),
+      { key: "Enter" },
+      { pos: 1 },
+      prefs
+    );
+    expect(dispatched).toEqual([{ type: "enter", pos: 1 }]);
+  });
+
+  it("the help overlay lists the keys that actually fire", () => {
+    const { deps } = makeDeps();
+    const byId = (id: string, p: EditorPreferences) =>
+      buildKeymap(deps, p).find((b) => b.id === id);
+    expect(byId("sel-edit", prefs)?.keys).toContain("Enter / Space");
+    expect(byId("sel-insert-sibling", prefs)?.keys).toBe("⌘/Ctrl + Enter");
+    expect(byId("sel-insert-sibling", DEFAULT_PREFERENCES)?.keys).toBe("Enter");
   });
 });
 

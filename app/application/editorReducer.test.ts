@@ -961,6 +961,127 @@ describe("moveToParent", () => {
   });
 });
 
+describe("moveToPrevSibling / moveToNextSibling", () => {
+  /** Root → A(A1, A2), B, C */
+  function siblingModel(): MindMapModel {
+    return {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          children: [
+            { id: "a1", text: "A1", children: [] },
+            { id: "a2", text: "A2", children: [] },
+          ],
+        },
+        { id: "b", text: "B", children: [] },
+        { id: "c", text: "C", children: [] },
+      ],
+    };
+  }
+
+  it("moves between siblings", () => {
+    const model = siblingModel();
+    expect(
+      editorReducer(stateAt(model, "c"), { type: "moveToPrevSibling" }).view
+        .activeNodeId
+    ).toBe("b");
+    expect(
+      editorReducer(stateAt(model, "b"), { type: "moveToNextSibling" }).view
+        .activeNodeId
+    ).toBe("c");
+  });
+
+  it("never crosses into another branch (the flat order would)", () => {
+    // B's predecessor in the flat order is A2, one level down inside A.
+    const model = siblingModel();
+    expect(
+      getFlatOrder(model)[getFlatOrder(model).indexOf("b") - 1]
+    ).toBe("a2");
+    expect(
+      editorReducer(stateAt(model, "b"), { type: "moveToPrevSibling" }).view
+        .activeNodeId
+    ).toBe("a");
+  });
+
+  it("is a no-op (same state) at either end of the sibling list", () => {
+    const model = siblingModel();
+    const first = stateAt(model, "a");
+    expect(editorReducer(first, { type: "moveToPrevSibling" })).toBe(first);
+    const last = stateAt(model, "c");
+    expect(editorReducer(last, { type: "moveToNextSibling" })).toBe(last);
+  });
+
+  it("is a no-op (same state) on the root, which has no siblings", () => {
+    const s = stateAt(siblingModel(), "root");
+    expect(editorReducer(s, { type: "moveToPrevSibling" })).toBe(s);
+    expect(editorReducer(s, { type: "moveToNextSibling" })).toBe(s);
+  });
+
+  // An object card renders its children as rows inside the card box, so the
+  // title and rows read as one column: there ↑/↓ follow the flat order.
+  describe("object cards are one visual column", () => {
+    /** Root → Card(r1, r2){type: object}, T */
+    function cardModel(collapsed = false): MindMapModel {
+      return {
+        id: "root",
+        text: "Root",
+        children: [
+          {
+            id: "card",
+            text: "Card",
+            type: "object",
+            collapsed,
+            children: [
+              { id: "r1", text: "価格: 1200", children: [] },
+              { id: "r2", text: "在庫: 5", children: [] },
+            ],
+          },
+          { id: "t", text: "T", children: [] },
+        ],
+      };
+    }
+
+    it("walks title → rows → the node after the card", () => {
+      const model = cardModel();
+      let s = stateAt(model, "card");
+      s = editorReducer(s, { type: "moveToNextSibling" });
+      expect(s.view.activeNodeId).toBe("r1");
+      s = editorReducer(s, { type: "moveToNextSibling" });
+      expect(s.view.activeNodeId).toBe("r2");
+      s = editorReducer(s, { type: "moveToNextSibling" });
+      expect(s.view.activeNodeId).toBe("t");
+    });
+
+    it("walks back up out of the card", () => {
+      const model = cardModel();
+      let s = stateAt(model, "r1");
+      s = editorReducer(s, { type: "moveToPrevSibling" });
+      expect(s.view.activeNodeId).toBe("card");
+    });
+
+    it("skips the rows of a folded card", () => {
+      const s = stateAt(cardModel(true), "card");
+      expect(
+        editorReducer(s, { type: "moveToNextSibling" }).view.activeNodeId
+      ).toBe("t");
+    });
+  });
+
+  it("records the visited child so ← then → round-trips", () => {
+    // Walking siblings must feed lastChildByParent the same way moveDown does.
+    const model = siblingModel();
+    let s = stateAt(model, "b");
+    s = editorReducer(s, { type: "moveToNextSibling" }); // c
+    s = editorReducer(s, { type: "moveToParent" }); // root
+    expect(editorReducer(s, { type: "moveToChild" }).view.activeNodeId).toBe(
+      "c"
+    );
+  });
+});
+
 describe("moveToChild (last-visited-child memory)", () => {
   /** Root → P(p1, p2, p3), Q */
   function branchModel(): MindMapModel {

@@ -34,6 +34,7 @@ describe("loadPreferences", () => {
     const prefs = {
       selectionMode: false,
       tabBehavior: "insert-child",
+      enterBehavior: "edit",
       arrowBehavior: "navigate",
     } as const;
     savePreferences(prefs);
@@ -46,12 +47,14 @@ describe("loadPreferences", () => {
       JSON.stringify({
         selectionMode: "yes",
         tabBehavior: "insert-child",
+        enterBehavior: "edit",
         arrowBehavior: "sideways",
       })
     );
     expect(loadPreferences()).toEqual({
       selectionMode: true,
       tabBehavior: "insert-child",
+      enterBehavior: "edit",
       arrowBehavior: DEFAULT_PREFERENCES.arrowBehavior,
     });
   });
@@ -61,12 +64,16 @@ describe("loadPreferences", () => {
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
   });
 
-  it("accepts every declared tabBehavior/arrowBehavior literal", () => {
+  it("accepts every declared tabBehavior/enterBehavior/arrowBehavior literal", () => {
     // Spelled out so this test fails to typecheck (not just at runtime) if a
     // member is ever renamed without updating the list below.
     const tabBehaviors: EditorPreferences["tabBehavior"][] = [
       "indent",
       "insert-child",
+    ];
+    const enterBehaviors: EditorPreferences["enterBehavior"][] = [
+      "insert-sibling",
+      "edit",
     ];
     const arrowBehaviors: EditorPreferences["arrowBehavior"][] = [
       "collapse",
@@ -78,6 +85,13 @@ describe("loadPreferences", () => {
         JSON.stringify({ ...DEFAULT_PREFERENCES, tabBehavior })
       );
       expect(loadPreferences().tabBehavior).toBe(tabBehavior);
+    }
+    for (const enterBehavior of enterBehaviors) {
+      localStorage.setItem(
+        PREFERENCES_KEY,
+        JSON.stringify({ ...DEFAULT_PREFERENCES, enterBehavior })
+      );
+      expect(loadPreferences().enterBehavior).toBe(enterBehavior);
     }
     for (const arrowBehavior of arrowBehaviors) {
       localStorage.setItem(

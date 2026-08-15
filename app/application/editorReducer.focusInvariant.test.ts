@@ -106,6 +106,8 @@ const ACTIONS = {
     focusOffset: 2,
   },
   moveToChild: { type: "moveToChild" },
+  moveToPrevSibling: { type: "moveToPrevSibling" },
+  moveToNextSibling: { type: "moveToNextSibling" },
   insertSiblingAfter: { type: "insertSiblingAfter" },
   toggleCollapse: { type: "toggleCollapse", nodeId: "a" },
   addChild: { type: "addChild", nodeId: "a1" },

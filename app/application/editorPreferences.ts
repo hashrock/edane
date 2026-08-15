@@ -27,6 +27,16 @@ export interface EditorPreferences {
    */
   tabBehavior: "indent" | "insert-child";
   /**
+   * Enter in selection mode:
+   * "insert-sibling" = add a sibling after the node (mindmap convention;
+   *                    editing starts with Space / F2 / ⌘/Ctrl+Enter).
+   * "edit"           = start editing the node — the two are simply swapped, so
+   *                    ⌘/Ctrl+Enter takes over inserting the sibling. For
+   *                    people who read Enter as "open this", where reaching
+   *                    for Space feels wrong.
+   */
+  enterBehavior: "insert-sibling" | "edit";
+  /**
    * ←/→ in selection mode:
    * "collapse" = fold/unfold first, fall back to parent/child movement.
    * "navigate" = always move to parent/child (→ auto-expands a folded branch
@@ -38,6 +48,7 @@ export interface EditorPreferences {
 export const DEFAULT_PREFERENCES: EditorPreferences = {
   selectionMode: true,
   tabBehavior: "insert-child",
+  enterBehavior: "insert-sibling",
   arrowBehavior: "navigate",
 };
 
@@ -57,6 +68,18 @@ const TAB_BEHAVIOR_SET = {
 
 function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"] {
   return typeof value === "string" && value in TAB_BEHAVIOR_SET;
+}
+
+/** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `enterBehavior`. */
+const ENTER_BEHAVIOR_SET = {
+  "insert-sibling": true,
+  edit: true,
+} as const satisfies Record<EditorPreferences["enterBehavior"], true>;
+
+function isEnterBehavior(
+  value: unknown
+): value is EditorPreferences["enterBehavior"] {
+  return typeof value === "string" && value in ENTER_BEHAVIOR_SET;
 }
 
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `arrowBehavior`. */
@@ -90,6 +113,9 @@ export function loadPreferences(): EditorPreferences {
       tabBehavior: isTabBehavior(parsed.tabBehavior)
         ? parsed.tabBehavior
         : DEFAULT_PREFERENCES.tabBehavior,
+      enterBehavior: isEnterBehavior(parsed.enterBehavior)
+        ? parsed.enterBehavior
+        : DEFAULT_PREFERENCES.enterBehavior,
       arrowBehavior: isArrowBehavior(parsed.arrowBehavior)
         ? parsed.arrowBehavior
         : DEFAULT_PREFERENCES.arrowBehavior,

@@ -11,6 +11,8 @@
 
 ← / → は `arrowBehavior` 設定（`app/application/editorPreferences.ts`）の2値どちらでも成立する。この設定が切り替えるのは**選択モード**の ← / →（折りたたみ or 親子移動）だけで、不変条件が対象とする**編集モード**では ← / → はどちらの設定でもカーソルキーだから。
 
+↑ / ↓ も同じ理由で、**選択モードだけがレイアウトで変わる**。canvasの選択モードでは兄弟間の移動（`moveToPrevSibling` / `moveToNextSibling`）で端では止まる（階層をまたぐのは ← / → の仕事）が、不変条件が対象とする**編集モード**では canvas / outline とも `moveUp` / `moveDown`＝フラット順で必ず隣のノードへ抜ける。**選択モードの ↑ / ↓ に「移動先がなければ止まる」挙動を足すのは構わないが、編集モードの ↑ / ↓ を止めてはいけない**（キャレットが閉じ込められる）。
+
 ### 守り方
 
 - 編集面の宣言は `app/application/editSurface.ts` の `EDIT_SURFACE` テーブル（layout × NodeType、`satisfies` で網羅強制）。**`NodeType` を追加するとここがコンパイルエラーになるので、必ず編集面の種類を宣言する。**

@@ -32,6 +32,7 @@ import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
 } from "./editorPreferences";
+import type { EditorLayout } from "./editSurface";
 
 export type KeyMode = "selection" | "editing";
 export type KeyResult = "handled" | "pass";
@@ -86,7 +87,8 @@ const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
 
 export function buildKeymap(
   deps: KeymapDeps,
-  prefs: EditorPreferences = DEFAULT_PREFERENCES
+  prefs: EditorPreferences = DEFAULT_PREFERENCES,
+  layout: EditorLayout = "canvas"
 ): KeyBinding[] {
   // An empty node must not spawn another empty child — otherwise Tab-spam on a
   // fresh (blank) node stacks up empties. The live text is editingText while
@@ -104,15 +106,30 @@ export function buildKeymap(
   // times (see the empty-space click handler), so leaving selection mode would
   // strand the keyboard on an unfocused textarea. Escape only acts in editing
   // mode (edit-escape), returning to selection.
+  // `enterBehavior` swaps which of the two Enter forms inserts a sibling and
+  // which starts editing — both stay reachable either way, one on plain Enter
+  // and one on the ⌘/Ctrl chord. The chord has no native browser action inside
+  // the page (⌘/Ctrl+Enter only means "complete the URL" in the address bar),
+  // so it can't collide with a browser shortcut. Each `match` tests mod()
+  // explicitly rather than relying on table order, so the pair stays
+  // order-independent, and the keys strings are built here so the help overlay
+  // shows the binding that actually fires.
+  const enterEdits = prefs.enterBehavior === "edit";
+  // ↑/↓ in selection mode follow the layout, not a preference. On the canvas
+  // siblings are what sit above and below each other, so walking the flat
+  // (depth-first) order jumps into a neighbouring branch — the outline draws
+  // that same order as one vertical column, where it is exactly right. Editing
+  // mode keeps using moveUp/moveDown in BOTH layouts: the keyboard-escape
+  // invariant requires ↑/↓ to always reach an adjacent node, and stopping at
+  // the first sibling would trap the caret (see editSurface.ts).
+  const siblingArrows = layout === "canvas";
   const selectionBindings: KeyBinding[] = [
     {
       id: "sel-insert-sibling",
       label: "兄弟ノードを追加",
-      keys: "Enter",
+      keys: enterEdits ? "⌘/Ctrl + Enter" : "Enter",
       when: "selection",
-      // Plain Enter only: the ⌘/Ctrl chord is sel-edit's "start editing"
-      // (excluded here so the two don't depend on table order).
-      match: (e) => e.key === "Enter" && !mod(e),
+      match: (e) => e.key === "Enter" && (enterEdits ? mod(e) : !mod(e)),
       run: () => {
         deps.dispatch({ type: "insertSiblingAfter" }, "insert-sibling");
         return "handled";
@@ -121,14 +138,12 @@ export function buildKeymap(
     {
       id: "sel-edit",
       label: "編集を開始",
-      keys: "Space / F2 / ⌘/Ctrl + Enter",
+      keys: enterEdits ? "Enter / Space / F2" : "Space / F2 / ⌘/Ctrl + Enter",
       when: "selection",
-      // ⌘/Ctrl + Enter is the chorded twin of Space: plain Enter is taken by
-      // insert-sibling, and the chord has no native browser action inside the
-      // page (Cmd/Ctrl+Enter only means "complete the URL" in the address bar),
-      // so it can't collide with a browser shortcut.
       match: (e) =>
-        e.key === " " || e.key === "F2" || (mod(e) && e.key === "Enter"),
+        e.key === " " ||
+        e.key === "F2" ||
+        (e.key === "Enter" && (enterEdits ? !mod(e) : mod(e))),
       run: () => {
         // No cursor args → the reducer's default: whole text selected, exactly
         // like Space, so a follow-up keystroke replaces the text either way.
@@ -138,23 +153,25 @@ export function buildKeymap(
     },
     {
       id: "sel-up",
-      label: "上のノードへ",
+      label: siblingArrows ? "前の兄弟ノードへ" : "上のノードへ",
       keys: "↑",
       when: "selection",
       match: (e) => e.key === "ArrowUp" && !e.altKey,
       run: () => {
-        deps.dispatch({ type: "moveUp" });
+        deps.dispatch({ type: siblingArrows ? "moveToPrevSibling" : "moveUp" });
         return "handled";
       },
     },
     {
       id: "sel-down",
-      label: "下のノードへ",
+      label: siblingArrows ? "次の兄弟ノードへ" : "下のノードへ",
       keys: "↓",
       when: "selection",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
       run: () => {
-        deps.dispatch({ type: "moveDown" });
+        deps.dispatch({
+          type: siblingArrows ? "moveToNextSibling" : "moveDown",
+        });
         return "handled";
       },
     },
@@ -502,6 +519,36 @@ export function buildKeymap(
       run: (ctx) => {
         const next = deps.dispatch({ type: "moveNodeDown" }, "reorder");
         if (next !== ctx.state) deps.saveNote(next.document.model);
+        return "handled";
+      },
+    },
+    {
+      // The horizontal twin of Alt+↑↓: those reorder among siblings, these move
+      // the node across levels. Alt (not ⌘/Ctrl) keeps the chord symmetric with
+      // the reorder pair and leaves ⌘/Ctrl+←→ free for the caret's
+      // line-start/line-end jumps while editing. Tab does the same thing, but
+      // only when tabBehavior is "indent" — with "insert-child" these are the
+      // only keys that re-parent a node.
+      id: "indent-right",
+      label: "インデント",
+      keys: "Alt + →",
+      when: "both",
+      match: (e) => e.altKey && e.key === "ArrowRight",
+      run: () => {
+        // The object-card guard lives in the reducer's "tab" case, so it
+        // applies here too.
+        deps.dispatch({ type: "tab", shift: false }, "indent");
+        return "handled";
+      },
+    },
+    {
+      id: "outdent-left",
+      label: "アウトデント",
+      keys: "Alt + ←",
+      when: "both",
+      match: (e) => e.altKey && e.key === "ArrowLeft",
+      run: () => {
+        deps.dispatch({ type: "tab", shift: true }, "indent");
         return "handled";
       },
     },
