@@ -1007,8 +1007,8 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
   });
 
   // Preferring siblings must never dead-end: once they run out, ↑/↓ leave the
-  // branch on the flat order, so holding ↓ still walks the whole tree.
-  it("leaves the branch on the flat order when the siblings run out", () => {
+  // branch, so holding ↓ still gets you out of a subtree.
+  it("leaves the branch when the siblings run out", () => {
     const model = siblingModel();
     // Last child of A: no next sibling, so ↓ steps out to A's next sibling.
     expect(
@@ -1027,24 +1027,58 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
     ).toBe("root");
   });
 
-  it("descends from the root, which has no siblings of its own", () => {
-    const s = stateAt(siblingModel(), "root");
+  // The rule that keeps ↓ predictable: whether it descends must NOT depend on
+  // where in the tree the node happens to sit. Both of these have children;
+  // "a" has a following sibling and "c" is the last child, and neither ↓ opens
+  // the branch — going a level deeper is → 's job.
+  it("never descends into children, wherever the node sits", () => {
+    const model = siblingModel();
+    model.children[2].children = [{ id: "c1", text: "C1", children: [] }];
     expect(
-      editorReducer(s, { type: "moveDownSiblingFirst" }).view.activeNodeId
-    ).toBe("a");
-    // Nothing above the root: the one place ↑ has nowhere to go.
-    expect(editorReducer(s, { type: "moveUpSiblingFirst" })).toBe(s);
+      editorReducer(stateAt(model, "a"), { type: "moveDownSiblingFirst" }).view
+        .activeNodeId
+    ).toBe("b");
+    // The flat order WOULD descend here — that asymmetry was the bug.
+    expect(getFlatOrder(model)[getFlatOrder(model).indexOf("c") + 1]).toBe("c1");
+    const atC = stateAt(model, "c");
+    expect(editorReducer(atC, { type: "moveDownSiblingFirst" })).toBe(atC);
   });
 
-  it("is a no-op (same state) on the last node of the whole tree", () => {
+  it("climbs past several levels to leave a deep subtree", () => {
+    // Root → A(A1(A1a, A1b), A2), B: ↓ from the last leaf of the deepest
+    // branch lands on the next node at whatever level has one.
     const model = siblingModel();
+    model.children[0].children[0].children = [
+      { id: "a1a", text: "A1a", children: [] },
+      { id: "a1b", text: "A1b", children: [] },
+    ];
+    expect(
+      editorReducer(stateAt(model, "a1b"), { type: "moveDownSiblingFirst" })
+        .view.activeNodeId
+    ).toBe("a2");
+    // And from A2 (last child of A) out to A's sibling.
+    expect(
+      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
+        .activeNodeId
+    ).toBe("b");
+  });
+
+  it("is a no-op (same state) on the root's ↑ and on the tree's last branch", () => {
+    const model = siblingModel();
+    const root = stateAt(model, "root");
+    // Nothing above the root.
+    expect(editorReducer(root, { type: "moveUpSiblingFirst" })).toBe(root);
+    // ...and nothing below it either: ↓ does not descend, and the root has no
+    // siblings. → is how you get into the tree.
+    expect(editorReducer(root, { type: "moveDownSiblingFirst" })).toBe(root);
     const last = stateAt(model, "c");
     expect(getFlatOrder(model).at(-1)).toBe("c");
     expect(editorReducer(last, { type: "moveDownSiblingFirst" })).toBe(last);
   });
 
   // An object card renders its children as rows inside the card box, so the
-  // title and rows read as one column: there ↑/↓ follow the flat order.
+  // title and rows read as one column — the single case where ↓ steps into a
+  // node's children. The exception stops at the card's direct rows.
   describe("object cards are one visual column", () => {
     /** Root → Card(r1, r2){type: object}, T */
     function cardModel(collapsed = false): MindMapModel {
@@ -1089,6 +1123,33 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
       const s = stateAt(cardModel(true), "card");
       expect(
         editorReducer(s, { type: "moveDownSiblingFirst" }).view.activeNodeId
+      ).toBe("t");
+    });
+
+    it("does not descend into a row's own subtree (the card never draws it)", () => {
+      const model = cardModel();
+      model.children[0].children[0].children = [
+        { id: "hidden", text: "隠れた子", children: [] },
+      ];
+      // r1 has a child, but the card only draws its direct rows: ↓ goes to the
+      // next row, exactly as it would without the subtree.
+      expect(
+        editorReducer(stateAt(model, "r1"), { type: "moveDownSiblingFirst" })
+          .view.activeNodeId
+      ).toBe("r2");
+      // ...and from the last row, out of the card entirely.
+      expect(
+        editorReducer(stateAt(model, "r2"), { type: "moveDownSiblingFirst" })
+          .view.activeNodeId
+      ).toBe("t");
+    });
+
+    it("does not step into an empty card", () => {
+      const model = cardModel();
+      model.children[0].children = [];
+      expect(
+        editorReducer(stateAt(model, "card"), { type: "moveDownSiblingFirst" })
+          .view.activeNodeId
       ).toBe("t");
     });
   });

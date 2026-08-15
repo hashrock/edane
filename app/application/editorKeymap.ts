@@ -119,10 +119,11 @@ export function buildKeymap(
   // siblings are what sit above and below each other, so walking the flat
   // (depth-first) order jumps into a neighbouring branch — the outline draws
   // that same order as one vertical column, where it is exactly right. The
-  // canvas pair still falls back to the flat order at the ends of a sibling
-  // list, so ↑/↓ keep moving either way. Editing mode uses plain
-  // moveUp/moveDown in BOTH layouts (the keyboard-escape invariant wants the
-  // adjacent node, not the adjacent sibling — see editSurface.ts).
+  // canvas pair leaves the branch once the siblings run out (to the parent /
+  // over the subtree) but never descends into children, so ↑/↓ keep moving
+  // without their meaning depending on where in the tree you are. Editing mode
+  // uses plain moveUp/moveDown in BOTH layouts (the keyboard-escape invariant
+  // wants the adjacent node, not the adjacent sibling — see editSurface.ts).
   const siblingArrows = layout === "canvas";
   const selectionBindings: KeyBinding[] = [
     {
@@ -154,7 +155,7 @@ export function buildKeymap(
     },
     {
       id: "sel-up",
-      label: siblingArrows ? "上のノードへ（兄弟優先）" : "上のノードへ",
+      label: siblingArrows ? "前の兄弟へ（なければ親へ）" : "上のノードへ",
       keys: "↑",
       when: "selection",
       match: (e) => e.key === "ArrowUp" && !e.altKey,
@@ -167,7 +168,7 @@ export function buildKeymap(
     },
     {
       id: "sel-down",
-      label: siblingArrows ? "下のノードへ（兄弟優先）" : "下のノードへ",
+      label: siblingArrows ? "次の兄弟へ（なければ枝の外へ）" : "下のノードへ",
       keys: "↓",
       when: "selection",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
@@ -316,6 +317,35 @@ export function buildKeymap(
             },
           },
         ] satisfies KeyBinding[])),
+    {
+      // The horizontal twin of Alt+↑↓: those reorder among siblings, these move
+      // the node across levels. Selection mode ONLY, unlike the reorder pair:
+      // in a textarea Alt+←→ is macOS's word-wise caret move (and Alt+Shift+←→
+      // its word-wise selection), which an editor has no business swallowing.
+      // Re-parenting while editing stays Tab / Shift+Tab.
+      id: "indent-right",
+      label: "インデント",
+      keys: "Alt + →",
+      when: "selection",
+      match: (e) => e.altKey && e.key === "ArrowRight",
+      run: () => {
+        // The object-card guard lives in the reducer's "tab" case, so it
+        // applies here too.
+        deps.dispatch({ type: "tab", shift: false }, "indent");
+        return "handled";
+      },
+    },
+    {
+      id: "outdent-left",
+      label: "アウトデント",
+      keys: "Alt + ←",
+      when: "selection",
+      match: (e) => e.altKey && e.key === "ArrowLeft",
+      run: () => {
+        deps.dispatch({ type: "tab", shift: true }, "indent");
+        return "handled";
+      },
+    },
     {
       id: "sel-delete",
       label: "ノードを削除",
@@ -522,36 +552,6 @@ export function buildKeymap(
       run: (ctx) => {
         const next = deps.dispatch({ type: "moveNodeDown" }, "reorder");
         if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
-      },
-    },
-    {
-      // The horizontal twin of Alt+↑↓: those reorder among siblings, these move
-      // the node across levels. Alt (not ⌘/Ctrl) keeps the chord symmetric with
-      // the reorder pair and leaves ⌘/Ctrl+←→ free for the caret's
-      // line-start/line-end jumps while editing. Tab does the same thing, but
-      // only when tabBehavior is "indent" — with "insert-child" these are the
-      // only keys that re-parent a node.
-      id: "indent-right",
-      label: "インデント",
-      keys: "Alt + →",
-      when: "both",
-      match: (e) => e.altKey && e.key === "ArrowRight",
-      run: () => {
-        // The object-card guard lives in the reducer's "tab" case, so it
-        // applies here too.
-        deps.dispatch({ type: "tab", shift: false }, "indent");
-        return "handled";
-      },
-    },
-    {
-      id: "outdent-left",
-      label: "アウトデント",
-      keys: "Alt + ←",
-      when: "both",
-      match: (e) => e.altKey && e.key === "ArrowLeft",
-      run: () => {
-        deps.dispatch({ type: "tab", shift: true }, "indent");
         return "handled";
       },
     },

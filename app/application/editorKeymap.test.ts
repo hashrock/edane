@@ -288,36 +288,41 @@ describe("reorder and bold (cross-mode)", () => {
     expect(dispatched).toEqual([{ type: "moveNodeDown" }]);
   });
 
-  it("Alt+ArrowRight indents, in selection mode", () => {
+  it("Alt+ArrowRight indents / Alt+ArrowLeft outdents, in selection mode", () => {
     const { deps, dispatched } = makeDeps();
     run(deps, state(model(), "b", false), { key: "ArrowRight", altKey: true });
-    expect(dispatched).toEqual([{ type: "tab", shift: false }]);
+    run(deps, state(model(), "a1", false), { key: "ArrowLeft", altKey: true });
+    expect(dispatched).toEqual([
+      { type: "tab", shift: false },
+      { type: "tab", shift: true },
+    ]);
   });
 
-  it("Alt+ArrowLeft outdents, in editing mode", () => {
-    const { deps, dispatched } = makeDeps();
-    run(deps, state(model(), "a1", true), { key: "ArrowLeft", altKey: true });
-    expect(dispatched).toEqual([{ type: "tab", shift: true }]);
-  });
-
-  // Alt+←→ must win over the caret bindings that match the same arrow keys,
-  // in both modes — otherwise the caret moves instead of the node.
-  it("Alt+←→ take precedence over the plain arrow bindings", () => {
-    for (const editing of [false, true]) {
-      const { deps, dispatched } = makeDeps();
-      run(deps, state(model(), "a1", editing, "A1"), {
-        key: "ArrowLeft",
-        altKey: true,
-      });
-      run(deps, state(model(), "a1", editing, "A1"), {
-        key: "ArrowRight",
-        altKey: true,
-      });
-      expect(dispatched).toEqual([
-        { type: "tab", shift: true },
-        { type: "tab", shift: false },
-      ]);
+  // In a textarea Alt+←→ is macOS's word-wise caret move and Alt+Shift+←→ its
+  // word-wise selection. Swallowing those would break plain text editing, so
+  // the indent pair is selection-only and every Alt+arrow form passes through
+  // untouched while editing.
+  it("Alt+←→ and Alt+Shift+←→ pass through to native while editing", () => {
+    for (const key of ["ArrowLeft", "ArrowRight"]) {
+      for (const shiftKey of [false, true]) {
+        const { deps, dispatched } = makeDeps();
+        const { preventDefault } = run(
+          deps,
+          state(model(), "a1", true, "A1"),
+          { key, altKey: true, shiftKey },
+          { pos: 1, selEnd: 1 }
+        );
+        expect(dispatched).toEqual([]);
+        expect(preventDefault).not.toHaveBeenCalled();
+      }
     }
+  });
+
+  // Alt+↑↓ (reorder) stays cross-mode: those have no native meaning to protect.
+  it("Alt+↑↓ still reorder while editing", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a1", true, "A1"), { key: "ArrowUp", altKey: true });
+    expect(dispatched).toEqual([{ type: "moveNodeUp" }]);
   });
 
   // The pair keeps working with tabBehavior = insert-child, where Tab no longer

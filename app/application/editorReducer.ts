@@ -130,9 +130,11 @@ export type EditorAction =
   | { type: "moveDown" }
   // Sibling-first vertical navigation: the canvas's ↑/↓ in selection mode.
   // moveUp/moveDown walk the flat (outline) order, which on a two-dimensional
-  // canvas means dropping into a neighbouring branch; these prefer the node's
-  // own siblings — what actually sits above and below it — and fall back to the
-  // flat order once the siblings run out, so ↑/↓ never dead-end mid-tree.
+  // canvas means dropping into a neighbouring branch; these move among the
+  // node's own siblings — what actually sits above and below it — and, once
+  // those run out, leave the branch (up: to the parent; down: over the whole
+  // subtree to the next node at any level) so ↑/↓ never dead-end mid-tree.
+  // They never descend into children: that is → 's job.
   | { type: "moveUpSiblingFirst" }
   | { type: "moveDownSiblingFirst" }
   // Move focus to the active node's parent (Left in selection mode on a leaf /
@@ -781,30 +783,42 @@ function viewReducer(
       const dir = action.type === "moveUpSiblingFirst" ? -1 : 1;
       const info = findParentAndIndex(model, view.activeNodeId);
       const node = findNode(model, view.activeNodeId);
-      // An object card draws its children as rows INSIDE its own box, so the
-      // card title and its rows are one visual column rather than two levels:
-      // ↓ has to step INTO the card, not over it. Only when it is expanded (a
-      // folded card hides its rows; visibleChildrenOf agrees).
-      const entersCard =
+      // THE RULE: these never descend into a node's children — going a level
+      // deeper is → 's job. Otherwise "↓ on a parent" would mean one thing for
+      // a node with a following sibling and another for the last child of a
+      // branch (the flat order's next IS the first child), which is invisible
+      // to the user and was exactly the bug this replaces.
+      //
+      // The single exception is an expanded object card: it draws its children
+      // as rows INSIDE its own box, so the title and rows form one visual
+      // column and ↓ must step into the card rather than over it. A folded card
+      // hides its rows (visibleChildrenOf agrees) and a row's own subtree is
+      // never drawn, so the exception stops at the card's direct children.
+      if (
         dir === 1 &&
         node?.type === "object" &&
         !node.collapsed &&
-        node.children.length > 0;
+        node.children.length > 0
+      ) {
+        return focusView(view, model, node.children[0].id);
+      }
       // Siblings share a parent, so if the active node is visible they all are
-      // — no collapsed check needed here (unlike moveToChild).
-      const sibling =
-        !entersCard && info
-          ? info.parent.children[info.index + dir]
-          : undefined;
-      if (sibling) return focusView(view, model, sibling.id);
-      // No sibling that way: fall back to the flat order so ↑/↓ always keep
-      // going. That covers stepping out of the last child of a branch, into a
-      // card's rows, and off the root (which has no siblings at all). Only the
-      // very first / last node of the whole tree has nowhere left to go.
-      const order = getFlatOrder(model);
-      const idx = order.indexOf(view.activeNodeId);
-      const next = order[idx + dir];
-      return next ? focusView(view, model, next) : view;
+      // — no collapsed check needed here (unlike moveToChild). The same holds
+      // for the parent and for any ancestor's sibling below.
+      if (dir === -1) {
+        if (!info) return view; // the root: nothing above it
+        const prev = info.parent.children[info.index - 1];
+        // First child → the parent, which is what sits above it on the canvas.
+        return focusView(view, model, prev ? prev.id : info.parent.id);
+      }
+      // Down: the next sibling, else climb until an ancestor has one — i.e.
+      // step over the whole subtree we are in and land on the next thing at
+      // any level. Only the last node of the tree runs out of ancestors.
+      for (let at = info; at; at = findParentAndIndex(model, at.parent.id)) {
+        const next = at.parent.children[at.index + 1];
+        if (next) return focusView(view, model, next.id);
+      }
+      return view;
     }
 
     case "moveToParent": {
