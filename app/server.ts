@@ -8,7 +8,7 @@ import { users, notes, apiTokens, images } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken } from "./utils/apiToken";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteContentForStorage } from "./utils/crypto";
+import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess } from "./utils/noteEditAccess";
@@ -452,7 +452,7 @@ const routes = app
     // Guest-mode imports arrive with their own serialized content; a plain
     // "new note" falls back to the starter topics.
     const plain = body.content ?? "トピック1\nトピック2";
-    const content = await encodeNoteContentForStorage(plain, isPublic, c.env.ENCRYPTION_KEY);
+    const content = await encodeNoteContentForStorage(plain, noteStorageMode(isPublic), c.env.ENCRYPTION_KEY);
 
     await db.insert(notes).values({
       id,
@@ -535,7 +535,7 @@ const routes = app
       case "render": {
         const owned = access.note;
         const content =
-          (await decodeStoredNoteContent(owned.content, owned.isPublic, c.env.ENCRYPTION_KEY)) ??
+          (await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), c.env.ENCRYPTION_KEY)) ??
           "";
         return c.render("Notes/Edit", {
           user: access.viewer,
@@ -559,7 +559,7 @@ const routes = app
       return c.notFound();
     }
 
-    const content = await decodeStoredNoteContent(note.content, note.isPublic, c.env.ENCRYPTION_KEY);
+    const content = await decodeStoredNoteContent(note.content, noteStorageMode(note.isPublic), c.env.ENCRYPTION_KEY);
     if (content === null) return c.text("Decryption failed", 500);
     return c.render("Notes/Show", {
       user,
