@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { EditorPreferences } from "./editorPreferences";
+import type { KeyValueStorage } from "./browserStorage";
 import {
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
@@ -7,42 +8,39 @@ import {
   savePreferences,
 } from "./editorPreferences";
 
-// The node test project has no DOM — back localStorage with a plain Map.
-function stubLocalStorage() {
+function memoryStorage(): KeyValueStorage {
   const store = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-  });
+  return {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => void store.set(k, v),
+    removeItem: (k) => void store.delete(k),
+  };
 }
-
-beforeEach(stubLocalStorage);
-afterEach(() => vi.unstubAllGlobals());
 
 describe("loadPreferences", () => {
   it("returns the defaults when nothing is stored", () => {
-    expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
+    expect(loadPreferences(memoryStorage())).toEqual(DEFAULT_PREFERENCES);
   });
 
-  it("returns the defaults when localStorage is unavailable (SSR)", () => {
-    vi.unstubAllGlobals();
-    expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
+  it("returns the defaults when storage is unavailable (SSR)", () => {
+    expect(loadPreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("round-trips a saved preference set", () => {
+    const storage = memoryStorage();
     const prefs = {
       selectionMode: false,
       tabBehavior: "insert-child",
       enterBehavior: "edit",
       arrowBehavior: "navigate",
     } as const;
-    savePreferences(prefs);
-    expect(loadPreferences()).toEqual(prefs);
+    savePreferences(prefs, storage);
+    expect(loadPreferences(storage)).toEqual(prefs);
   });
 
   it("falls back per-field on invalid values", () => {
-    localStorage.setItem(
+    const storage = memoryStorage();
+    storage.setItem(
       PREFERENCES_KEY,
       JSON.stringify({
         selectionMode: "yes",
@@ -51,7 +49,7 @@ describe("loadPreferences", () => {
         arrowBehavior: "sideways",
       })
     );
-    expect(loadPreferences()).toEqual({
+    expect(loadPreferences(storage)).toEqual({
       selectionMode: true,
       tabBehavior: "insert-child",
       enterBehavior: "edit",
@@ -60,8 +58,9 @@ describe("loadPreferences", () => {
   });
 
   it("falls back to the defaults on unparsable JSON", () => {
-    localStorage.setItem(PREFERENCES_KEY, "{nope");
-    expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
+    const storage = memoryStorage();
+    storage.setItem(PREFERENCES_KEY, "{nope");
+    expect(loadPreferences(storage)).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("accepts every declared tabBehavior/enterBehavior/arrowBehavior literal", () => {
@@ -79,26 +78,27 @@ describe("loadPreferences", () => {
       "collapse",
       "navigate",
     ];
+    const storage = memoryStorage();
     for (const tabBehavior of tabBehaviors) {
-      localStorage.setItem(
+      storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, tabBehavior })
       );
-      expect(loadPreferences().tabBehavior).toBe(tabBehavior);
+      expect(loadPreferences(storage).tabBehavior).toBe(tabBehavior);
     }
     for (const enterBehavior of enterBehaviors) {
-      localStorage.setItem(
+      storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, enterBehavior })
       );
-      expect(loadPreferences().enterBehavior).toBe(enterBehavior);
+      expect(loadPreferences(storage).enterBehavior).toBe(enterBehavior);
     }
     for (const arrowBehavior of arrowBehaviors) {
-      localStorage.setItem(
+      storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, arrowBehavior })
       );
-      expect(loadPreferences().arrowBehavior).toBe(arrowBehavior);
+      expect(loadPreferences(storage).arrowBehavior).toBe(arrowBehavior);
     }
   });
 });

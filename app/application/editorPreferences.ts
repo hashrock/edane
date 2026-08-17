@@ -9,6 +9,8 @@
  * out accordingly instead of pretending they still apply.
  */
 
+import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
+
 export interface EditorPreferences {
   /**
    * true  = two-mode editing (selection + editing), the historical behaviour.
@@ -95,14 +97,17 @@ function isArrowBehavior(
 }
 
 /**
- * Read preferences from localStorage. Unknown fields are dropped and invalid
+ * Read preferences from storage. Unknown fields are dropped and invalid
  * or missing values fall back to the defaults, so a stale or hand-edited
  * entry can never wedge the editor. Safe without a DOM (SSR) — returns the
  * defaults.
  */
-export function loadPreferences(): EditorPreferences {
+export function loadPreferences(
+  storage: KeyValueStorage | undefined = defaultLocalStorage()
+): EditorPreferences {
+  if (!storage) return { ...DEFAULT_PREFERENCES };
   try {
-    const raw = localStorage.getItem(PREFERENCES_KEY);
+    const raw = storage.getItem(PREFERENCES_KEY);
     if (!raw) return { ...DEFAULT_PREFERENCES };
     const parsed = JSON.parse(raw) as Partial<EditorPreferences>;
     return {
@@ -126,9 +131,13 @@ export function loadPreferences(): EditorPreferences {
 }
 
 /** Persist preferences. Best-effort: quota/privacy-mode failures are ignored. */
-export function savePreferences(prefs: EditorPreferences): void {
+export function savePreferences(
+  prefs: EditorPreferences,
+  storage: KeyValueStorage | undefined = defaultLocalStorage()
+): void {
+  if (!storage) return;
   try {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(prefs));
+    storage.setItem(PREFERENCES_KEY, JSON.stringify(prefs));
   } catch {
     // localStorage unavailable (private mode, quota) — the in-memory
     // preferences still apply for this session.
