@@ -303,6 +303,38 @@ describe("mergeIntoPredecessor", () => {
     expect(a.collapsed).toBe(false);
     expect(getFlatOrder(res.model)).toEqual(["root", "a", "a1", "b1"]);
   });
+
+  it("returns null instead of nesting an object card under a previous-sibling object card", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "a", text: "A", type: "object", children: [] },
+        {
+          id: "b",
+          text: "B",
+          children: [{ id: "c", text: "C", type: "object", children: [] }],
+        },
+      ],
+    };
+    expect(mergeIntoPredecessor(model, "b")).toBeNull();
+  });
+
+  it("returns null instead of nesting an object card under its object-card parent", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      type: "object",
+      children: [
+        {
+          id: "b",
+          text: "B",
+          children: [{ id: "c", text: "C", type: "object", children: [] }],
+        },
+      ],
+    };
+    expect(mergeIntoPredecessor(model, "b")).toBeNull();
+  });
 });
 
 describe("mergeSuccessorInto", () => {
@@ -352,6 +384,44 @@ describe("mergeSuccessorInto", () => {
   it("returns the same reference when the node is not found", () => {
     const model = tree();
     expect(mergeSuccessorInto(model, "missing")).toBe(model);
+  });
+
+  it("returns the same reference instead of nesting an object card under an object-card node (child pulled up)", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "A",
+          type: "object",
+          children: [
+            {
+              id: "row",
+              text: "row",
+              children: [{ id: "c", text: "C", type: "object", children: [] }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(mergeSuccessorInto(model, "a")).toBe(model);
+  });
+
+  it("returns the same reference instead of nesting an object card under an object-card node (sibling merge)", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "a", text: "A", type: "object", children: [] },
+        {
+          id: "b",
+          text: "B",
+          children: [{ id: "c", text: "C", type: "object", children: [] }],
+        },
+      ],
+    };
+    expect(mergeSuccessorInto(model, "a")).toBe(model);
   });
 });
 
@@ -733,6 +803,18 @@ describe("moveBranch", () => {
     const model = wideModel();
     expect(moveBranch(model, "nope", "a")).toBe(model);
     expect(moveBranch(model, "a", "nope")).toBe(model);
+  });
+
+  it("returns the SAME reference instead of nesting an object card under an object-card parent", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "a", text: "A", type: "object", children: [] },
+        { id: "b", text: "B", type: "object", children: [] },
+      ],
+    };
+    expect(moveBranch(model, "b", "a")).toBe(model);
   });
 
   it("returns the SAME reference for a no-op append (already last child)", () => {
