@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveEditPageAccess } from "./noteEditAccess";
+import { resolveEditPageAccess, resolveViewPageAccess } from "./noteAccess";
 
 const owner = { id: "owner-1" };
 const stranger = { id: "someone-else" };
@@ -66,6 +66,62 @@ describe("resolveEditPageAccess", () => {
 
   it("never treats an ownerless note as owned", () => {
     expect(resolveEditPageAccess({ note: note({ userId: null }), viewer: owner })).toEqual({
+      kind: "not-found",
+    });
+  });
+});
+
+describe("resolveViewPageAccess", () => {
+  it("renders for the owner", () => {
+    const own = note();
+    expect(resolveViewPageAccess({ note: own, viewer: owner })).toEqual({
+      kind: "render",
+      note: own,
+      viewer: owner,
+    });
+  });
+
+  it("renders a public note for anyone, including a logged-out visitor", () => {
+    const shared = note({ isPublic: true });
+    expect(resolveViewPageAccess({ note: shared, viewer: stranger })).toEqual({
+      kind: "render",
+      note: shared,
+      viewer: stranger,
+    });
+    expect(resolveViewPageAccess({ note: shared, viewer: null })).toEqual({
+      kind: "render",
+      note: shared,
+      viewer: null,
+    });
+  });
+
+  it("hides a private note from a signed-in non-owner and from a logged-out visitor", () => {
+    expect(resolveViewPageAccess({ note: note(), viewer: stranger })).toEqual({
+      kind: "not-found",
+    });
+    expect(resolveViewPageAccess({ note: note(), viewer: null })).toEqual({
+      kind: "not-found",
+    });
+  });
+
+  it("is not-found for a missing or trashed note, even for the owner", () => {
+    expect(resolveViewPageAccess({ note: undefined, viewer: owner })).toEqual({
+      kind: "not-found",
+    });
+    expect(resolveViewPageAccess({ note: note({ deletedAt: TRASHED_AT }), viewer: owner })).toEqual({
+      kind: "not-found",
+    });
+    // A trashed public note doesn't leak through either.
+    expect(
+      resolveViewPageAccess({
+        note: note({ isPublic: true, deletedAt: TRASHED_AT }),
+        viewer: stranger,
+      })
+    ).toEqual({ kind: "not-found" });
+  });
+
+  it("never treats an ownerless note as owned", () => {
+    expect(resolveViewPageAccess({ note: note({ userId: null }), viewer: owner })).toEqual({
       kind: "not-found",
     });
   });
