@@ -150,6 +150,15 @@ const NODE_TYPE_LABEL = {
   object: "オブジェクトカードにする",
 } as const satisfies Record<NodeType, string>;
 
+// Labels for the numeric-format context menu, keyed by NumFormat. Same
+// exhaustiveness idiom as NODE_TYPE_LABEL above: adding a NumFormat refuses
+// to compile here until it's given a label.
+const NUM_FORMAT_LABEL = {
+  comma: "カンマ区切り（1,234）",
+  currency: "通貨（¥1,234）",
+  percent: "パーセント（12%）",
+} as const satisfies Record<NumFormat, string>;
+
 // Zoom factor per click of the floating +/− buttons. Deliberately coarser than
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
 const ZOOM_BUTTON_STEP = 1.2;
@@ -1151,9 +1160,12 @@ export function MindmapEditorView({
           onSelect: () =>
             applyNum({ numFormat: node.numFormat === fmt ? null : fmt }),
         });
-        numGroup.push(fmtItem("comma", "カンマ区切り（1,234）"));
-        numGroup.push(fmtItem("currency", "通貨（¥1,234）"));
-        numGroup.push(fmtItem("percent", "パーセント（12%）"));
+        for (const [fmt, label] of Object.entries(NUM_FORMAT_LABEL) as [
+          NumFormat,
+          string,
+        ][]) {
+          numGroup.push(fmtItem(fmt, label));
+        }
         if ((node.decimals ?? 0) < 4)
           numGroup.push({
             label: "小数点桁数を増やす",
