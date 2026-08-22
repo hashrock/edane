@@ -11,7 +11,7 @@ import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteContentForStorage } from "./utils/crypto";
 import { resolveDevGuestPreference } from "./utils/devAuthBypass";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
-import { resolveEditPageAccess } from "./utils/noteEditAccess";
+import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
 import { extractLinkPreview } from "./utils/linkPreview";
@@ -554,16 +554,15 @@ const routes = app
       .where(eq(notes.id, c.req.param("id")))
       .get();
     const user = c.get("user");
-    if (!note || note.deletedAt) return c.notFound();
-    if (!note.isPublic && (!user || note.userId !== user.id)) {
-      return c.notFound();
-    }
+    const access = resolveViewPageAccess({ note, viewer: user });
+    if (access.kind === "not-found") return c.notFound();
 
-    const content = await decodeStoredNoteContent(note.content, note.isPublic, c.env.ENCRYPTION_KEY);
+    const owned = access.note;
+    const content = await decodeStoredNoteContent(owned.content, owned.isPublic, c.env.ENCRYPTION_KEY);
     if (content === null) return c.text("Decryption failed", 500);
     return c.render("Notes/Show", {
-      user,
-      note: { id: note.id, title: note.title, content, isPublic: note.isPublic },
+      user: access.viewer,
+      note: { id: owned.id, title: owned.title, content, isPublic: owned.isPublic },
     });
   });
 

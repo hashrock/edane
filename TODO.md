@@ -88,7 +88,7 @@
 ## 公開まわり
 
 - [x] 公開ノートのリンクをコピーする動線（エディタと一覧 `app/pages/Notes/Index.tsx` のメニュー両方）（URL組み立てと文言は`app/application/publicNoteLink.ts`、コピー本体は`app/lib/clipboard.ts`に分離しexecCommandへフォールバック。エディタは公開切り替えと同じPublicityDropdownに同居させ`useNoteEditor.copyPublicLink`で両レイアウト共通化、フィードバックは既存のヘッダーstatus行に相乗り。非公開でも項目は残して無効化＋理由表示）
-- [x] オーナー以外が `/notes/:id/edit` を開いたら `/notes/:id` へリダイレクト（公開ノートなら閲覧ページへ。非公開ノートはid存在を漏らさないため引き続き404、未ログインはログイン用にトップへ。判定は`app/utils/noteEditAccess.ts`に純関数として分離）
+- [x] オーナー以外が `/notes/:id/edit` を開いたら `/notes/:id` へリダイレクト（公開ノートなら閲覧ページへ。非公開ノートはid存在を漏らさないため引き続き404、未ログインはログイン用にトップへ。判定は`app/utils/noteAccess.ts`の`resolveEditPageAccess`に純関数として分離。閲覧ページ`/notes/:id`側の同種の判定は同ファイルの`resolveViewPageAccess`に分離）
 
 ※ 方向キーでのノード移動 / ダブルクリックで編集・Escで抜ける / パンズームの滑らかさは「いいところ」として挙がっていた（リグレッション注意）
 
