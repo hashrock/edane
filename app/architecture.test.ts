@@ -33,7 +33,11 @@ const ROOT_SHARED_FILES = new Set(["user.ts", "global.d.ts"]);
 // composition root) may import anything, so they're left out of this map.
 const ALLOWED_IMPORTS: Record<string, string[]> = {
   domain: [],
-  lib: ["domain"],
+  // lib is generic layout/geometry/clipboard substrate shared by the outline
+  // and canvas layouts; it defines its own types (e.g. treeLayout's
+  // LayoutNode) instead of depending on domain, so it stays reusable without
+  // pulling in the mindmap model. Keep this empty rather than ["domain"].
+  lib: [],
   application: ["domain", "lib"],
   components: ["domain", "lib", "application"],
   pages: ["domain", "lib", "application", "components"],
