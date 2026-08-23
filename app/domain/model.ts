@@ -468,8 +468,11 @@ export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel 
  * they are BEFORE the move (undefined = append); a same-parent move compensates
  * for the slot freed by the removal. Returns the SAME model reference when the
  * move is impossible or a no-op — root move, dropping on itself or one of its
- * own descendants, unknown ids, or a position identical to the current one —
- * so callers can treat identity as "skip undo/save".
+ * own descendants, unknown ids, a position identical to the current one, or a
+ * {@link violatesObjectCardNesting} destination — so callers can treat
+ * identity as "skip undo/save". The nesting check is enforced here (not just
+ * by dragDrop's isCardIntoCard, the only caller today) so this stays true for
+ * any future caller of the domain mutation, not only the current UI path.
  */
 export function moveBranch(
   model: MindMapModel,
@@ -484,6 +487,7 @@ export function moveBranch(
   if (findNode(node, newParentId)) return model;
   const newParent = findNode(model, newParentId);
   if (!newParent) return model;
+  if (violatesObjectCardNesting(newParent.type, node.type)) return model;
   const cur = findParentAndIndex(model, nodeId);
   if (!cur) return model;
 
@@ -526,7 +530,10 @@ export function moveBranch(
  *     parent can't be collapsed here: a collapsed node hides its own
  *     descendants (including `node`, which is being merged), so `node`
  *     couldn't have been reachable/active in the first place.
- * The root has no predecessor → returns null (caller treats as no-op).
+ * The root has no predecessor → returns null (caller treats as no-op). Also
+ * returns null when the merge would land one of `node`'s children directly
+ * under an object-card target ({@link violatesObjectCardNesting}) — same
+ * no-op-on-blocked-change convention as setNodeType/indentNode/dedentNode.
  *
  * Returns the new model, the id the caret should land on (the merge target) and
  * the caret offset (the target's text length *before* the merge).
@@ -544,6 +551,8 @@ export function mergeIntoPredecessor(
   if (info.index > 0) {
     // Merge into the previous sibling; children trail the sibling's own.
     const target = info.parent.children[info.index - 1];
+    if (node.children.some((c) => violatesObjectCardNesting(target.type, c.type)))
+      return null;
     target.collapsed = false;
     const caretPos = target.text.length;
     target.text += node.text;
@@ -554,6 +563,8 @@ export function mergeIntoPredecessor(
 
   // First child: merge into the parent; the node's children take its slot.
   const target = info.parent;
+  if (node.children.some((c) => violatesObjectCardNesting(target.type, c.type)))
+    return null;
   const caretPos = target.text.length;
   target.text += node.text;
   info.parent.children.splice(info.index, 1, ...node.children);
@@ -567,7 +578,9 @@ export function mergeIntoPredecessor(
  * take that child's slot), otherwise the node's next sibling (whose children
  * are appended to the node). When the node has neither — its DFS-successor
  * would live in an unrelated, shallower subtree — the SAME model reference is
- * returned so callers can treat identity as "no-op".
+ * returned so callers can treat identity as "no-op". Also a no-op when the
+ * successor's children would land directly under an object-card `node`
+ * ({@link violatesObjectCardNesting}), same convention as moveBranch.
  */
 export function mergeSuccessorInto(
   model: MindMapModel,
@@ -577,22 +590,28 @@ export function mergeSuccessorInto(
   if (!node) return model;
 
   if (!node.collapsed && node.children.length > 0) {
+    const child = node.children[0];
+    if (child.children.some((c) => violatesObjectCardNesting(node.type, c.type)))
+      return model;
     const cloned = cloneModel(model);
     const target = findNode(cloned, nodeId)!;
-    const child = target.children[0];
-    target.text += child.text;
-    target.children.splice(0, 1, ...child.children);
+    const clonedChild = target.children[0];
+    target.text += clonedChild.text;
+    target.children.splice(0, 1, ...clonedChild.children);
     return cloned;
   }
 
   const info = findParentAndIndex(model, nodeId);
   if (info && info.index < info.parent.children.length - 1) {
+    const sibling = info.parent.children[info.index + 1];
+    if (sibling.children.some((c) => violatesObjectCardNesting(node.type, c.type)))
+      return model;
     const cloned = cloneModel(model);
     const ci = findParentAndIndex(cloned, nodeId)!;
     const target = ci.parent.children[ci.index];
-    const sibling = ci.parent.children[ci.index + 1];
-    target.text += sibling.text;
-    target.children.push(...sibling.children);
+    const clonedSibling = ci.parent.children[ci.index + 1];
+    target.text += clonedSibling.text;
+    target.children.push(...clonedSibling.children);
     ci.parent.children.splice(ci.index + 1, 1);
     return cloned;
   }
