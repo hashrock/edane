@@ -484,7 +484,7 @@ app.get("/api/publications", async (c) => {
     if (model === undefined) {
       const content = await decodeStoredNoteContent(
         r.noteContent,
-        r.noteIsPublic,
+        noteStorageMode(r.noteIsPublic),
         c.env.ENCRYPTION_KEY
       );
       model = content === null ? null : parseContent(content, r.noteTitle);
