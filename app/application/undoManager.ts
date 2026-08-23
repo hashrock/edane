@@ -32,9 +32,13 @@ export class UndoManager {
   // Transaction batching: groups several dispatches into one undo entry so a
   // single logical operation (e.g. paste = delete-then-insert) undoes/redoes
   // atomically. Supports nesting via a depth counter.
+  //
+  // `type` and `before` are always set and cleared together (beginTransaction
+  // sets both, endTransaction/clear reset both) — one field instead of two
+  // parallel nullables so that pairing is a type-level fact, not a convention
+  // callers have to keep in sync by hand.
   private txDepth = 0;
-  private txBefore: DocumentState | null = null;
-  private txType: UndoCommandType | null = null;
+  private tx: { type: UndoCommandType; before: DocumentState } | null = null;
 
   /** Set a callback to get the current state when committing pending text */
   setCommitCallback(fn: () => DocumentState) {
@@ -112,8 +116,7 @@ export class UndoManager {
   beginTransaction(type: UndoCommandType, before: DocumentState) {
     if (this.txDepth === 0) {
       this.commitPendingText();
-      this.txBefore = before;
-      this.txType = type;
+      this.tx = { type, before };
     }
     this.txDepth++;
   }
@@ -122,16 +125,15 @@ export class UndoManager {
   endTransaction(after: DocumentState) {
     if (this.txDepth === 0) return;
     this.txDepth--;
-    if (this.txDepth === 0 && this.txBefore && this.txType) {
-      if (this.txBefore !== after) {
+    if (this.txDepth === 0 && this.tx) {
+      if (this.tx.before !== after) {
         this.pushCommand({
-          type: this.txType,
-          stateBefore: this.txBefore,
+          type: this.tx.type,
+          stateBefore: this.tx.before,
           stateAfter: after,
         });
       }
-      this.txBefore = null;
-      this.txType = null;
+      this.tx = null;
     }
   }
 
@@ -167,8 +169,7 @@ export class UndoManager {
     this.redoStack = [];
     this.pendingTextBefore = null;
     this.txDepth = 0;
-    this.txBefore = null;
-    this.txType = null;
+    this.tx = null;
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
