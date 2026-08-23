@@ -55,3 +55,24 @@ export const images = sqliteTable("images", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+// Node-level web publication: a random, revocable public id (the URL slug)
+// pointing at one node inside a note. The served content is always the LIVE
+// subtree — nothing is copied here — so deleting the node (or making the note
+// private / trashing it) turns the URL into a 404. Revoking deletes the row;
+// re-publishing issues a fresh id, so a leaked URL can be rotated.
+export const nodePublications = sqliteTable("node_publications", {
+  /** Public slug served at /pub/:id.json / /pub/:id.md (random UUID). */
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  noteId: text("note_id")
+    .notNull()
+    .references(() => notes.id),
+  /** The published node's id inside the note's JSON tree. */
+  nodeId: text("node_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

@@ -2,6 +2,8 @@ import { Head, Link } from "@inertiajs/react";
 import { useEffect, useState, useCallback } from "react";
 import type { SessionUser } from "../user";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
+import { publicationUrls } from "../application/nodePublication";
+import { copyText } from "../lib/clipboard";
 
 type User = SessionUser | null;
 
@@ -20,6 +22,29 @@ interface ApiToken {
   createdAt: string;
 }
 
+/** GET /api/publications の1行（Web公開中のノード）。 */
+interface Publication {
+  id: string;
+  noteId: string;
+  nodeId: string;
+  createdAt: string;
+  noteTitle: string;
+  /** ルート→ノードのテキスト列。ノードが消えていれば null。 */
+  path: string[] | null;
+  /** 今URLが生きているか（ノートが公開中 かつ ノードが存在）。 */
+  active: boolean;
+  inactiveReason: "note-trashed" | "note-private" | "node-missing" | null;
+}
+
+const INACTIVE_LABEL: Record<
+  NonNullable<Publication["inactiveReason"]>,
+  string
+> = {
+  "note-trashed": "停止中（ノートがゴミ箱にあります）",
+  "note-private": "停止中（ノートが非公開です）",
+  "node-missing": "停止中（ノードが見つかりません）",
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -36,6 +61,9 @@ export default function Settings({ user }: { user: User }) {
 
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [newToken, setNewToken] = useState<string | null>(null);
+
+  const [publications, setPublications] = useState<Publication[]>([]);
+  const [copiedPubUrl, setCopiedPubUrl] = useState<string | null>(null);
 
   const loadImages = useCallback(async () => {
     const res = await fetch("/api/images", { credentials: "include" });
@@ -55,9 +83,18 @@ export default function Settings({ user }: { user: User }) {
     if (res.ok) setTokens((await res.json()) as ApiToken[]);
   }, []);
 
+  const loadPublications = useCallback(async () => {
+    const res = await fetch("/api/publications", { credentials: "include" });
+    if (!res.ok) return;
+    const data = (await res.json()) as { publications: Publication[] };
+    setPublications(data.publications);
+  }, []);
+
   useEffect(() => {
-    Promise.all([loadImages(), loadTokens()]).finally(() => setLoading(false));
-  }, [loadImages, loadTokens]);
+    Promise.all([loadImages(), loadTokens(), loadPublications()]).finally(() =>
+      setLoading(false)
+    );
+  }, [loadImages, loadTokens, loadPublications]);
 
   const handleUpload = async (file: File | undefined) => {
     if (!file) return;
@@ -114,6 +151,19 @@ export default function Settings({ user }: { user: User }) {
       credentials: "include",
     });
     await loadTokens();
+  };
+
+  const revokePublication = async (id: string) => {
+    await fetch(`/api/publications/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    await loadPublications();
+  };
+
+  const copyPubUrl = async (url: string) => {
+    const ok = await copyText(url);
+    setCopiedPubUrl(ok ? url : null);
   };
 
   const pct = Math.min(100, Math.round((used / limit) * 100));
@@ -215,6 +265,91 @@ export default function Settings({ user }: { user: User }) {
               </div>
             )}
           </div>
+        </section>
+
+        <section className="mb-8">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            Web公開中のノード
+          </h2>
+          <div className="rounded-xl border border-slate-200 bg-white">
+            {loading ? (
+              <div className="py-6 text-center text-sm text-slate-400">
+                読み込み中…
+              </div>
+            ) : publications.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-400">
+                Web公開中のノードはありません（エディタでノードを右クリック →
+                「Web公開」）
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {publications.map((pub) => {
+                  const urls = publicationUrls(window.location.origin, pub.id);
+                  const urlButton = (label: string, url: string) => (
+                    <span className="inline-flex items-center gap-1">
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener"
+                        className="text-emerald-700 hover:underline"
+                      >
+                        {label}
+                      </a>
+                      <button
+                        onClick={() => void copyPubUrl(url)}
+                        title={`${label} URLをコピー`}
+                        className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100"
+                      >
+                        {copiedPubUrl === url ? "コピーしました" : "コピー"}
+                      </button>
+                    </span>
+                  );
+                  return (
+                    <li key={pub.id} className="px-4 py-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <Link
+                            href={`/notes/${pub.noteId}/edit`}
+                            className="font-medium hover:underline"
+                          >
+                            {pub.noteTitle}
+                          </Link>
+                          <div
+                            className="mt-0.5 truncate text-xs text-slate-500"
+                            title={pub.path?.join(" › ")}
+                          >
+                            {pub.path
+                              ? pub.path.join(" › ")
+                              : "（ノードが見つかりません）"}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs">
+                            {urlButton("JSON", urls.json)}
+                            {urlButton("Markdown", urls.md)}
+                            {pub.inactiveReason && (
+                              <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">
+                                {INACTIVE_LABEL[pub.inactiveReason]}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => void revokePublication(pub.id)}
+                          className="shrink-0 text-xs text-red-600 hover:underline"
+                        >
+                          解除
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            公開URLは枝（ノードとその子孫）の最新内容を JSON / Markdown
+            で配信します。解除するとURLは無効になり、再公開すると新しいURLが
+            発行されます。
+          </p>
         </section>
 
         <section>

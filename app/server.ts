@@ -1,10 +1,11 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle } from "drizzle-orm/d1";
 import { and, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
-import { users, notes, apiTokens, images } from "./db/schema";
+import { users, notes, apiTokens, images, nodePublications } from "./db/schema";
 import { getSession, setSession, clearSession } from "./utils/session";
 import { getUserByToken } from "./utils/apiToken";
 import { hashToken } from "./utils/tokenHash";
@@ -14,6 +15,16 @@ import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess } from "./utils/noteEditAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
+import { findNode } from "./domain/model";
+import { parseContent } from "./application/persistence";
+import { modelToMarkdown } from "./application/markdown";
+import {
+  PRIVATE_NOTE_PUBLISH_REASON,
+  parsePublicationPath,
+  canServePublication,
+  publishedNodeJson,
+  nodePathTexts,
+} from "./application/nodePublication";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
 import type { Env } from "./global.d";
@@ -349,6 +360,179 @@ app.get("/api/images/:id/raw", async (c) => {
   });
 });
 
+// --- Node publications: serve one branch as JSON / Markdown (public, CORS) ---
+// The slug is a random, revocable id (see application/nodePublication.ts for
+// the policy). Content is always the LIVE subtree: the node gone, the note
+// trashed or switched back to private all turn the URL into a 404. Data-feed
+// endpoints, so keep crawlers out via X-Robots-Tag.
+app.use("/pub/*", cors());
+app.get("/pub/:file", async (c) => {
+  const parsed = parsePublicationPath(c.req.param("file"));
+  if (!parsed) return c.notFound();
+
+  const db = drizzle(c.env.DB);
+  const pub = await db
+    .select()
+    .from(nodePublications)
+    .where(eq(nodePublications.id, parsed.pubId))
+    .get();
+  if (!pub) return c.notFound();
+
+  const note = await db
+    .select()
+    .from(notes)
+    .where(eq(notes.id, pub.noteId))
+    .get();
+  // Only live public notes are served — private notes stay encrypted and this
+  // endpoint never touches the decryption path.
+  if (!note || !canServePublication(note)) return c.notFound();
+
+  const node = findNode(parseContent(note.content, note.title), pub.nodeId);
+  if (!node) return c.notFound();
+
+  c.header("X-Robots-Tag", "noindex");
+  if (parsed.format === "json") return c.json(publishedNodeJson(node));
+  return c.text(modelToMarkdown(node), 200, {
+    "Content-Type": "text/markdown; charset=utf-8",
+  });
+});
+
+// Publish a node of an owned, public note. Idempotent per (note, node): the
+// existing slug is returned rather than a second one minted, so "公開…" opened
+// twice shows the same URL. Revoke + re-publish DOES mint a new slug — that's
+// the URL-rotation feature, not an accident.
+app.post("/api/notes/:id/publications", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const db = drizzle(c.env.DB);
+  const note = await loadOwnedNote(db, c.req.param("id"), user.id);
+  if (!note) return c.json({ error: "Not found" }, 404);
+  if (!note.isPublic) {
+    return c.json({ error: PRIVATE_NOTE_PUBLISH_REASON }, 400);
+  }
+
+  const body = await c.req
+    .json<{ nodeId?: string }>()
+    .catch(() => ({}) as { nodeId?: string });
+  if (!body.nodeId) return c.json({ error: "nodeId is required" }, 400);
+  if (!findNode(parseContent(note.content, note.title), body.nodeId)) {
+    return c.json({ error: "Node not found" }, 404);
+  }
+
+  const existing = await db
+    .select()
+    .from(nodePublications)
+    .where(
+      and(
+        eq(nodePublications.noteId, note.id),
+        eq(nodePublications.nodeId, body.nodeId)
+      )
+    )
+    .get();
+  if (existing) {
+    return c.json({
+      id: existing.id,
+      nodeId: existing.nodeId,
+      createdAt: existing.createdAt,
+    });
+  }
+
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  await db.insert(nodePublications).values({
+    id,
+    userId: user.id,
+    noteId: note.id,
+    nodeId: body.nodeId,
+    createdAt,
+  });
+  return c.json({ id, nodeId: body.nodeId, createdAt }, 201);
+});
+
+// List the current user's publications for the settings page: note title +
+// the branch's root-to-node path (階層), plus why an inactive one is inactive.
+// Decoding here is owner-facing (same as the edit page), so a note that went
+// back to private still shows its path — the PUBLIC serve path above never
+// decrypts.
+app.get("/api/publications", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select({
+      id: nodePublications.id,
+      noteId: nodePublications.noteId,
+      nodeId: nodePublications.nodeId,
+      createdAt: nodePublications.createdAt,
+      noteTitle: notes.title,
+      noteContent: notes.content,
+      noteIsPublic: notes.isPublic,
+      noteDeletedAt: notes.deletedAt,
+    })
+    .from(nodePublications)
+    .innerJoin(notes, eq(nodePublications.noteId, notes.id))
+    .where(eq(nodePublications.userId, user.id))
+    .orderBy(desc(nodePublications.createdAt));
+
+  // Parse each note's tree once even when several branches of it are published.
+  const models = new Map<string, ReturnType<typeof parseContent> | null>();
+  const publications = [];
+  for (const r of rows) {
+    let model = models.get(r.noteId);
+    if (model === undefined) {
+      const content = await decodeStoredNoteContent(
+        r.noteContent,
+        r.noteIsPublic,
+        c.env.ENCRYPTION_KEY
+      );
+      model = content === null ? null : parseContent(content, r.noteTitle);
+      models.set(r.noteId, model);
+    }
+    const path = model ? nodePathTexts(model, r.nodeId) : null;
+    const servable = canServePublication({
+      isPublic: r.noteIsPublic,
+      deletedAt: r.noteDeletedAt,
+    });
+    publications.push({
+      id: r.id,
+      noteId: r.noteId,
+      nodeId: r.nodeId,
+      createdAt: r.createdAt,
+      noteTitle: r.noteTitle,
+      path,
+      active: servable && path !== null,
+      inactiveReason: r.noteDeletedAt
+        ? "note-trashed"
+        : !r.noteIsPublic
+          ? "note-private"
+          : path === null
+            ? "node-missing"
+            : null,
+    });
+  }
+  return c.json({ publications });
+});
+
+app.delete("/api/publications/:id", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const id = c.req.param("id");
+  const db = drizzle(c.env.DB);
+  const pub = await db
+    .select()
+    .from(nodePublications)
+    .where(eq(nodePublications.id, id))
+    .get();
+  if (!pub || pub.userId !== user.id) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  await db.delete(nodePublications).where(eq(nodePublications.id, id));
+  return c.json({ ok: true });
+});
+
 // --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
 app.get("/api/link-preview", async (c) => {
   const url = c.req.query("url");
@@ -501,6 +685,11 @@ const routes = app
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
+      // Publications reference the note; drop them first so their URLs die
+      // with the note instead of dangling (and the FK stays satisfied).
+      await db
+        .delete(nodePublications)
+        .where(eq(nodePublications.noteId, note.id));
       await db.delete(notes).where(eq(notes.id, note.id));
     }
     return c.redirect("/trash", 303);
