@@ -151,6 +151,15 @@ const NODE_TYPE_LABEL = {
   object: "オブジェクトカードにする",
 } as const satisfies Record<NodeType, string>;
 
+// Pre-release: node types that ship hidden. They are only kept out of the
+// "convert to…" menu — existing nodes of the type still render, edit, save
+// and load, and converting *away* from one stays available, so a note made
+// before the type was hidden never becomes uneditable.
+// To ship the type, drop it from this set; that's the whole switch.
+// (Commenting out its NODE_TYPE_LABEL entry above would not work: the
+// `satisfies Record<NodeType, string>` there is exhaustive by design.)
+const HIDDEN_NODE_TYPES: ReadonlySet<NodeType> = new Set(["object"]);
+
 // Labels for the numeric-format context menu, keyed by NumFormat. Same
 // exhaustiveness idiom as NODE_TYPE_LABEL above: adding a NumFormat refuses
 // to compile here until it's given a label.
@@ -396,6 +405,16 @@ export function MindmapEditorView({
   // The markdown node whose full document is open in the side panel (null =
   // closed). Markdown nodes edit/preview here rather than expanding on-canvas.
   const [mdPanelNodeId, setMdPanelNodeId] = useState<string | null>(null);
+  // True while the markdown panel's textarea owns the keyboard. Same role as
+  // `urlEditing` for the URL box: it marks an editing surface outside the
+  // canvas, so the focus-sync effects below must leave the focus alone.
+  const [mdPanelEditing, setMdPanelEditing] = useState(false);
+  const mdPanelEditingRef = useRef(false);
+  mdPanelEditingRef.current = mdPanelEditing;
+  const handleMdPanelEditingChange = useCallback(
+    (v: boolean) => setMdPanelEditing(v),
+    []
+  );
   // Bumped whenever the stage is panned or zoomed so the (viewport-culled)
   // redraw effect re-runs and refills the newly-visible area. See the redraw
   // effect below — only nodes intersecting the visible viewport are built.
@@ -580,23 +599,37 @@ export function MindmapEditorView({
   }, [activeNodeId, cursorPos, editingText]);
 
   // --- Sync the hidden input to the editor state (single place) ---
-  // Replaces the scattered value/setSelectionRange/focus calls. While a custom
-  // node's URL box is open, the box owns the keyboard — never steal focus back.
+  // Replaces the scattered value/setSelectionRange/focus calls. While an
+  // editing surface outside the canvas is open — a custom node's URL box, or
+  // the markdown panel's textarea — that surface owns the keyboard and we must
+  // never steal focus back. Editing in the markdown panel re-enters here on
+  // every keystroke (the edit updates editingText), so without the guard the
+  // second character onwards would land on the canvas as selection-mode
+  // shortcuts: Backspace deletes the node, Enter adds a sibling, arrows move.
   useEffect(() => {
     const el = inputRef.current;
     if (!el || isComposingRef.current) return;
     if (el.value !== editingText) el.value = editingText;
     el.setSelectionRange(cursorPos, selectionEnd);
-    if (activeNodeId && !urlEditing) el.focus();
-  }, [editingText, cursorPos, selectionEnd, activeNodeId, urlEditing]);
+    if (activeNodeId && !urlEditing && !mdPanelEditing) el.focus();
+  }, [
+    editingText,
+    cursorPos,
+    selectionEnd,
+    activeNodeId,
+    urlEditing,
+    mdPanelEditing,
+  ]);
 
   // Hand the keyboard to the right editor when URL editing starts/stops: the
   // visible URL box while open, the hidden textarea (keymap host) otherwise —
   // e.g. after Enter/Escape closes the box, arrow navigation must stay live.
+  // Leaving the markdown panel's edit mode also lands here, handing the
+  // keyboard back to the hidden textarea so arrows navigate nodes again.
   useEffect(() => {
     if (urlEditing) urlInputRef.current?.focus();
-    else if (activeNodeId) inputRef.current?.focus();
-  }, [urlEditing, activeNodeId]);
+    else if (activeNodeId && !mdPanelEditing) inputRef.current?.focus();
+  }, [urlEditing, activeNodeId, mdPanelEditing]);
 
   // Refocus the editor after a click/menu/palette interaction, picking the
   // right keyboard host: the visible URL box while an image/link node is being
@@ -610,7 +643,9 @@ export function MindmapEditorView({
         : undefined;
       if (v.editing && (t === "image" || t === "link")) {
         urlInputRef.current?.focus();
-      } else {
+      } else if (!mdPanelEditingRef.current) {
+        // The markdown panel's textarea keeps the keyboard; pulling focus to
+        // the canvas here would drop the user mid-sentence.
         inputRef.current?.focus();
       }
     }, 0);
@@ -1142,7 +1177,8 @@ export function MindmapEditorView({
         NodeType,
         string,
       ][]) {
-        if (nodeType !== type) typeGroup.push({ label, onSelect: setType(nodeType) });
+        if (nodeType === type || HIDDEN_NODE_TYPES.has(nodeType)) continue;
+        typeGroup.push({ label, onSelect: setType(nodeType) });
       }
     }
     groups.push(typeGroup);
@@ -3518,6 +3554,7 @@ export function MindmapEditorView({
                 readOnly={readOnly}
                 onChange={(text) => handleMarkdownEdit(n.id, text)}
                 onClose={() => setMdPanelNodeId(null)}
+                onEditingChange={handleMdPanelEditingChange}
               />
             </Suspense>
           );

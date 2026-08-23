@@ -141,4 +141,86 @@ describe("MindmapEditor markdown compact card + panel", () => {
     // Still a markdown node after editing.
     expect(findNode(api().getModel(), "md")!.type).toBe("markdown");
   });
+
+  // Regression: the panel is a `modal-panel` surface (see EDIT_SURFACE), so the
+  // editor behind it sits in SELECTION mode while the user types here. It used
+  // to pull focus back to its hidden textarea on every keystroke — an edit here
+  // updates the node's text, which is what the focus-sync effect watches — so
+  // from the second character on, keys landed on the canvas as selection
+  // shortcuts: Backspace deleted the very node being edited, Enter forked a
+  // sibling, arrows jumped away. Real keystrokes are the point of this test;
+  // the case above drives the textarea through a synthetic input event and
+  // therefore never moves focus at all.
+  it("keeps the keyboard in the panel while typing (no canvas shortcuts)", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+
+    const point = await waitFor(() => api().getNodeClickPoint("md"));
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="mm-canvas"]'
+    )!;
+    await userEvent.click(canvas, {
+      position: { x: Math.round(point.x), y: Math.round(point.y) },
+    });
+    await waitFor(() => api().getActiveNodeId() === "md");
+    await userEvent.keyboard("[Space]");
+    await waitFor(panel);
+
+    const editBtn = await waitFor(() =>
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          '[data-testid="md-panel"] button'
+        )
+      ).find((b) => b.textContent === "編集")
+    );
+    editBtn.click();
+
+    const textarea = await waitFor(() =>
+      document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="md-panel"] textarea'
+      )
+    );
+    await waitFor(() => document.activeElement === textarea);
+
+    const before = api().getModel();
+    const siblingCount = before.children.length;
+
+    // Several real characters: one keystroke alone would not have caught the
+    // old bug, since the focus theft happened on the first one's state update.
+    await userEvent.keyboard("HELLO");
+
+    // The panel still owns the keyboard...
+    expect(document.activeElement).toBe(textarea);
+    // ...the text went into the markdown node, not the canvas...
+    const after = api().getModel();
+    expect(findNode(after, "md")!.text).toContain("HELLO");
+    expect(findNode(after, "md")!.type).toBe("markdown");
+    // ...and no selection shortcut fired behind it.
+    expect(after.children.length).toBe(siblingCount);
+    expect(api().getActiveNodeId()).toBe("md");
+
+    // Backspace is the destructive one: in selection mode it deletes the node.
+    await userEvent.keyboard("[Backspace]");
+    expect(document.activeElement).toBe(textarea);
+    expect(findNode(api().getModel(), "md")).not.toBeNull();
+    expect(api().getModel().children.length).toBe(siblingCount);
+
+    // Enter forks a sibling in selection mode; here it must type a newline.
+    await userEvent.keyboard("[Enter]");
+    expect(api().getModel().children.length).toBe(siblingCount);
+
+    // Leaving edit mode hands the keyboard back, so arrows navigate again.
+    const viewBtn = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="md-panel"] button'
+      )
+    ).find((b) => b.textContent === "表示")!;
+    viewBtn.click();
+    await waitFor(() => document.activeElement !== textarea);
+    await userEvent.keyboard("[ArrowDown]");
+    await waitFor(() => api().getActiveNodeId() === "plain");
+  });
 });

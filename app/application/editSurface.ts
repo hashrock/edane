@@ -46,6 +46,15 @@ export type EditSurface =
    * inline (canvas markdown). The panel must NOT steal the keyboard on open —
    * the editor drops back to selection mode so arrows keep navigating nodes —
    * and Escape inside the panel must close it.
+   *
+   * The converse holds once the panel's own field takes focus: the editor must
+   * then leave the focus alone until the field gives it up. It stays in
+   * selection mode (there is no inline caret to own), so any key that reaches
+   * the canvas while the user types in the panel fires a selection shortcut —
+   * Backspace deletes the node being edited, Enter adds a sibling, arrows jump
+   * away. Editing through the panel feeds the node's text back into the
+   * editor state, which is exactly what wakes the focus-sync effects, so this
+   * is a live trap rather than a theoretical one.
    */
   | { kind: "modal-panel" };
 

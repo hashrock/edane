@@ -10,6 +10,12 @@ interface Props {
   onChange: (next: string) => void;
   /** Close the panel. */
   onClose: () => void;
+  /**
+   * Fires when the panel's own textarea takes / gives up the keyboard, so the
+   * editor behind it can stop pulling focus back to its hidden textarea (the
+   * keymap host). Must be referentially stable — it drives an effect here.
+   */
+  onEditingChange?: (editing: boolean) => void;
 }
 
 /**
@@ -23,6 +29,7 @@ export default function MarkdownPanel({
   readOnly,
   onChange,
   onClose,
+  onEditingChange,
 }: Props) {
   // readOnly では表示/編集トグル自体を出さないので、mode は "view" のまま動かない。
   const [mode, setMode] = useState<"view" | "edit">("view");
@@ -37,6 +44,16 @@ export default function MarkdownPanel({
   useEffect(() => {
     if (mode === "edit") textareaRef.current?.focus();
   }, [mode]);
+
+  // Tell the editor when this textarea owns the keyboard. In "view" mode the
+  // panel deliberately holds no keyboard (arrows keep navigating nodes behind
+  // it), but in "edit" mode it does — and the editor must not steal focus
+  // back, or the keys land on the canvas as selection-mode shortcuts.
+  // The cleanup covers closing / unmounting straight out of edit mode.
+  useEffect(() => {
+    onEditingChange?.(mode === "edit");
+    return () => onEditingChange?.(false);
+  }, [mode, onEditingChange]);
 
   // Close on Escape from anywhere in the panel.
   const html = useMemo(() => renderMarkdownHtml(source), [source]);
