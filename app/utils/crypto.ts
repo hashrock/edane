@@ -68,18 +68,33 @@ export function isEncrypted(content: string): boolean {
 }
 
 /**
+ * Whether a note's content is stored plaintext or encrypted-at-rest. Today
+ * this is a straight mirror of `isPublic` (see noteStorageMode below), but
+ * it's a distinct concept from "is this note publicly viewable" — publicity
+ * is access control, storage mode is a persistence detail. Naming it
+ * explicitly at the crypto boundary keeps the two from being silently
+ * assumed identical if publishing ever moves off the single `isPublic` flag
+ * (e.g. per-node publishing, see TODO.md).
+ */
+export type NoteStorageMode = "plain" | "encrypted";
+
+/** Today's storage policy: public notes are stored plaintext, private notes encrypted. */
+export function noteStorageMode(isPublic: boolean): NoteStorageMode {
+  return isPublic ? "plain" : "encrypted";
+}
+
+/**
  * Read-side counterpart to the encrypt/store-plain decision a caller makes
- * before writing: public notes are stored plaintext, private notes are
- * stored encrypted (older private notes may still be plaintext, hence the
- * isEncrypted check rather than trusting isPublic alone). Returns null if
+ * before writing (older private notes may still be plaintext, hence the
+ * isEncrypted check rather than trusting the mode alone). Returns null if
  * decryption fails so callers can pick their own fallback.
  */
 export async function decodeStoredNoteContent(
   content: string,
-  isPublic: boolean,
+  mode: NoteStorageMode,
   secret: string
 ): Promise<string | null> {
-  if (isPublic || !content || !isEncrypted(content)) return content;
+  if (mode === "plain" || !content || !isEncrypted(content)) return content;
   try {
     return await decrypt(content, secret);
   } catch {
@@ -88,15 +103,14 @@ export async function decodeStoredNoteContent(
 }
 
 /**
- * Write-side counterpart to decodeStoredNoteContent: public notes are stored
- * plaintext, private notes are stored encrypted. Kept here (rather than
+ * Write-side counterpart to decodeStoredNoteContent. Kept here (rather than
  * inlined at each call site) so the storage policy has one home instead of
  * drifting between a read-side helper and ad-hoc ternaries.
  */
 export async function encodeNoteContentForStorage(
   content: string,
-  isPublic: boolean,
+  mode: NoteStorageMode,
   secret: string
 ): Promise<string> {
-  return isPublic ? content : await encrypt(content, secret);
+  return mode === "plain" ? content : await encrypt(content, secret);
 }
