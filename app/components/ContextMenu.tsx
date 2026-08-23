@@ -1,20 +1,24 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-export interface ContextMenuAction {
+type ContextMenuActionBase = {
   label: string;
   onSelect: () => void;
   /** Render in a destructive (red) style. */
   danger?: boolean;
   /** Optional leading icon. */
   icon?: React.ReactNode;
-  /**
-   * 押せない状態。項目を消すのではなく残したまま無効化するので、なぜ押せないかを
-   * {@link disabledReason} で必ず添えること。
-   */
-  disabled?: boolean;
-  /** 無効な理由。ラベルの下に小さく出る。 */
-  disabledReason?: string;
-}
+};
+
+/**
+ * 押せない状態にするなら、項目を消すのではなく残したまま無効化し、なぜ押せないかを
+ * disabledReason で必ず添える。型でこの対を強制する（disabled だけ立てて
+ * disabledReason を書き忘れる、を作れないようにする）。
+ */
+export type ContextMenuAction = ContextMenuActionBase &
+  (
+    | { disabled?: undefined; disabledReason?: undefined }
+    | { disabled: boolean; disabledReason: string }
+  );
 
 /** A horizontal divider between categories. */
 export interface ContextMenuSeparator {
