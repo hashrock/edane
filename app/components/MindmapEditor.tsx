@@ -100,6 +100,7 @@ import type { Command } from "./CommandPalette";
 import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
 import MarkdownPasteDialog from "./MarkdownPasteDialog";
+import PublishNodeDialog from "./PublishNodeDialog";
 import type { EditorState, ViewState } from "../application/editorReducer";
 import {
   buildKeymap,
@@ -425,6 +426,11 @@ export function MindmapEditorView({
   const [mdPaste, setMdPaste] = useState<{
     text: string;
     targetId: string;
+  } | null>(null);
+  // ノードのWeb公開ダイアログの対象（null = 閉）。noteId のある編集画面限定。
+  const [publishTarget, setPublishTarget] = useState<{
+    nodeId: string;
+    text: string;
   } | null>(null);
   // Refs
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -1232,7 +1238,7 @@ export function MindmapEditorView({
     }
     groups.push(mediaGroup);
 
-    // --- Copy ---
+    // --- Copy / share ---
     const copyGroup: ContextMenuAction[] = [];
     copyGroup.push({
       label: "枝をテキストコピー",
@@ -1240,6 +1246,15 @@ export function MindmapEditorView({
         navigator.clipboard.writeText(modelToText(node));
       },
     });
+    if (noteId && !readOnly) {
+      // この枝に取り消し可能な公開URL（JSON / Markdown）を発行する。ノートが
+      // 非公開のときも項目は残し、ダイアログ側で理由を見せる（PublicityDropdown
+      // の非公開時コピー動線と同じ「消さずに理由」方針）。
+      copyGroup.push({
+        label: "Web公開（JSON / Markdown）…",
+        onSelect: () => setPublishTarget({ nodeId, text: node.text }),
+      });
+    }
     groups.push(copyGroup);
 
     // --- Destructive ---
@@ -3575,6 +3590,18 @@ export function MindmapEditorView({
             if (file && nodeId) await uploadAndSetImage(nodeId, file);
           }}
         />
+        {publishTarget && noteId && (
+          <PublishNodeDialog
+            noteId={noteId}
+            nodeId={publishTarget.nodeId}
+            nodeText={publishTarget.text}
+            isPublic={isPublic}
+            onClose={() => {
+              setPublishTarget(null);
+              focusEditorSoon();
+            }}
+          />
+        )}
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
