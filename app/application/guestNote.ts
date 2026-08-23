@@ -8,6 +8,8 @@
  * storage key and shape stay in one place.
  */
 
+import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
+
 export const PENDING_NOTE_KEY = "edane:pending-note";
 
 export type PendingNote = {
@@ -18,9 +20,13 @@ export type PendingNote = {
 };
 
 /** Stash the in-progress guest note before sending the visitor through login. */
-export function stashPendingNote(note: PendingNote): boolean {
+export function stashPendingNote(
+  note: PendingNote,
+  storage: KeyValueStorage | undefined = defaultLocalStorage()
+): boolean {
+  if (!storage) return false;
   try {
-    localStorage.setItem(PENDING_NOTE_KEY, JSON.stringify(note));
+    storage.setItem(PENDING_NOTE_KEY, JSON.stringify(note));
     return true;
   } catch {
     return false;
@@ -31,11 +37,14 @@ export function stashPendingNote(note: PendingNote): boolean {
  * Read and remove the stashed guest note (consume-once, so a reload can't
  * re-import it). Returns null when nothing valid is stored.
  */
-export function takePendingNote(): PendingNote | null {
+export function takePendingNote(
+  storage: KeyValueStorage | undefined = defaultLocalStorage()
+): PendingNote | null {
+  if (!storage) return null;
   try {
-    const raw = localStorage.getItem(PENDING_NOTE_KEY);
+    const raw = storage.getItem(PENDING_NOTE_KEY);
     if (!raw) return null;
-    localStorage.removeItem(PENDING_NOTE_KEY);
+    storage.removeItem(PENDING_NOTE_KEY);
     const parsed = JSON.parse(raw) as Partial<PendingNote> | null;
     if (!parsed || typeof parsed.content !== "string") return null;
     return {
