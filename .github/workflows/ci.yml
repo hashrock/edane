@@ -19,6 +19,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Types first: cheapest signal, and vitest transpiles without typechecking
+      # so a type error would otherwise sail through the test jobs below.
+      - name: Typecheck
+        run: pnpm run typecheck
+
       # Node (framework-agnostic) tests.
       - name: Run node tests
         run: pnpm run test
