@@ -1,4 +1,6 @@
 import { memo } from "react";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 import type { EditorLayout } from "../application/editSurface";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { MindmapIcon, OutlineIcon } from "./icons";
@@ -41,6 +43,7 @@ const LAYOUTS: {
  * props this skips the whole pill on gestures that don't change the zoom.
  */
 export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読; memo越しでも自前で購読する）
   const menu = useAnchoredPopover("down");
   const current = LAYOUTS.find((l) => l.value === layout) ?? LAYOUTS[0];
 
@@ -101,8 +104,8 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Prop
         <>
           <button
             type="button"
-            aria-label="ズームアウト"
-            title="ズームアウト"
+            aria-label={t("zoomOut")}
+            title={t("zoomOut")}
             onClick={zoom.onZoomOut}
             className="flex h-6 w-6 items-center justify-center rounded-lg text-sm text-slate-500 hover:bg-slate-100"
           >
@@ -111,7 +114,7 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Prop
           <button
             type="button"
             data-testid="view-zoom-percent"
-            title="100%に戻す"
+            title={t("zoomReset")}
             onClick={zoom.onReset}
             className="w-10 rounded-lg px-1 py-1 text-center text-xs tabular-nums text-slate-600 hover:bg-slate-100"
           >
@@ -119,8 +122,8 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Prop
           </button>
           <button
             type="button"
-            aria-label="ズームイン"
-            title="ズームイン"
+            aria-label={t("zoomIn")}
+            title={t("zoomIn")}
             onClick={zoom.onZoomIn}
             className="flex h-6 w-6 items-center justify-center rounded-lg text-sm text-slate-500 hover:bg-slate-100"
           >

@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 export interface Command {
   id: string;
@@ -13,6 +15,7 @@ interface Props {
 }
 
 export default function CommandPalette({ commands, open, onClose }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,13 +78,13 @@ export default function CommandPalette({ commands, open, onClose }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="コマンドを検索..."
+          placeholder={t("paletteSearchPlaceholder")}
           className="w-full px-4 py-3 text-sm border-b outline-none"
         />
         <ul className="max-h-64 overflow-y-auto">
           {filtered.length === 0 ? (
             <li className="px-4 py-3 text-sm text-gray-400">
-              該当するコマンドがありません
+              {t("paletteNoMatch")}
             </li>
           ) : (
             filtered.map((cmd, i) => (

@@ -19,6 +19,7 @@ import {
 } from "../lib/measureText";
 import { imageDisplaySize } from "../lib/imageCache";
 import { markdownTitle } from "./markdownCard";
+import { t } from "./i18n";
 import {
   parseField,
   inferValueKind,
@@ -53,8 +54,15 @@ export const ROW_THUMB_MAX_H = 72;
 export const ROW_BADGE_W = 26;
 /** Height of the "add field" affordance shown inside an empty card. */
 export const CARD_HINT_H = 22;
-/** Label of the empty-card "add field" button (also the width-reservation basis). */
-export const ADD_FIELD_LABEL = "＋ フィールドを追加";
+/**
+ * Label of the empty-card "add field" button (also the width-reservation
+ * basis). A function, not a constant: it follows the current UI language, and
+ * measurement ({@link addFieldButtonWidth}) and draw both call it at use time
+ * so the reserved width always matches the drawn label.
+ */
+export function addFieldLabel(): string {
+  return t("addFieldLabel");
+}
 /** Font size of the "add field" button label. */
 export const ADD_FIELD_FONT_SIZE = 11;
 /** Horizontal padding inside the "add field" button (both sides combined). */
@@ -66,7 +74,7 @@ const ADD_FIELD_BTN_PAD = 20;
  */
 export function addFieldButtonWidth(): number {
   return (
-    measureNodeBox(ADD_FIELD_LABEL, { fontSize: ADD_FIELD_FONT_SIZE }).width +
+    measureNodeBox(addFieldLabel(), { fontSize: ADD_FIELD_FONT_SIZE }).width +
     ADD_FIELD_BTN_PAD
   );
 }

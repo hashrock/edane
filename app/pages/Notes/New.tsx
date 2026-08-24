@@ -1,10 +1,13 @@
 import { Head, Link, useForm } from "@inertiajs/react";
 import type { SessionUser } from "../../user";
+import { t } from "../../application/i18n";
+import { useLocale } from "../../components/useLocale";
 
 type User = SessionUser | null;
 
 export default function NotesNew({ user }: { user: User }) {
-  const { data, setData, post, processing } = useForm({
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
+  const { data, setData, post, processing, transform } = useForm({
     title: "",
     isPublic: false,
   });
@@ -12,12 +15,15 @@ export default function NotesNew({ user }: { user: User }) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!data.title.trim()) return;
+    // 初期コンテンツ（スターターのトピック）はUI言語に合わせてクライアントが
+    // 添える。送らなければサーバ側の日本語フォールバックになる。
+    transform((d) => ({ ...d, content: t("starterTopics") }));
     post("/notes");
   };
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-7 md:py-9">
-      <Head title="新規ノート" />
+      <Head title={t("newNoteHeadTitle")} />
       <header className="anim-header mb-10 flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">
           <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
@@ -27,7 +33,7 @@ export default function NotesNew({ user }: { user: User }) {
             href="/notes"
             className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
           >
-            ← 一覧
+            {t("settingsBackToList")}
           </Link>
         )}
       </header>
@@ -37,9 +43,9 @@ export default function NotesNew({ user }: { user: User }) {
           onSubmit={submit}
           className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8"
         >
-          <h2 className="text-xl font-bold tracking-tight">新しいノート</h2>
+          <h2 className="text-xl font-bold tracking-tight">{t("newNoteHeading")}</h2>
           <p className="mt-1 text-sm text-slate-500">
-            タイトルを入力するとマインドマップの起点（ルートノード）になります。
+            {t("newNoteDesc")}
           </p>
 
           <div className="mt-6">
@@ -47,7 +53,7 @@ export default function NotesNew({ user }: { user: User }) {
               htmlFor="title"
               className="block text-sm font-medium text-slate-700"
             >
-              タイトル
+              {t("titleLabel")}
             </label>
             <input
               id="title"
@@ -55,7 +61,7 @@ export default function NotesNew({ user }: { user: User }) {
               autoFocus
               value={data.title}
               onChange={(e) => setData("title", e.target.value)}
-              placeholder="例: プロジェクト計画"
+              placeholder={t("titleExample")}
               className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             />
           </div>
@@ -68,9 +74,9 @@ export default function NotesNew({ user }: { user: User }) {
               onChange={(e) => setData("isPublic", e.target.checked)}
             />
             <span className="text-sm">
-              <span className="font-medium text-slate-800">公開する</span>
+              <span className="font-medium text-slate-800">{t("makePublic")}</span>
               <span className="ml-2 text-slate-500">
-                リンクを知っている人が閲覧できます
+                {t("makePublicDesc")}
               </span>
             </span>
           </label>
@@ -80,14 +86,14 @@ export default function NotesNew({ user }: { user: User }) {
               href="/notes"
               className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition"
             >
-              キャンセル
+              {t("cancel")}
             </Link>
             <button
               type="submit"
               disabled={processing || !data.title.trim()}
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {processing ? "作成中..." : "作成して編集"}
+              {processing ? t("creating") : t("createAndEdit")}
             </button>
           </div>
         </form>

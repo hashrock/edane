@@ -23,31 +23,42 @@ import {
   parseContent,
   serializeModel,
 } from "../application/persistence";
-import {
-  COPY_LINK_FAILURE,
-  COPY_LINK_SUCCESS,
-  publicNoteUrl,
-} from "../application/publicNoteLink";
+import { publicNoteUrl } from "../application/publicNoteLink";
+import { t } from "../application/i18n";
+import type { MessageKey } from "../application/messages";
 import { UndoManager } from "../application/undoManager";
 import { copyText } from "../lib/clipboard";
 
 /**
- * updateSaveStatus に渡せる文言。フェード演出の分岐（"" / "保存済み" / それ以外）
- * が呼び出し側の文字列と一致し続けることを型で保証する。
+ * updateSaveStatus に渡す状態コード。表示文言は描画時に現在のUI言語で解決する
+ * ので、呼び出し側は文言ではなくコードを渡す（フェード演出の分岐 "" / "saved" /
+ * それ以外もコードで判定できる）。
  *
  * 保存以外のヘッダー通知（画像アップロード、リンクコピー）も同じ一行に相乗り
  * している。専用のトースト機構は持たない。
  */
 export type SaveStatusText =
   | ""
-  | "保存中..."
-  | "保存済み"
-  | "保存失敗"
-  | "画像アップロード中..."
-  | "アップロード失敗"
-  | "容量超過（上限10MB）"
-  | typeof COPY_LINK_SUCCESS
-  | typeof COPY_LINK_FAILURE;
+  | "saving"
+  | "saved"
+  | "save-failed"
+  | "uploading"
+  | "upload-failed"
+  | "storage-limit"
+  | "link-copied"
+  | "link-copy-failed";
+
+/** コード→カタログキー。網羅は satisfies で強制（キー追加漏れを防ぐ）。 */
+const SAVE_STATUS_MESSAGE = {
+  saving: "statusSaving",
+  saved: "statusSaved",
+  "save-failed": "statusSaveFailed",
+  uploading: "statusUploading",
+  "upload-failed": "statusUploadFailed",
+  "storage-limit": "statusStorageLimit",
+  "link-copied": "copyLinkSuccess",
+  "link-copy-failed": "copyLinkFailure",
+} as const satisfies Record<Exclude<SaveStatusText, "">, MessageKey>;
 
 export interface NoteEditorInit {
   noteId?: string;
@@ -196,19 +207,19 @@ export function useNoteEditor({
   const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
-    el.textContent = status;
+    el.textContent = status === "" ? "" : t(SAVE_STATUS_MESSAGE[status]);
     el.style.transition = "opacity 300ms ease";
     if (status === "") {
       // Hidden state (e.g. unsaved): drop out immediately, no fade.
       el.style.opacity = "0";
-    } else if (status === "保存済み") {
+    } else if (status === "saved") {
       // Fade the "saved" confirmation in so it appears gently.
       el.style.opacity = "0";
       requestAnimationFrame(() => {
         if (saveStatusRef.current === el) el.style.opacity = "1";
       });
     } else {
-      // Transient states (保存中... / 保存失敗 / etc.) show instantly.
+      // Transient states (saving / save-failed / etc.) show instantly.
       el.style.opacity = "1";
     }
   }, []);
@@ -218,7 +229,7 @@ export function useNoteEditor({
   const copyPublicLink = useCallback(() => {
     if (!noteId) return;
     void copyText(publicNoteUrl(window.location.origin, noteId)).then((ok) =>
-      updateSaveStatus(ok ? COPY_LINK_SUCCESS : COPY_LINK_FAILURE)
+      updateSaveStatus(ok ? "link-copied" : "link-copy-failed")
     );
   }, [noteId, updateSaveStatus]);
 
@@ -227,7 +238,7 @@ export function useNoteEditor({
       if (!noteId || readOnly) return true;
       const content = serializeModel(currentModel);
       const seq = ++saveSeqRef.current;
-      updateSaveStatus("保存中...");
+      updateSaveStatus("saving");
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
           method: "PUT",
@@ -246,14 +257,14 @@ export function useNoteEditor({
           if (seq > ackedSeqRef.current) {
             ackedSeqRef.current = seq;
             lastSavedContentRef.current = content;
-            updateSaveStatus("保存済み");
+            updateSaveStatus("saved");
           }
           return true;
         }
-        updateSaveStatus("保存失敗");
+        updateSaveStatus("save-failed");
         return false;
       } catch {
-        updateSaveStatus("保存失敗");
+        updateSaveStatus("save-failed");
         return false;
       }
     },
@@ -275,7 +286,7 @@ export function useNoteEditor({
     if (!noteId || readOnly) return;
     // Don't surface the "unsaved" state as visible text — it's visual noise.
     // Clear the status so the header stays quiet until the save itself flips
-    // this to 保存中... → 保存済み.
+    // this to saving → saved.
     if (isDirty()) updateSaveStatus("");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     let cancelled = false;

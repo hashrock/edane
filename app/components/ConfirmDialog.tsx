@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   open: boolean;
@@ -17,11 +19,12 @@ export default function ConfirmDialog({
   title,
   message,
   confirmLabel = "OK",
-  cancelLabel = "キャンセル",
+  cancelLabel,
   variant = "default",
   onConfirm,
   onCancel,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -74,7 +77,7 @@ export default function ConfirmDialog({
             onClick={onCancel}
             className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
           >
-            {cancelLabel}
+            {cancelLabel ?? t("cancel")}
           </button>
           <button
             ref={confirmRef}

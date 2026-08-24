@@ -10,11 +10,13 @@ import {
 } from "../../components/icons";
 import { takePendingNote } from "../../application/guestNote";
 import {
-  COPY_LINK_FAILURE,
-  COPY_LINK_SUCCESS,
-  PRIVATE_NOTE_COPY_REASON,
+  copyLinkFailure,
+  copyLinkSuccess,
+  privateNoteCopyReason,
   publicNoteUrl,
 } from "../../application/publicNoteLink";
+import { dateLocale, t } from "../../application/i18n";
+import { useLocale } from "../../components/useLocale";
 import { copyText } from "../../lib/clipboard";
 import type { SessionUser } from "../../user";
 
@@ -38,6 +40,7 @@ export default function NotesIndex({
   user: User;
   notes: Note[];
 }) {
+  useLocale(); // 言語切り替えで再レンダー（t() / 日付表記の購読）
   const [menu, setMenu] = useState<{ note: Note; x: number; y: number } | null>(
     null
   );
@@ -72,7 +75,7 @@ export default function NotesIndex({
     void copyText(publicNoteUrl(window.location.origin, note.id)).then((ok) =>
       setFlash({
         seq: ++flashSeq.current,
-        text: ok ? COPY_LINK_SUCCESS : COPY_LINK_FAILURE,
+        text: ok ? copyLinkSuccess() : copyLinkFailure(),
       })
     );
   };
@@ -127,19 +130,19 @@ export default function NotesIndex({
                 href="/trash"
                 className="text-slate-500 hover:text-slate-900 transition"
               >
-                ゴミ箱
+                {t("trash")}
               </Link>
               <Link
                 href="/settings"
                 className="text-slate-500 hover:text-slate-900 transition"
               >
-                設定
+                {t("settingsNav")}
               </Link>
               <a
                 href="/auth/logout"
                 className="text-slate-500 hover:text-slate-900 transition"
               >
-                ログアウト
+                {t("logout")}
               </a>
             </div>
           ) : (
@@ -147,7 +150,7 @@ export default function NotesIndex({
               href="/auth/google"
               className="text-sm font-medium text-slate-900 hover:text-slate-600 transition"
             >
-              Googleでログイン
+              {t("loginWithGoogle")}
             </a>
           )}
         </div>
@@ -157,10 +160,10 @@ export default function NotesIndex({
         <section className="anim-item">
           <div className="mb-4">
             <h2 className="text-lg font-bold tracking-tight">
-              シンプルで軽快なアイデアノート
+              {t("landingTitle")}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              思いついたことを、そのまま書いて広げる。ログイン不要ですぐ試せます。
+              {t("landingSubtitle")}
             </p>
           </div>
           <div
@@ -169,7 +172,7 @@ export default function NotesIndex({
           >
             <iframe
               src="/guest?embed=1"
-              title="ゲストエディタ"
+              title={t("guestEditorTitle")}
               className="h-full w-full border-0"
             />
           </div>
@@ -179,7 +182,7 @@ export default function NotesIndex({
       {user && (
         <section>
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-xl font-bold tracking-tight">マイノート</h2>
+            <h2 className="text-xl font-bold tracking-tight">{t("myNotes")}</h2>
             <div className="flex items-center gap-3">
               {flash && (
                 <span
@@ -193,7 +196,7 @@ export default function NotesIndex({
                 href="/notes/new"
                 className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
               >
-                + 新規作成
+                {t("newNoteButton")}
               </Link>
             </div>
           </div>
@@ -202,15 +205,15 @@ export default function NotesIndex({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="タイトルで検索"
+              placeholder={t("searchByTitle")}
               className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             />
           )}
           {notes.length === 0 ? (
-            <p className="text-slate-500">ノートがありません。</p>
+            <p className="text-slate-500">{t("noNotes")}</p>
           ) : filtered.length === 0 ? (
             <p className="text-slate-500">
-              「{query}」に一致するノートはありません。
+              {t("noNotesMatch", { query })}
             </p>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -235,20 +238,20 @@ export default function NotesIndex({
                       <span className="truncate">{note.title}</span>
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {new Date(note.updatedAt).toLocaleDateString("ja-JP")}
+                      {new Date(note.updatedAt).toLocaleDateString(dateLocale())}
                     </div>
                   </Link>
                   <div className="flex items-center gap-4 pr-4 pl-2">
                     <span
                       className={`rounded-full px-2.5 py-1 text-xs font-medium ${note.isPublic ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
                     >
-                      {note.isPublic ? "公開" : "非公開"}
+                      {note.isPublic ? t("publicLabel") : t("privateLabel")}
                     </span>
                     <button
                       onClick={(e) => openMenu(note, e)}
                       className="p-2 text-slate-400 opacity-70 hover:text-slate-700 group-hover:opacity-100 transition"
-                      title="メニュー"
-                      aria-label="メニュー"
+                      title={t("menu")}
+                      aria-label={t("menu")}
                     >
                       <MoreVerticalIcon />
                     </button>
@@ -263,7 +266,7 @@ export default function NotesIndex({
       {importing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-sm">
           <p className="text-sm font-medium text-slate-600">
-            ノートを保存しています...
+            {t("savingNote")}
           </p>
         </div>
       )}
@@ -275,26 +278,26 @@ export default function NotesIndex({
           onClose={() => setMenu(null)}
           items={[
             {
-              label: "編集する",
+              label: t("menuEditNote"),
               icon: <PencilIcon />,
               onSelect: () => router.visit(`/notes/${menu.note.id}/edit`),
             },
             {
-              label: "リンクをコピー",
+              label: t("copyLinkLabel"),
               icon: <LinkIcon />,
-              // 非公開でも項目は残して理由を見せる（PRIVATE_NOTE_COPY_REASON の
+              // 非公開でも項目は残して理由を見せる（privateNoteCopyReason の
               // コメント参照）。
               disabled: !menu.note.isPublic,
-              disabledReason: PRIVATE_NOTE_COPY_REASON,
+              disabledReason: privateNoteCopyReason(),
               onSelect: () => copyLink(menu.note),
             },
             {
-              label: menu.note.pinned ? "固定を解除" : "先頭に固定して表示",
+              label: menu.note.pinned ? t("menuUnpin") : t("menuPin"),
               icon: <PinIcon />,
               onSelect: () => togglePin(menu.note),
             },
             {
-              label: "ゴミ箱に移動",
+              label: t("menuMoveToTrash"),
               icon: <TrashIcon />,
               danger: true,
               onSelect: () => trashNote(menu.note),

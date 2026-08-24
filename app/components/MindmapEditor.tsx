@@ -68,11 +68,14 @@ import {
 import {
   KEY_FONT_SIZE,
   CARD_HINT_H,
-  ADD_FIELD_LABEL,
+  addFieldLabel,
   ADD_FIELD_FONT_SIZE,
   addFieldButtonWidth,
   rowKeyColOffset,
 } from "../application/objectCard";
+import { t } from "../application/i18n";
+import type { MessageKey } from "../application/messages";
+import { useLocale } from "./useLocale";
 import { parseField, inferValueKind } from "../application/objectField";
 import type { NumFormat } from "../domain/model";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
@@ -137,19 +140,19 @@ function isNonPrimaryButton(e: { evt?: { button?: unknown } }): boolean {
 // so selection doesn't jump to a neighbouring (e.g. same-Y parent) node.
 const DRAG_THRESHOLD = 4;
 
-// Labels for the context menu's "convert to…" group, keyed by NodeType.
-// `satisfies Record<NodeType, string>` makes this exhaustive: adding a
+// Message keys for the context menu's "convert to…" group, keyed by NodeType.
+// `satisfies Record<NodeType, MessageKey>` makes this exhaustive: adding a
 // NodeType refuses to compile here until it's given a label, so the new
 // type can't silently stay unreachable from the conversion menu (the same
 // idiom as STORED_NODE_TYPE_SET in domain/model.ts and EDIT_SURFACE in
-// application/editSurface.ts).
+// application/editSurface.ts). Resolved with t() when the menu is built.
 const NODE_TYPE_LABEL = {
-  text: "テキストにする",
-  image: "画像にする（URL）",
-  link: "リンクにする（URL）",
-  markdown: "Markdownにする",
-  object: "オブジェクトカードにする",
-} as const satisfies Record<NodeType, string>;
+  text: "nodeTypeText",
+  image: "nodeTypeImage",
+  link: "nodeTypeLink",
+  markdown: "nodeTypeMarkdown",
+  object: "nodeTypeObject",
+} as const satisfies Record<NodeType, MessageKey>;
 
 // Pre-release: node types that ship hidden. They are only kept out of the
 // "convert to…" menu — existing nodes of the type still render, edit, save
@@ -160,14 +163,14 @@ const NODE_TYPE_LABEL = {
 // `satisfies Record<NodeType, string>` there is exhaustive by design.)
 const HIDDEN_NODE_TYPES: ReadonlySet<NodeType> = new Set(["object"]);
 
-// Labels for the numeric-format context menu, keyed by NumFormat. Same
+// Message keys for the numeric-format context menu, keyed by NumFormat. Same
 // exhaustiveness idiom as NODE_TYPE_LABEL above: adding a NumFormat refuses
 // to compile here until it's given a label.
 const NUM_FORMAT_LABEL = {
-  comma: "カンマ区切り（1,234）",
-  currency: "通貨（¥1,234）",
-  percent: "パーセント（12%）",
-} as const satisfies Record<NumFormat, string>;
+  comma: "numFormatComma",
+  currency: "numFormatCurrency",
+  percent: "numFormatPercent",
+} as const satisfies Record<NumFormat, MessageKey>;
 
 // Zoom factor per click of the floating +/− buttons. Deliberately coarser than
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
@@ -360,6 +363,10 @@ export function MindmapEditorView({
     setLeaveConfirm,
     bypassNavGuardRef,
   } = engine;
+
+  // UI言語。t() を使うラベル群（メニュー・パレット・キャンバス描画）を言語
+  // 切り替えで作り直すため、useMemo / 再描画エフェクトの依存にも入れる。
+  const locale = useLocale();
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
@@ -670,7 +677,7 @@ export function MindmapEditorView({
   const uploadAndSetImage = useCallback(
     async (nodeId: string, file: File) => {
       if (!file.type.startsWith("image/")) return;
-      updateSaveStatus("画像アップロード中...");
+      updateSaveStatus("uploading");
       try {
         const form = new FormData();
         form.append("file", file);
@@ -685,8 +692,8 @@ export function MindmapEditorView({
           };
           updateSaveStatus(
             err?.error === "Storage limit exceeded"
-              ? "容量超過（上限10MB）"
-              : "アップロード失敗"
+              ? "storage-limit"
+              : "upload-failed"
           );
           return;
         }
@@ -703,7 +710,7 @@ export function MindmapEditorView({
         if (noteId) saveNote(next.document.model);
         else updateSaveStatus("");
       } catch {
-        updateSaveStatus("アップロード失敗");
+        updateSaveStatus("upload-failed");
       }
     },
     [dispatch, noteId, saveNote, updateSaveStatus]
@@ -1083,7 +1090,7 @@ export function MindmapEditorView({
       const text = activeNodeId
         ? modelToText(findNode(model, activeNodeId) || model)
         : modelToText(model);
-      const prompt = `この箇条書きツリー形式のテキストデータを文章に整形してください。内容は「${model.text}」についてです。\n\n${text}`;
+      const prompt = `${t("chatgptPrompt", { title: model.text })}\n\n${text}`;
       window.open(
         `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`,
         "_blank"
@@ -1094,16 +1101,17 @@ export function MindmapEditorView({
       pasteTextAsNodes(clipText);
     };
     return [
-      { id: "copy-all", label: "すべてプレーンテキストでコピー", action: copyAllText },
-      { id: "copy-branch", label: "選択した枝以下をテキストコピー", action: copyBranch },
+      { id: "copy-all", label: t("cmdCopyAll"), action: copyAllText },
+      { id: "copy-branch", label: t("cmdCopyBranch"), action: copyBranch },
       ...(readOnly
         ? []
-        : [{ id: "paste", label: "プレーンテキストからペースト", action: pasteAsNodes }]),
-      { id: "chatgpt", label: "ChatGPTに送る", action: sendToChatGPT },
-      { id: "shortcuts", label: "キーボードショートカット一覧", action: () => setHelpOpen(true) },
-      { id: "settings", label: "エディタ設定", action: () => setSettingsOpen(true) },
+        : [{ id: "paste", label: t("cmdPasteText"), action: pasteAsNodes }]),
+      { id: "chatgpt", label: t("cmdSendToChatGPT"), action: sendToChatGPT },
+      { id: "shortcuts", label: t("cmdShortcuts"), action: () => setHelpOpen(true) },
+      { id: "settings", label: t("cmdEditorSettings"), action: () => setSettingsOpen(true) },
     ];
-  }, [pasteTextAsNodes, readOnly]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasteTextAsNodes, readOnly, locale]);
 
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -1126,12 +1134,12 @@ export function MindmapEditorView({
     const linkGroup: ContextMenuAction[] = [];
     if (type === "link" && node.text) {
       linkGroup.push({
-        label: "リンクを開く",
+        label: t("menuOpenLink"),
         onSelect: () => window.open(node.text, "_blank", "noopener"),
       });
       if (!readOnly) {
         linkGroup.push({
-          label: "リンク情報を取得（タイトル/favicon）",
+          label: t("menuFetchLinkMeta"),
           onSelect: () => fetchLinkMeta(nodeId),
         });
       }
@@ -1142,7 +1150,7 @@ export function MindmapEditorView({
     const structureGroup: ContextMenuAction[] = [];
     if (!readOnly) {
       structureGroup.push({
-        label: "子ノードを追加",
+        label: t("menuAddChild"),
         onSelect: () => {
           const next = dispatch({ type: "addChild", nodeId }, "add-child");
           if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
@@ -1153,7 +1161,7 @@ export function MindmapEditorView({
     }
     if (hasChildren) {
       structureGroup.push({
-        label: node.collapsed ? "展開する" : "折りたたむ",
+        label: node.collapsed ? t("menuExpand") : t("menuCollapse"),
         onSelect: () => {
           const next = toggleCollapse(nodeId);
           if (noteId) saveNote(next.document.model);
@@ -1175,10 +1183,10 @@ export function MindmapEditorView({
       };
       for (const [nodeType, label] of Object.entries(NODE_TYPE_LABEL) as [
         NodeType,
-        string,
+        MessageKey,
       ][]) {
         if (nodeType === type || HIDDEN_NODE_TYPES.has(nodeType)) continue;
-        typeGroup.push({ label, onSelect: setType(nodeType) });
+        typeGroup.push({ label: t(label), onSelect: setType(nodeType) });
       }
     }
     groups.push(typeGroup);
@@ -1197,26 +1205,26 @@ export function MindmapEditorView({
           const next = dispatch({ type: "setNumFormat", nodeId, ...patch }, "style");
           if (noteId) saveNote(next.document.model);
         };
-        const fmtItem = (fmt: NumFormat, label: string): ContextMenuAction => ({
-          label: `${node.numFormat === fmt ? "✓ " : ""}${label}`,
+        const fmtItem = (fmt: NumFormat, label: MessageKey): ContextMenuAction => ({
+          label: `${node.numFormat === fmt ? "✓ " : ""}${t(label)}`,
           onSelect: () =>
             applyNum({ numFormat: node.numFormat === fmt ? null : fmt }),
         });
         for (const [fmt, label] of Object.entries(NUM_FORMAT_LABEL) as [
           NumFormat,
-          string,
+          MessageKey,
         ][]) {
           numGroup.push(fmtItem(fmt, label));
         }
         if ((node.decimals ?? 0) < 4)
           numGroup.push({
-            label: "小数点桁数を増やす",
+            label: t("menuMoreDecimals"),
             onSelect: () => applyNum({ decimals: (node.decimals ?? 0) + 1 }),
           });
         if (node.decimals !== undefined)
           numGroup.push({
             label:
-              node.decimals === 0 ? "小数点桁数を自動に戻す" : "小数点桁数を減らす",
+              node.decimals === 0 ? t("menuAutoDecimals") : t("menuFewerDecimals"),
             onSelect: () =>
               applyNum({
                 decimals: node.decimals! > 0 ? node.decimals! - 1 : null,
@@ -1244,21 +1252,21 @@ export function MindmapEditorView({
       };
       if (bigger !== undefined)
         formatGroup.push({
-          label: "文字を大きく",
+          label: t("menuBiggerText"),
           onSelect: () => applyStyle({ fontSize: bigger }),
         });
       if (smaller !== undefined)
         formatGroup.push({
-          label: "文字を小さく",
+          label: t("menuSmallerText"),
           onSelect: () => applyStyle({ fontSize: smaller }),
         });
       if (node.fontSize !== undefined && node.fontSize !== DEFAULT_FONT_SIZE)
         formatGroup.push({
-          label: "標準サイズに戻す",
+          label: t("menuResetTextSize"),
           onSelect: () => applyStyle({ fontSize: null }),
         });
       formatGroup.push({
-        label: node.bold ? "太字を解除" : "太字にする",
+        label: node.bold ? t("menuBoldOff") : t("menuBoldOn"),
         onSelect: () => applyStyle({ bold: !node.bold }),
       });
     }
@@ -1268,7 +1276,7 @@ export function MindmapEditorView({
     const mediaGroup: ContextMenuAction[] = [];
     if (!isRoot && !readOnly) {
       mediaGroup.push({
-        label: "画像をアップロード",
+        label: t("menuUploadImage"),
         onSelect: () => triggerImageUpload(nodeId),
       });
     }
@@ -1277,7 +1285,7 @@ export function MindmapEditorView({
     // --- Copy / share ---
     const copyGroup: ContextMenuAction[] = [];
     copyGroup.push({
-      label: "枝をテキストコピー",
+      label: t("menuCopyBranchText"),
       onSelect: () => {
         navigator.clipboard.writeText(modelToText(node));
       },
@@ -1287,7 +1295,7 @@ export function MindmapEditorView({
       // 非公開のときも項目は残し、ダイアログ側で理由を見せる（PublicityDropdown
       // の非公開時コピー動線と同じ「消さずに理由」方針）。
       copyGroup.push({
-        label: "Web公開（JSON / Markdown）…",
+        label: t("menuPublishNode"),
         onSelect: () => setPublishTarget({ nodeId, text: node.text }),
       });
     }
@@ -1297,7 +1305,7 @@ export function MindmapEditorView({
     const dangerGroup: ContextMenuAction[] = [];
     if (!isRoot && !readOnly) {
       dangerGroup.push({
-        label: "ノードを削除",
+        label: t("menuDeleteNode"),
         danger: true,
         onSelect: () => {
           const next = dispatch({ type: "deleteNode", nodeId }, "delete-node");
@@ -1314,6 +1322,7 @@ export function MindmapEditorView({
       items.push(...group);
     }
     return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     contextMenu,
     dispatch,
@@ -1324,6 +1333,7 @@ export function MindmapEditorView({
     fetchLinkMeta,
     triggerImageUpload,
     flashNodes,
+    locale,
   ]);
 
   // --- Keyboard handling ---
@@ -2446,7 +2456,7 @@ export function MindmapEditorView({
               new Konva.Text({
                 x: valueX,
                 y: node.y - 6,
-                text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
+                text: d.status === "error" ? t("imageLoadError") : t("loading"),
                 fontSize: 11,
                 fontFamily: "sans-serif",
                 fill: "#94a3b8",
@@ -2532,7 +2542,7 @@ export function MindmapEditorView({
               y: node.y - 7,
               width: d.w,
               align: "center",
-              text: d.status === "error" ? "画像を読み込めません" : "読み込み中…",
+              text: d.status === "error" ? t("imageLoadError") : t("loading"),
               fontSize: 12,
               fontFamily: "sans-serif",
               fill: "#94a3b8",
@@ -2600,7 +2610,7 @@ export function MindmapEditorView({
               height: btnH,
               align: "center",
               verticalAlign: "middle",
-              text: ADD_FIELD_LABEL,
+              text: addFieldLabel(),
               fontSize: ADD_FIELD_FONT_SIZE,
               fontFamily: "sans-serif",
               fill: "#0369a1",
@@ -2655,7 +2665,7 @@ export function MindmapEditorView({
           })
         );
         // Line-count badge pinned to the card's right edge.
-        const badgeText = `${markdownLineCount(node.text)}行`;
+        const badgeText = t("mdLineCount", { n: markdownLineCount(node.text) });
         group.add(
           new Konva.Text({
             x: node.x + rectWidth - MD_CARD_BADGE + 2,
@@ -2994,7 +3004,10 @@ export function MindmapEditorView({
       perfRef.current.redrawLastMs = now - perfStart;
       perfRef.current.redrawDrawMs += now - drawStart;
     }
-  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, readOnly, viewportTick]);
+  // locale: キャンバスに直接描く文言（読み込み中 / 行数バッジ / フィールド追加
+  // ボタンなど）を言語切り替えで描き直す。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, readOnly, viewportTick, locale]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -3371,7 +3384,7 @@ export function MindmapEditorView({
   // 静的表示（readOnly）と編集ボタンの中身で共用するタイトル。
   const titleSpan = (
     <span className="truncate text-base font-semibold tracking-tight">
-      {title || "無題"}
+      {title || t("untitled")}
     </span>
   );
 
@@ -3419,10 +3432,10 @@ export function MindmapEditorView({
       <ConfirmDialog
         open={leaveConfirm !== null}
         variant="danger"
-        title="保存に失敗しました"
-        message="未保存の変更があります。このまま移動すると変更が失われる可能性があります。移動しますか？"
-        confirmLabel="移動する"
-        cancelLabel="とどまる"
+        title={t("saveFailedTitle")}
+        message={t("leaveMessage")}
+        confirmLabel={t("leaveConfirm")}
+        cancelLabel={t("leaveCancel")}
         onConfirm={() => {
           const target = leaveConfirm;
           setLeaveConfirm(null);
@@ -3437,8 +3450,8 @@ export function MindmapEditorView({
           {!embed && (
             <Link
               href="/notes"
-              aria-label="一覧へ戻る"
-              title="一覧へ戻る"
+              aria-label={t("backToList")}
+              title={t("backToList")}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             >
               <svg
@@ -3477,13 +3490,13 @@ export function MindmapEditorView({
                 }
               }}
               className="h-8 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-base font-semibold tracking-tight outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-              placeholder="タイトル（ルートノード）"
+              placeholder={t("titlePlaceholderCanvas")}
             />
           ) : (
             <button
               onClick={() => setEditingTitle(true)}
               className="flex min-w-0 items-center gap-2 rounded-lg px-1 text-left hover:bg-slate-100"
-              title="タイトルを編集"
+              title={t("editTitle")}
             >
               {titleSpan}
               <span className="text-sm text-slate-400">✎</span>
@@ -3518,7 +3531,7 @@ export function MindmapEditorView({
               onClick={handleSaveToAccount}
               className="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white transition hover:bg-emerald-700"
             >
-              アカウントに保存
+              {t("saveToAccount")}
             </button>
           )}
         </div>
@@ -3540,7 +3553,7 @@ export function MindmapEditorView({
             className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-500/10"
           >
             <span className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-md">
-              画像をドロップしてアップロード
+              {t("dropImageHint")}
             </span>
           </div>
         )}
@@ -3604,7 +3617,7 @@ export function MindmapEditorView({
             onChange={handleUrlChange}
             onKeyDown={(e) => handleAuxInputKeys(e, dispatch)}
             placeholder={
-              activeModelNode?.type === "image" ? "画像のURL" : "リンクのURL"
+              activeModelNode?.type === "image" ? t("imageUrlLabel") : t("linkUrlLabel")
             }
             className="absolute z-10 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-md outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             style={{

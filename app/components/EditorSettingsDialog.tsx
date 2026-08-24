@@ -1,5 +1,12 @@
 import { useEffect } from "react";
 import type { EditorPreferences } from "../application/editorPreferences";
+import {
+  LOCALE_LABELS,
+  setLocale,
+  t,
+  type Locale,
+} from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   open: boolean;
@@ -13,6 +20,8 @@ interface Props {
  * editorPreferences.ts). The two radio groups only apply while selection mode
  * is on, so they grey out when the parent toggle turns it off, and a note
  * lists the chorded replacements that take over in always-edit mode.
+ * UI言語（application/i18n.ts）もここから切り替える — キーボード設定と同じ
+ * 「このデバイスの表示設定」なので同じダイアログに置く。
  */
 export default function EditorSettingsDialog({
   open,
@@ -20,6 +29,7 @@ export default function EditorSettingsDialog({
   onChange,
   onClose,
 }: Props) {
+  const locale = useLocale();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -69,23 +79,51 @@ export default function EditorSettingsDialog({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="エディタ設定"
+      aria-label={t("editorSettings")}
     >
       <div
         className="anim-modal max-h-[80vh] w-full max-w-md overflow-y-auto rounded-lg border bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="text-sm font-bold text-slate-800">エディタ設定</h2>
+          <h2 className="text-sm font-bold text-slate-800">
+            {t("editorSettings")}
+          </h2>
           <button
             onClick={onClose}
             className="rounded px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            aria-label="閉じる"
+            aria-label={t("close")}
           >
             ✕
           </button>
         </div>
         <div className="space-y-5 px-5 py-4">
+          <section>
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {t("languageHeading")}
+            </h3>
+            <div className="flex gap-1.5">
+              {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+                <label
+                  key={l}
+                  className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
+                    locale === l
+                      ? "border-emerald-500 bg-emerald-50/50 text-slate-800"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="uiLocale"
+                    checked={locale === l}
+                    onChange={() => setLocale(l)}
+                    className="accent-emerald-600"
+                  />
+                  {LOCALE_LABELS[l]}
+                </label>
+              ))}
+            </div>
+          </section>
           <section>
             <label className="flex cursor-pointer items-start gap-2.5">
               <input
@@ -98,95 +136,96 @@ export default function EditorSettingsDialog({
               />
               <span>
                 <span className="block text-sm font-medium text-slate-800">
-                  選択モードを使う
+                  {t("selectionModeLabel")}
                 </span>
                 <span className="block text-xs leading-relaxed text-slate-500">
-                  オフにすると常に編集モードになり、クリックした位置にカーソルが入ります。
+                  {t("selectionModeDesc")}
                 </span>
               </span>
             </label>
             {!prefs.selectionMode && (
               <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
-                常時編集モードの操作: 枝ごと削除は{" "}
+                {t("alwaysEditHintPrefix")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
                   ⌘/Ctrl + Shift + Backspace
                 </kbd>
-                、枝の開閉は{" "}
+                {t("alwaysEditHintCollapse")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
                   ⌘/Ctrl + .
                 </kbd>
-                、ショートカット一覧は{" "}
+                {t("alwaysEditHintHelp")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
                   ⌘/Ctrl + /
                 </kbd>
+                {t("alwaysEditHintSuffix")}
               </div>
             )}
           </section>
           <section>
             <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              選択中の Tab キー
+              {t("tabKeyHeading")}
             </h3>
             <div className="space-y-1.5">
               {radio(
                 "tabBehavior",
                 prefs.tabBehavior === "indent",
                 !prefs.selectionMode,
-                "インデント",
-                "選択ノードを直前のノードの子にする（Shift + Tab で戻す）",
+                t("kmIndent"),
+                t("tabIndentDesc"),
                 () => onChange({ ...prefs, tabBehavior: "indent" })
               )}
               {radio(
                 "tabBehavior",
                 prefs.tabBehavior === "insert-child",
                 !prefs.selectionMode,
-                "子ノードを挿入",
-                "選択ノードの下に新しい子を作って編集を始める（Shift + Tab はアウトデント）",
+                t("kmInsertChild"),
+                t("tabInsertChildDesc"),
                 () => onChange({ ...prefs, tabBehavior: "insert-child" })
               )}
             </div>
           </section>
           <section>
             <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              選択中の Enter キー
+              {t("enterKeyHeading")}
             </h3>
             <div className="space-y-1.5">
               {radio(
                 "enterBehavior",
                 prefs.enterBehavior === "insert-sibling",
                 !prefs.selectionMode,
-                "兄弟ノードを追加",
-                "編集の開始は Space / F2 / ⌘/Ctrl + Enter",
+                t("kmInsertSibling"),
+                t("enterInsertSiblingDesc"),
                 () => onChange({ ...prefs, enterBehavior: "insert-sibling" })
               )}
               {radio(
                 "enterBehavior",
                 prefs.enterBehavior === "edit",
                 !prefs.selectionMode,
-                "編集を開始",
-                "兄弟ノードの追加は ⌘/Ctrl + Enter に移る",
+                t("kmStartEditing"),
+                t("enterEditDesc"),
                 () => onChange({ ...prefs, enterBehavior: "edit" })
               )}
             </div>
           </section>
           <section>
             <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              選択中の ← / → キー
+              {t("arrowKeyHeading")}
             </h3>
             <div className="space-y-1.5">
               {radio(
                 "arrowBehavior",
                 prefs.arrowBehavior === "collapse",
                 !prefs.selectionMode,
-                "枝の開閉を優先",
-                "→ で展開、← で折りたたみ。開閉できないときは親子へ移動",
+                t("arrowCollapseLabel"),
+                t("arrowCollapseDesc"),
                 () => onChange({ ...prefs, arrowBehavior: "collapse" })
               )}
               {radio(
                 "arrowBehavior",
                 prefs.arrowBehavior === "navigate",
                 !prefs.selectionMode,
-                "親子への移動を優先",
-                "→ で子ノードへ、← で親ノードへ。開閉は ⌘/Ctrl + .",
+                t("arrowNavigateLabel"),
+                t("arrowNavigateDesc"),
                 () => onChange({ ...prefs, arrowBehavior: "navigate" })
               )}
             </div>

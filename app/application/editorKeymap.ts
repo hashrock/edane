@@ -26,6 +26,7 @@
  */
 
 import type { EditorAction, EditorState, UndoType } from "./editorReducer";
+import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
 import { findNode, findParentAndIndex } from "../domain/model";
 import {
@@ -73,8 +74,12 @@ export interface KeymapDeps {
 
 export interface KeyBinding {
   id: string;
-  /** Human description for the help overlay; "" hides the binding from help. */
-  label: string;
+  /**
+   * Message key of the human description for the help overlay ("" hides the
+   * binding from help). A key, not display text: ShortcutHelp resolves it with
+   * `t()` at render time so the overlay follows the current UI language.
+   */
+  label: MessageKey | "";
   /** Key combo shown in the help overlay. */
   keys: string;
   when: "global" | "selection" | "editing" | "both";
@@ -128,7 +133,7 @@ export function buildKeymap(
   const selectionBindings: KeyBinding[] = [
     {
       id: "sel-insert-sibling",
-      label: "兄弟ノードを追加",
+      label: "kmInsertSibling",
       keys: enterEdits ? "⌘/Ctrl + Enter" : "Enter",
       when: "selection",
       match: (e) => e.key === "Enter" && (enterEdits ? mod(e) : !mod(e)),
@@ -139,7 +144,7 @@ export function buildKeymap(
     },
     {
       id: "sel-edit",
-      label: "編集を開始",
+      label: "kmStartEditing",
       keys: enterEdits ? "Enter / Space / F2" : "Space / F2 / ⌘/Ctrl + Enter",
       when: "selection",
       match: (e) =>
@@ -155,7 +160,7 @@ export function buildKeymap(
     },
     {
       id: "sel-up",
-      label: siblingArrows ? "前の兄弟へ（なければ親へ）" : "上のノードへ",
+      label: siblingArrows ? "kmSelUpSibling" : "kmSelUpFlat",
       keys: "↑",
       when: "selection",
       match: (e) => e.key === "ArrowUp" && !e.altKey,
@@ -168,7 +173,7 @@ export function buildKeymap(
     },
     {
       id: "sel-down",
-      label: siblingArrows ? "次の兄弟へ（なければ枝の外へ）" : "下のノードへ",
+      label: siblingArrows ? "kmSelDownSibling" : "kmSelDownFlat",
       keys: "↓",
       when: "selection",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
@@ -182,7 +187,7 @@ export function buildKeymap(
     prefs.arrowBehavior === "navigate"
       ? {
           id: "sel-right",
-          label: "子ノードへ",
+          label: "kmSelChild",
           keys: "→",
           when: "selection",
           match: (e) => e.key === "ArrowRight" && !e.altKey,
@@ -207,7 +212,7 @@ export function buildKeymap(
         }
       : {
           id: "sel-right",
-          label: "展開 / 子ノードへ",
+          label: "kmSelExpandOrChild",
           keys: "→",
           when: "selection",
           match: (e) => e.key === "ArrowRight" && !e.altKey,
@@ -232,7 +237,7 @@ export function buildKeymap(
     prefs.arrowBehavior === "navigate"
       ? {
           id: "sel-left",
-          label: "親ノードへ",
+          label: "kmSelParent",
           keys: "←",
           when: "selection",
           match: (e) => e.key === "ArrowLeft" && !e.altKey,
@@ -243,7 +248,7 @@ export function buildKeymap(
         }
       : {
           id: "sel-left",
-          label: "折りたたみ / 親ノードへ",
+          label: "kmSelCollapseOrParent",
           keys: "←",
           when: "selection",
           match: (e) => e.key === "ArrowLeft" && !e.altKey,
@@ -265,7 +270,7 @@ export function buildKeymap(
       ? ([
           {
             id: "sel-insert-child",
-            label: "子ノードを挿入",
+            label: "kmInsertChild",
             keys: "Tab",
             when: "selection",
             match: (e) => e.key === "Tab" && !e.shiftKey,
@@ -294,7 +299,7 @@ export function buildKeymap(
           },
           {
             id: "sel-outdent",
-            label: "アウトデント",
+            label: "kmOutdent",
             keys: "Shift + Tab",
             when: "selection",
             match: (e) => e.key === "Tab" && e.shiftKey,
@@ -307,7 +312,7 @@ export function buildKeymap(
       : ([
           {
             id: "sel-indent",
-            label: "インデント / アウトデント",
+            label: "kmIndentOutdent",
             keys: "Tab / Shift + Tab",
             when: "selection",
             match: (e) => e.key === "Tab",
@@ -324,7 +329,7 @@ export function buildKeymap(
       // its word-wise selection), which an editor has no business swallowing.
       // Re-parenting while editing stays Tab / Shift+Tab.
       id: "indent-right",
-      label: "インデント",
+      label: "kmIndent",
       keys: "Alt + →",
       when: "selection",
       match: (e) => e.altKey && e.key === "ArrowRight",
@@ -337,7 +342,7 @@ export function buildKeymap(
     },
     {
       id: "outdent-left",
-      label: "アウトデント",
+      label: "kmOutdent",
       keys: "Alt + ←",
       when: "selection",
       match: (e) => e.altKey && e.key === "ArrowLeft",
@@ -348,7 +353,7 @@ export function buildKeymap(
     },
     {
       id: "sel-delete",
-      label: "ノードを削除",
+      label: "kmDeleteNode",
       keys: "Backspace / Delete",
       when: "selection",
       match: (e) => e.key === "Backspace" || e.key === "Delete",
@@ -360,7 +365,7 @@ export function buildKeymap(
     },
     {
       id: "sel-help",
-      label: "ショートカット一覧",
+      label: "kmShortcutList",
       keys: "?",
       when: "selection",
       match: (e) => e.key === "?",
@@ -378,7 +383,7 @@ export function buildKeymap(
   const alwaysEditBindings: KeyBinding[] = [
     {
       id: "edit-delete-branch",
-      label: "ノードを枝ごと削除",
+      label: "kmDeleteBranch",
       keys: "⌘/Ctrl + Shift + Backspace",
       when: "both",
       match: (e) => mod(e) && e.shiftKey && e.key === "Backspace",
@@ -401,7 +406,7 @@ export function buildKeymap(
       ? [
           {
             id: "edit-insert-child",
-            label: "子ノードを挿入",
+            label: "kmInsertChild",
             keys: "Tab",
             when: "editing",
             match: (e) => e.key === "Tab" && !e.shiftKey,
@@ -429,7 +434,7 @@ export function buildKeymap(
           },
           {
             id: "edit-outdent",
-            label: "アウトデント",
+            label: "kmOutdent",
             keys: "Shift + Tab",
             when: "editing",
             match: (e) => e.key === "Tab" && e.shiftKey,
@@ -442,7 +447,7 @@ export function buildKeymap(
       : [
           {
             id: "edit-indent",
-            label: "インデント / アウトデント",
+            label: "kmIndentOutdent",
             keys: "Tab / Shift + Tab",
             when: "editing",
             match: (e) => e.key === "Tab",
@@ -458,7 +463,7 @@ export function buildKeymap(
   // Escape is left to native behaviour (IME cancel, closing dialogs).
   const editEscape: KeyBinding = {
     id: "edit-escape",
-    label: "編集を終了",
+    label: "kmExitEditing",
     keys: "Esc",
     when: "editing",
     match: (e) => e.key === "Escape",
@@ -472,7 +477,7 @@ export function buildKeymap(
     // ---- Global (work regardless of mode / active node) ----
     {
       id: "palette",
-      label: "コマンドパレット",
+      label: "kmCommandPalette",
       keys: "⌘/Ctrl + K",
       when: "global",
       match: (e) => mod(e) && e.key.toLowerCase() === "k",
@@ -483,7 +488,7 @@ export function buildKeymap(
     },
     {
       id: "undo",
-      label: "元に戻す",
+      label: "kmUndo",
       keys: "⌘/Ctrl + Z",
       when: "global",
       match: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "z",
@@ -494,7 +499,7 @@ export function buildKeymap(
     },
     {
       id: "redo",
-      label: "やり直し",
+      label: "kmRedo",
       keys: "⌘/Ctrl + Shift + Z",
       when: "global",
       match: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "z",
@@ -520,7 +525,7 @@ export function buildKeymap(
       // mode, where "?" just types a character) this is the only key that can
       // reach the help overlay.
       id: "help-slash",
-      label: "ショートカット一覧",
+      label: "kmShortcutList",
       keys: "⌘/Ctrl + /",
       when: "global",
       match: (e) => mod(e) && e.key === "/",
@@ -533,7 +538,7 @@ export function buildKeymap(
     // ---- Cross-mode (need an active node; must precede plain-arrow bindings) ----
     {
       id: "reorder-up",
-      label: "ノードを上へ移動",
+      label: "kmMoveNodeUp",
       keys: "Alt + ↑",
       when: "both",
       match: (e) => e.altKey && e.key === "ArrowUp",
@@ -545,7 +550,7 @@ export function buildKeymap(
     },
     {
       id: "reorder-down",
-      label: "ノードを下へ移動",
+      label: "kmMoveNodeDown",
       keys: "Alt + ↓",
       when: "both",
       match: (e) => e.altKey && e.key === "ArrowDown",
@@ -557,7 +562,7 @@ export function buildKeymap(
     },
     {
       id: "bold",
-      label: "太字",
+      label: "kmBold",
       keys: "⌘/Ctrl + B",
       when: "both",
       match: (e) => mod(e) && e.key.toLowerCase() === "b",
@@ -576,7 +581,7 @@ export function buildKeymap(
 
     {
       id: "toggle-collapse",
-      label: "折りたたみ / 展開",
+      label: "kmToggleCollapse",
       keys: "⌘/Ctrl + .",
       when: "both",
       // Selection mode already collapses with ←/→, but those are the caret keys
@@ -602,7 +607,7 @@ export function buildKeymap(
     // ---- Editing mode ----
     {
       id: "edit-newline",
-      label: "改行",
+      label: "kmNewline",
       keys: "Shift + Enter",
       when: "editing",
       match: (e) => e.key === "Enter" && e.shiftKey,
@@ -610,7 +615,7 @@ export function buildKeymap(
     },
     {
       id: "edit-enter",
-      label: "ノードを分割 / 追加",
+      label: "kmSplitNode",
       keys: "Enter",
       when: "editing",
       match: (e) => e.key === "Enter",

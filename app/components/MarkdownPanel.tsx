@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { renderMarkdownHtml } from "../lib/markdownHtml";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   /** The markdown source to show / edit. */
@@ -31,6 +33,7 @@ export default function MarkdownPanel({
   onClose,
   onEditingChange,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   // readOnly では表示/編集トグル自体を出さないので、mode は "view" のまま動かない。
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [draft, setDraft] = useState(source);
@@ -88,7 +91,7 @@ export default function MarkdownPanel({
                     : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                表示
+                {t("mdView")}
               </button>
               <button
                 type="button"
@@ -99,14 +102,14 @@ export default function MarkdownPanel({
                     : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                編集
+                {t("mdEdit")}
               </button>
             </div>
           )}
           <button
             type="button"
             onClick={onClose}
-            aria-label="閉じる"
+            aria-label={t("close")}
             className="rounded-md px-2 py-1 text-lg leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
           >
             ×
@@ -124,7 +127,7 @@ export default function MarkdownPanel({
           />
         ) : (
           <div className="flex-1 px-5 py-4 text-sm text-slate-400">
-            空のMarkdownです。「編集」から内容を追加できます。
+            {t("mdEmpty")}
           </div>
         )
       ) : (
@@ -134,7 +137,7 @@ export default function MarkdownPanel({
           onChange={(e) => commit(e.target.value)}
           spellCheck={false}
           className="flex-1 resize-none px-5 py-4 font-mono text-sm text-slate-800 outline-none"
-          placeholder="# 見出し&#10;&#10;- 箇条書き"
+          placeholder={t("mdPlaceholder")}
         />
       )}
     </div>

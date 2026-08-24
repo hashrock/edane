@@ -6,6 +6,8 @@
  * loaded only by the client-only preview panel.
  */
 
+import { t } from "./i18n";
+
 /** Max characters shown in a card title before an ellipsis. */
 export const MD_TITLE_MAX = 40;
 
@@ -15,7 +17,7 @@ export const MD_TITLE_MAX = 40;
  * card measurement and draw agree.
  */
 export function markdownTitle(src: string, maxLen = MD_TITLE_MAX): string {
-  let title = "無題のMarkdown";
+  let title = t("untitledMarkdown");
   for (const raw of src.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;

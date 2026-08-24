@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   open: boolean;
@@ -25,6 +27,7 @@ export default function MarkdownPasteDialog({
   onPlain,
   onCancel,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -47,20 +50,20 @@ export default function MarkdownPasteDialog({
   }[] = [
     {
       key: "decompose",
-      label: "分解してペースト",
-      desc: "見出しやリストの階層をノードツリーに展開します",
+      label: t("mdPasteDecompose"),
+      desc: t("mdPasteDecomposeDesc"),
       onSelect: onDecompose,
     },
     {
       key: "node",
-      label: "Markdownノードとしてペースト",
-      desc: "1つのMarkdownノードとしてそのまま貼り付けます",
+      label: t("mdPasteNode"),
+      desc: t("mdPasteNodeDesc"),
       onSelect: onAsNode,
     },
     {
       key: "plain",
-      label: "プレーンテキストとして貼り付け",
-      desc: "Markdown記法を解釈せず、行のインデントだけでノード化します",
+      label: t("mdPastePlain"),
+      desc: t("mdPastePlainDesc"),
       onSelect: onPlain,
     },
   ];
@@ -71,17 +74,17 @@ export default function MarkdownPasteDialog({
       onClick={onCancel}
       role="dialog"
       aria-modal="true"
-      aria-label="Markdownの貼り付け方法"
+      aria-label={t("mdPasteAriaLabel")}
     >
       <div
         className="anim-modal w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-bold tracking-tight text-slate-950">
-          Markdownを検出しました
+          {t("mdPasteDetected")}
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-500">
-          貼り付け方法を選んでください。
+          {t("mdPasteChoose")}
         </p>
         {preview && (
           <pre className="mt-3 max-h-28 overflow-auto rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 whitespace-pre-wrap break-words">
@@ -112,7 +115,7 @@ export default function MarkdownPasteDialog({
             onClick={onCancel}
             className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
           >
-            キャンセル
+            {t("cancel")}
           </button>
         </div>
       </div>

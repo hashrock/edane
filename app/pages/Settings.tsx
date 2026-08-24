@@ -4,6 +4,14 @@ import type { SessionUser } from "../user";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
 import { copyText } from "../lib/clipboard";
+import {
+  LOCALE_LABELS,
+  setLocale,
+  t,
+  type Locale,
+} from "../application/i18n";
+import { useLocale } from "../components/useLocale";
+import type { MessageKey } from "../application/messages";
 
 type User = SessionUser | null;
 
@@ -36,13 +44,14 @@ interface Publication {
   inactiveReason: "note-trashed" | "note-private" | "node-missing" | null;
 }
 
+// 値はカタログキー（描画時に t() で解決 — 言語切り替えに追従する）。
 const INACTIVE_LABEL: Record<
   NonNullable<Publication["inactiveReason"]>,
-  string
+  MessageKey
 > = {
-  "note-trashed": "停止中（ノートがゴミ箱にあります）",
-  "note-private": "停止中（ノートが非公開です）",
-  "node-missing": "停止中（ノードが見つかりません）",
+  "note-trashed": "inactiveNoteTrashed",
+  "note-private": "inactiveNotePrivate",
+  "node-missing": "inactiveNodeMissing",
 };
 
 function formatBytes(bytes: number): string {
@@ -52,6 +61,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function Settings({ user }: { user: User }) {
+  const locale = useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const [images, setImages] = useState<ImageMeta[]>([]);
   const [used, setUsed] = useState(0);
   const [limit, setLimit] = useState(IMAGE_STORAGE_LIMIT_BYTES);
@@ -112,8 +122,8 @@ export default function Settings({ user }: { user: User }) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         setError(
           err?.error === "Storage limit exceeded"
-            ? `容量上限（${formatBytes(limit)}）を超えています`
-            : "アップロードに失敗しました"
+            ? t("storageLimitExceededError", { limit: formatBytes(limit) })
+            : t("uploadFailed")
         );
         return;
       }
@@ -170,38 +180,65 @@ export default function Settings({ user }: { user: User }) {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <Head title="設定" />
+      <Head title={t("settingsHeadTitle")} />
       <header className="flex h-14 items-center gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
         <Link
           href="/notes"
           className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
         >
-          ← 一覧
+          {t("settingsBackToList")}
         </Link>
         <div className="h-6 w-px bg-slate-200" />
-        <h1 className="text-lg font-bold tracking-tight">プロジェクト設定</h1>
+        <h1 className="text-lg font-bold tracking-tight">{t("projectSettings")}</h1>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-8 md:px-6">
         {user && (
           <section className="mb-8">
             <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
-              アカウント
+              {t("accountHeading")}
             </h2>
             <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-              <div className="font-medium">{user.name || "（名前未設定）"}</div>
+              <div className="font-medium">{user.name || t("nameUnset")}</div>
               <div className="text-slate-500">{user.email}</div>
             </div>
           </section>
         )}
 
         <section className="mb-8">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            {t("languageHeading")}
+          </h2>
+          <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-3">
+            {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+              <label
+                key={l}
+                className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
+                  locale === l
+                    ? "border-emerald-500 bg-emerald-50/50 text-slate-800"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="uiLocale"
+                  checked={locale === l}
+                  onChange={() => setLocale(l)}
+                  className="accent-emerald-600"
+                />
+                {LOCALE_LABELS[l]}
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="mb-8">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase text-slate-400">
-              画像ストレージ
+              {t("imageStorageHeading")}
             </h2>
             <label className="cursor-pointer rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
-              {uploading ? "アップロード中…" : "画像を追加"}
+              {uploading ? t("uploadingImage") : t("addImage")}
               <input
                 type="file"
                 accept="image/*"
@@ -214,7 +251,7 @@ export default function Settings({ user }: { user: User }) {
 
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-1 flex items-center justify-between text-sm">
-              <span className="font-medium">使用量</span>
+              <span className="font-medium">{t("usage")}</span>
               <span className="text-slate-500">
                 {formatBytes(used)} / {formatBytes(limit)}
               </span>
@@ -228,10 +265,10 @@ export default function Settings({ user }: { user: User }) {
             {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 
             {loading ? (
-              <div className="py-6 text-center text-slate-400">読み込み中…</div>
+              <div className="py-6 text-center text-slate-400">{t("loading")}</div>
             ) : images.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-                画像はまだありません
+                {t("noImages")}
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -258,7 +295,7 @@ export default function Settings({ user }: { user: User }) {
                       onClick={() => deleteImage(img.id)}
                       className="absolute right-1.5 top-1.5 hidden rounded bg-red-600 px-2 py-0.5 text-[11px] text-white group-hover:block"
                     >
-                      削除
+                      {t("deleteAction")}
                     </button>
                   </div>
                 ))}
@@ -269,17 +306,16 @@ export default function Settings({ user }: { user: User }) {
 
         <section className="mb-8">
           <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
-            Web公開中のノード
+            {t("publishedNodesHeading")}
           </h2>
           <div className="rounded-xl border border-slate-200 bg-white">
             {loading ? (
               <div className="py-6 text-center text-sm text-slate-400">
-                読み込み中…
+                {t("loading")}
               </div>
             ) : publications.length === 0 ? (
               <div className="py-6 text-center text-sm text-slate-400">
-                Web公開中のノードはありません（エディタでノードを右クリック →
-                「Web公開」）
+                {t("noPublishedNodes")}
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
@@ -297,10 +333,10 @@ export default function Settings({ user }: { user: User }) {
                       </a>
                       <button
                         onClick={() => void copyPubUrl(url)}
-                        title={`${label} URLをコピー`}
+                        title={t("copyUrlTitle", { label })}
                         className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100"
                       >
-                        {copiedPubUrl === url ? "コピーしました" : "コピー"}
+                        {copiedPubUrl === url ? t("copied") : t("copy")}
                       </button>
                     </span>
                   );
@@ -320,14 +356,14 @@ export default function Settings({ user }: { user: User }) {
                           >
                             {pub.path
                               ? pub.path.join(" › ")
-                              : "（ノードが見つかりません）"}
+                              : t("nodeMissing")}
                           </div>
                           <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs">
                             {urlButton("JSON", urls.json)}
                             {urlButton("Markdown", urls.md)}
                             {pub.inactiveReason && (
                               <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">
-                                {INACTIVE_LABEL[pub.inactiveReason]}
+                                {t(INACTIVE_LABEL[pub.inactiveReason])}
                               </span>
                             )}
                           </div>
@@ -336,7 +372,7 @@ export default function Settings({ user }: { user: User }) {
                           onClick={() => void revokePublication(pub.id)}
                           className="shrink-0 text-xs text-red-600 hover:underline"
                         >
-                          解除
+                          {t("revoke")}
                         </button>
                       </div>
                     </li>
@@ -346,28 +382,26 @@ export default function Settings({ user }: { user: User }) {
             )}
           </div>
           <p className="mt-2 text-xs leading-relaxed text-slate-400">
-            公開URLは枝（ノードとその子孫）の最新内容を JSON / Markdown
-            で配信します。解除するとURLは無効になり、再公開すると新しいURLが
-            発行されます。
+            {t("publicationsFootnote")}
           </p>
         </section>
 
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase text-slate-400">
-              APIトークン（デスクトップアプリ用）
+              {t("apiTokensHeading")}
             </h2>
             <button
               onClick={createToken}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
             >
-              新規作成
+              {t("createNew")}
             </button>
           </div>
           {newToken && (
             <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
               <div className="mb-1 font-medium text-amber-800">
-                トークンを発行しました（この画面でしか確認できません）
+                {t("tokenIssued")}
               </div>
               <code className="block break-all rounded bg-white px-2 py-1 text-xs">
                 {newToken}
@@ -377,24 +411,24 @@ export default function Settings({ user }: { user: User }) {
           <div className="rounded-xl border border-slate-200 bg-white">
             {tokens.length === 0 ? (
               <div className="py-6 text-center text-sm text-slate-400">
-                トークンはありません
+                {t("noTokens")}
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {tokens.map((t) => (
+                {tokens.map((tok) => (
                   <li
-                    key={t.id}
+                    key={tok.id}
                     className="flex items-center justify-between px-4 py-3 text-sm"
                   >
                     <div>
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-slate-400">{t.createdAt}</div>
+                      <div className="font-medium">{tok.name}</div>
+                      <div className="text-xs text-slate-400">{tok.createdAt}</div>
                     </div>
                     <button
-                      onClick={() => deleteToken(t.id)}
+                      onClick={() => deleteToken(tok.id)}
                       className="text-xs text-red-600 hover:underline"
                     >
-                      削除
+                      {t("deleteAction")}
                     </button>
                   </li>
                 ))}
