@@ -56,8 +56,11 @@ import {
   flattenToNodes,
   layoutObjectRows,
   nodeDisplayText,
+  nodeTextOffsetX,
+  checkboxOffset,
+  supportsCheckbox,
+  CHECKBOX_SIZE,
   FAVICON_SIZE,
-  FAVICON_GAP,
   NODE_PADDING,
   nodeBoxWidth,
   nodeBoxHeight,
@@ -267,6 +270,7 @@ export interface RenderedText {
   height: number;
   fontSize: number;
   fontStyle: string;
+  textDecoration: string;
   fill: string;
 }
 
@@ -277,11 +281,22 @@ export interface RenderedImage {
   height: number;
 }
 
+export interface RenderedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fill: string;
+  stroke: string;
+}
+
 export interface NodeRender {
   /** The node's box in world px (x/y = top-left). */
   box: { x: number; y: number; width: number; height: number };
   texts: RenderedText[];
   images: RenderedImage[];
+  /** Includes the node's own background rect, not just chrome like a checkbox. */
+  rects: RenderedRect[];
 }
 
 /** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
@@ -311,6 +326,12 @@ export interface MindmapTestApi {
    * the draw-side position math so click tests stay in sync with it.
    */
   getToggleButtonPoint: (id: string) => { x: number; y: number } | null;
+  /**
+   * Screen-space centre of a node's task checkbox (null when the node isn't a
+   * task). Mirrors the draw-side position math, like getToggleButtonPoint, so
+   * a click test aims at the box the user sees.
+   */
+  getCheckboxPoint: (id: string) => { x: number; y: number } | null;
   /** Screen-space box of a node (x/y = top-left), for drag & drop zone tests. */
   getNodeRect: (
     id: string
@@ -707,6 +728,18 @@ export function MindmapEditorView({
   );
   const addFieldToCardRef = useRef(addFieldToCard);
   addFieldToCardRef.current = addFieldToCard;
+
+  // Flip a task node between done and open. Backs the checkbox drawn inside
+  // the node (a click on the box itself) — the same edit ⌘/Ctrl+Shift+D makes.
+  const setNodeChecked = useCallback(
+    (nodeId: string, checked: boolean | null) => {
+      const next = dispatch({ type: "setChecked", nodeId, checked }, "check");
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, noteId, saveNote]
+  );
+  const setNodeCheckedRef = useRef(setNodeChecked);
+  setNodeCheckedRef.current = setNodeChecked;
 
   // --- Image upload: push a file to R2 and turn the node into an image ---
   const uploadAndSetImage = useCallback(
@@ -1141,6 +1174,24 @@ export function MindmapEditorView({
       ...(readOnly
         ? []
         : [{ id: "paste", label: t("cmdPasteText"), action: pasteAsNodes }]),
+      ...(readOnly
+        ? []
+        : [
+            {
+              id: "toggle-checkbox",
+              label: t("cmdToggleCheckbox"),
+              action: () => {
+                const id = stateRef.current.view.activeNodeId;
+                const n = id ? findNode(modelRef.current, id) : null;
+                if (!n || n.id === modelRef.current.id) return;
+                if (!supportsCheckbox(n.type ?? "text")) return;
+                setNodeCheckedRef.current(
+                  n.id,
+                  n.checked === undefined ? false : null
+                );
+              },
+            },
+          ]),
       { id: "chatgpt", label: t("cmdSendToChatGPT"), action: sendToChatGPT },
       { id: "shortcuts", label: t("cmdShortcuts"), action: () => setHelpOpen(true) },
       { id: "settings", label: t("cmdEditorSettings"), action: () => setSettingsOpen(true) },
@@ -1269,6 +1320,35 @@ export function MindmapEditorView({
     }
     groups.push(numGroup);
 
+    // --- Task checkbox ---
+    // Offered for the kinds that can show one (supportsCheckbox), except a
+    // card's field rows: a row is laid out by objectCardGeom's key/value
+    // columns, which have no checkbox column to give it.
+    const taskGroup: ContextMenuAction[] = [];
+    if (
+      !readOnly &&
+      !isRoot &&
+      supportsCheckbox(type) &&
+      parentInfo?.parent.type !== "object"
+    ) {
+      if (node.checked === undefined) {
+        taskGroup.push({
+          label: t("menuAddCheckbox"),
+          onSelect: () => setNodeChecked(nodeId, false),
+        });
+      } else {
+        taskGroup.push({
+          label: node.checked ? t("menuUncheckTask") : t("menuCheckTask"),
+          onSelect: () => setNodeChecked(nodeId, !node.checked),
+        });
+        taskGroup.push({
+          label: t("menuRemoveCheckbox"),
+          onSelect: () => setNodeChecked(nodeId, null),
+        });
+      }
+    }
+    groups.push(taskGroup);
+
     // --- Text formatting (font size / bold) ---
     // Card field rows render at the card's fixed rhythm, so per-node font
     // styling is hidden for them (the numeric format group above applies).
@@ -1368,6 +1448,7 @@ export function MindmapEditorView({
     fetchLinkMeta,
     triggerImageUpload,
     flashNodes,
+    setNodeChecked,
     locale,
   ]);
 
@@ -1823,7 +1904,7 @@ export function MindmapEditorView({
             0,
             Math.min(data.lines.length - 1, Math.floor(relY / data.lineHeight))
           );
-          const relX = worldX - node.x - NODE_PADDING;
+          const relX = worldX - node.x - nodeTextOffsetX(node);
           charIdx = lineColToPos(
             data,
             line,
@@ -2130,7 +2211,8 @@ export function MindmapEditorView({
         -blockHeight / 2 + line * data.lineHeight + data.lineHeight / 2;
     }
 
-    const screenX = (activeNode.x + NODE_PADDING + cursorX) * scale + stage.x();
+    const screenX =
+      (activeNode.x + nodeTextOffsetX(activeNode) + cursorX) * scale + stage.x();
     // Object cards edit their title at the top of the card box.
     const textCenterY = activeNode.y + (activeNode.card?.titleOffsetY ?? 0);
     const screenY = (textCenterY + lineCenterOffset) * scale + stage.y();
@@ -2273,7 +2355,9 @@ export function MindmapEditorView({
       // measurement knows nothing about (a link's favicon column, an image's
       // scaled size). An empty node paints the italic "empty" placeholder,
       // which is wider than the nothing it measured.
-      const measured = isTextEditingThis ? lineDataWidth(data) : node.width;
+      const measured = isTextEditingThis
+        ? lineDataWidth(data) + checkboxOffset(node)
+        : node.width;
       textWidths.set(
         node.id,
         displayRaw === "" ? Math.max(measured, measureEmptyWidth()) : measured
@@ -2373,7 +2457,13 @@ export function MindmapEditorView({
         asLink && node.favicon ? getImageEntry(node.favicon) : undefined;
       const favLoaded =
         favEntry?.status === "loaded" ? favEntry.img : undefined;
-      const favOffset = asLink && node.favicon ? FAVICON_SIZE + FAVICON_GAP : 0;
+      // Task checkbox: its own column ahead of the favicon/text (0 wide when
+      // the node isn't a task), and a done task reads as struck through.
+      const checkOffset = checkboxOffset(node);
+      const isDone = node.checked === true;
+      // Where the text column starts — padding plus the checkbox and favicon
+      // columns, from the same helper the caret and hit tests use.
+      const textX = node.x + nodeTextOffsetX(node);
 
       // Box geometry from a single measured size. While text-editing it follows
       // the caret's own line measurement (so the caret can't overflow the box);
@@ -2728,12 +2818,73 @@ export function MindmapEditorView({
           })
         );
       } else {
+        // Task checkbox, then the favicon, then the text — one column each.
+        if (checkOffset > 0) {
+          // Aligned with the FIRST line, not the box centre, so a wrapped task
+          // keeps its box beside the line the text starts on.
+          const boxY =
+            node.y - blockHeight / 2 + 2 + lineHeightPx / 2 - CHECKBOX_SIZE / 2;
+          const boxX = node.x + nodePadding;
+          const cbox = new Konva.Rect({
+            x: boxX,
+            y: boxY,
+            width: CHECKBOX_SIZE,
+            height: CHECKBOX_SIZE,
+            cornerRadius: 4,
+            fill: isDone ? "#10b981" : "#ffffff",
+            stroke: isDone ? "#10b981" : "#94a3b8",
+            strokeWidth: 1.5,
+          });
+          if (!readOnly) {
+            cbox.on("mousedown touchstart", (e: any) => {
+              if (isNonPrimaryButton(e)) return;
+              // The node under the box must not also take the press: hitting
+              // the checkbox is a toggle, never a select-or-edit.
+              e.cancelBubble = true;
+              // Read the state from the MODEL, not from the frame this shape
+              // was drawn for: a second click that arrives before the redraw
+              // would otherwise re-send the state the node already has.
+              const live = findNode(modelRef.current, node.id);
+              setNodeCheckedRef.current(node.id, live?.checked !== true);
+            });
+            cbox.on("mouseenter", () => {
+              const st = konvaStageRef.current;
+              if (st) st.container().style.cursor = "pointer";
+            });
+            cbox.on("mouseleave", () => {
+              const st = konvaStageRef.current;
+              if (st) st.container().style.cursor = "";
+            });
+          } else {
+            cbox.listening(false);
+          }
+          group.add(cbox);
+          if (isDone) {
+            group.add(
+              new Konva.Line({
+                points: [
+                  boxX + 3.5,
+                  boxY + 7.5,
+                  boxX + 6,
+                  boxY + 10,
+                  boxX + 10.5,
+                  boxY + 4,
+                ],
+                stroke: "#ffffff",
+                strokeWidth: 2,
+                lineCap: "round",
+                lineJoin: "round",
+                listening: false,
+              })
+            );
+          }
+        }
         // Favicon before the link title (when fetched + loaded).
         if (asLink && favLoaded) {
           group.add(
             new Konva.Image({
               image: favLoaded,
-              x: node.x + nodePadding,
+              x: node.x + nodePadding + checkOffset,
               y: node.y - FAVICON_SIZE / 2,
               width: FAVICON_SIZE,
               height: FAVICON_SIZE,
@@ -2742,23 +2893,29 @@ export function MindmapEditorView({
           );
         }
         const textNode = new Konva.Text({
-          x: node.x + nodePadding + favOffset,
+          x: textX,
           y: node.y - blockHeight / 2 + 2,
           text: drawnText,
           fontSize,
           fontFamily: "sans-serif",
           lineHeight: konvaLineHeight,
-          fill: asLink
-            ? "#2563eb"
-            : isRoot
-              ? "#ffffff"
-              : asMarkdown
-                ? "#6b21a8"
-                : isEmpty
-                  ? "#94a3b8"
-                  : "#0f172a",
+          // A completed task fades and is struck through — the node is still
+          // there to read, just visibly finished.
+          fill: isDone
+            ? "#94a3b8"
+            : asLink
+              ? "#2563eb"
+              : isRoot
+                ? "#ffffff"
+                : asMarkdown
+                  ? "#6b21a8"
+                  : isEmpty
+                    ? "#94a3b8"
+                    : "#0f172a",
           fontStyle: isEmpty ? "italic" : bold ? "bold" : "normal",
-          textDecoration: asLink ? "underline" : "",
+          textDecoration: [asLink ? "underline" : "", isDone ? "line-through" : ""]
+            .filter(Boolean)
+            .join(" "),
           listening: false,
         });
         group.add(textNode);
@@ -2816,7 +2973,7 @@ export function MindmapEditorView({
             0,
             Math.min(lineCount - 1, Math.floor(relY / data.lineHeight))
           );
-          const relX = worldX - node.x - nodePadding;
+          const relX = worldX - node.x - nodeTextOffsetX(node);
           charIdx = lineColToPos(
             data,
             line,
@@ -3112,7 +3269,7 @@ export function MindmapEditorView({
           const lineCenterY = textTop + li * lineHeight + lineHeight / 2;
           cursorLayer.add(
             new Konva.Rect({
-              x: activeNode.x + nodePadding + x1,
+              x: activeNode.x + nodeTextOffsetX(activeNode) + x1,
               y: lineCenterY - caretHalf,
               width: x2 - x1,
               height: caretHalf * 2,
@@ -3131,7 +3288,9 @@ export function MindmapEditorView({
           ? posToLineCol(data, cursorPos)
           : { line: 0, col: 0 };
         const cursorX =
-          activeNode.x + nodePadding + (data?.lineOffsets[line]?.[col] || 0);
+          activeNode.x +
+          nodeTextOffsetX(activeNode) +
+          (data?.lineOffsets[line]?.[col] || 0);
         const lineCenterY = textTop + line * lineHeight + lineHeight / 2;
         cursorLayer.add(
           new Konva.Line({
@@ -3367,7 +3526,7 @@ export function MindmapEditorView({
         const scale = stage.scaleX();
         const data = lineDataRef.current.get(id);
         const textW = data ? lineDataWidth(data) || 40 : 40;
-        const worldX = node.x + NODE_PADDING + textW / 2;
+        const worldX = node.x + nodeTextOffsetX(node) + textW / 2;
         // A card's clickable text (its title) sits at the top of the box.
         const worldY = node.y + (node.card?.titleOffsetY ?? 0);
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
@@ -3383,6 +3542,18 @@ export function MindmapEditorView({
         const rectW = nodeBoxWidth(node.width, isRoot);
         const worldX = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
         const worldY = node.y;
+        return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
+      },
+      getCheckboxPoint: (id: string) => {
+        const node = nodesRef.current.find((n) => n.id === id);
+        const stage = konvaStageRef.current;
+        if (!node || !stage || checkboxOffset(node) === 0) return null;
+        const scale = stage.scaleX();
+        const data = lineDataRef.current.get(id);
+        const lineHeight = data?.lineHeight ?? LINE_HEIGHT;
+        const blockHeight = (data?.lines.length ?? 1) * lineHeight;
+        const worldX = node.x + NODE_PADDING + CHECKBOX_SIZE / 2;
+        const worldY = node.y - blockHeight / 2 + 2 + lineHeight / 2;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
       getNodeRect: (id: string) => {
@@ -3434,6 +3605,7 @@ export function MindmapEditorView({
               height: tx.height(),
               fontSize: tx.fontSize(),
               fontStyle: tx.fontStyle(),
+              textDecoration: tx.textDecoration(),
               fill: String(tx.fill()),
             };
           });
@@ -3446,7 +3618,18 @@ export function MindmapEditorView({
             width: s.width(),
             height: s.height(),
           }));
-        return { box, texts, images };
+        const rects = layer
+          .find("Rect")
+          .filter(inside)
+          .map((s: any) => ({
+            x: s.x(),
+            y: s.y(),
+            width: s.width(),
+            height: s.height(),
+            fill: String(s.fill() ?? ""),
+            stroke: String(s.stroke() ?? ""),
+          }));
+        return { box, texts, images, rects };
       },
       getRedrawStats: () => ({ ...perfRef.current }),
       resetRedrawStats: () => {

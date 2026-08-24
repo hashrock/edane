@@ -11,6 +11,7 @@ import { findNode, cloneWithNewIds } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
 import { textToModel } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
+import { supportsCheckbox } from "../application/nodeUtils";
 import {
   buildKeymap,
   runKeymap,
@@ -401,6 +402,10 @@ export default function OutlineEditor({
               // URL in an inline box below (instead of raw-text editing).
               const showUrlEditor = isEditingThis && isCustom;
               const isEmpty = node.text === "";
+              // Task checkbox — the same flag the canvas draws beside a node.
+              const isTask =
+                node.checked !== undefined && supportsCheckbox(type);
+              const isDone = node.checked === true;
               const displayText = isEditingThis ? editingText : node.text;
 
               return (
@@ -447,6 +452,38 @@ export default function OutlineEditor({
                       )}
                     </button>
 
+                    {/* Task checkbox. `tabIndex={-1}` deliberately: it is a
+                        pointer affordance only, so the keyboard never lands in
+                        it and the keyboard-escape invariant (see CLAUDE.md)
+                        stays a question about text fields alone. The keyboard
+                        route is ⌘/Ctrl+Shift+D. */}
+                    {isTask && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        disabled={readOnly}
+                        aria-label={
+                          isDone ? t("outlineTaskOpen") : t("outlineTaskDone")
+                        }
+                        aria-pressed={isDone}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          withSave("check", {
+                            type: "setChecked",
+                            nodeId: node.id,
+                            checked: !isDone,
+                          });
+                        }}
+                        className={`mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] leading-none ${
+                          isDone
+                            ? "border-emerald-500 bg-emerald-500 text-white"
+                            : "border-slate-400 bg-white text-transparent"
+                        }`}
+                      >
+                        ✓
+                      </button>
+                    )}
+
                     {/* Content */}
                     {/* The row text already wraps at the viewport on a phone;
                         ROW_CONTENT_STYLE's cap is what stops a long item from
@@ -478,11 +515,13 @@ export default function OutlineEditor({
                             // overlay while editing; custom nodes keep the preview.
                             isEditingThis && !isCustom ? "opacity-0" : ""
                           } ${
-                            type === "link"
-                              ? "text-blue-600 underline"
-                              : isEmpty
-                                ? "italic text-slate-400"
-                                : "text-slate-900"
+                            isDone
+                              ? "text-slate-400 line-through"
+                              : type === "link"
+                                ? "text-blue-600 underline"
+                                : isEmpty
+                                  ? "italic text-slate-400"
+                                  : "text-slate-900"
                           }`}
                           style={rowFontStyle(node)}
                         >

@@ -295,6 +295,28 @@ describe("parseContent", () => {
     expect(c.favicon).toBe("https://example.com/f.ico");
   });
 
+  it("keeps a task checkbox in either state, and only for booleans", () => {
+    // `false` is the OPEN task, not "no checkbox" — a truthiness guard here
+    // would quietly turn every open task into a plain node on reload.
+    const json = JSON.stringify({
+      id: "r",
+      text: "Root",
+      children: [
+        { id: "open", text: "o", checked: false, children: [] },
+        { id: "done", text: "d", checked: true, children: [] },
+        { id: "plain", text: "p", children: [] },
+        { id: "junk", text: "j", checked: "yes", children: [] },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    expect(model.children.map((c) => c.checked)).toEqual([
+      false,
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("preserves every declared NodeType through normalization", () => {
     // Guards the round-trip invariant that OPTIONAL_NODE_TYPES protects at
     // the type level: every non-default NodeType must survive normalizeTree

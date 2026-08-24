@@ -136,3 +136,46 @@ describe("modelToMarkdown", () => {
     ]);
   });
 });
+
+describe("task lists", () => {
+  it("writes a node's checkbox as a GFM list marker", () => {
+    const tree: MindMapModel = {
+      id: "r",
+      text: "Shopping",
+      checked: false,
+      children: [
+        { id: "a", text: "Milk", checked: true, children: [] },
+        { id: "b", text: "Bread", checked: false, children: [] },
+        { id: "c", text: "Note", children: [] },
+      ],
+    };
+    expect(modelToMarkdown(tree)).toBe(
+      ["- [ ] Shopping", "  - [x] Milk", "  - [ ] Bread", "  - Note"].join("\n")
+    );
+  });
+
+  it("reads GFM task items back as checkboxes, not as literal text", () => {
+    const back = markdownToModel("- [ ] Bread\n- [X] Milk\n- Note");
+    expect(back.children.map((c) => c.text)).toEqual(["Bread", "Milk", "Note"]);
+    expect(back.children.map((c) => c.checked)).toEqual([false, true, undefined]);
+  });
+
+  it("round-trips task state through Markdown", () => {
+    const tree: MindMapModel = {
+      id: "r",
+      text: "T",
+      children: [
+        { id: "a", text: "done", checked: true, children: [] },
+        { id: "b", text: "open", checked: false, children: [] },
+      ],
+    };
+    const back = markdownToModel(modelToMarkdown(tree));
+    expect(back.children[0].children.map((c) => c.checked)).toEqual([true, false]);
+  });
+
+  it("leaves a bracket that isn't a task marker as text", () => {
+    const back = markdownToModel("- [WIP] refactor\n- [] tight");
+    expect(back.children.map((c) => c.text)).toEqual(["[WIP] refactor", "[] tight"]);
+    expect(back.children.every((c) => c.checked === undefined)).toBe(true);
+  });
+});

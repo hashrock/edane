@@ -42,6 +42,7 @@ import {
   addChildToNode,
   setNodeType,
   setNodeStyle,
+  setChecked,
   setLinkMeta,
   setNumFormat,
   moveNodeUp,
@@ -110,6 +111,7 @@ export type UndoType =
   | "move-branch"
   | "paste"
   | "link-meta"
+  | "check"
   | "set-type";
 
 export type EditorAction =
@@ -214,6 +216,8 @@ export type EditorAction =
       linkTitle?: string;
       favicon?: string | null;
     }
+  // Task checkbox; `null` removes it (the node stops being a task).
+  | { type: "setChecked"; nodeId: string; checked: boolean | null }
   // Object-card field rows: numeric display format (null clears the field).
   | {
       type: "setNumFormat";
@@ -581,6 +585,13 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
+    case "setChecked": {
+      const node = findNode(document.model, action.nodeId);
+      if (!node) return { document };
+      const newModel = setChecked(document.model, action.nodeId, action.checked);
+      return { document: { ...document, model: newModel } };
+    }
+
     case "setNumFormat": {
       const node = findNode(document.model, action.nodeId);
       if (!node) return { document };
@@ -749,6 +760,7 @@ function viewReducer(
     case "tab":
     case "setNodeStyle":
     case "setLinkMeta":
+    case "setChecked":
     case "setNumFormat":
     case "copyBranch":
       return view;

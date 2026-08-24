@@ -36,6 +36,54 @@ export const MD_CARD_BADGE = 34;
 export const MD_TITLE_MAX_W =
   NODE_MAX_CONTENT_WIDTH - MD_CARD_LEAD - MD_CARD_BADGE;
 
+/** Rendered task-checkbox size (px) + gap before the node's content. */
+export const CHECKBOX_SIZE = 14;
+export const CHECKBOX_GAP = 8;
+
+/**
+ * Which kinds can carry a task checkbox — the ONE place that decides it, read
+ * by the geometry below, both editors' rendering and every UI affordance that
+ * offers the toggle.
+ *
+ * Only the kinds that paint a line of text beside the box qualify. An image
+ * has no text line to sit next to; a markdown node is a compact card standing
+ * in for a whole document (its tasks are inside it, not on it); an object node
+ * is a card of `key: value` rows, and its rows are laid out by objectCardGeom,
+ * which sizes the key/value columns and knows nothing of a checkbox column.
+ *
+ * Exhaustive over `NodeType` (`assertNever`), so a new kind has to answer this
+ * question rather than silently inheriting an answer.
+ */
+export function supportsCheckbox(type: NodeType): boolean {
+  switch (type) {
+    case "text":
+    case "link":
+      return true;
+    case "image":
+    case "markdown":
+    case "object":
+      return false;
+    default:
+      return assertNever(type);
+  }
+}
+
+/**
+ * Width the checkbox takes out of a node's content column (0 when the node
+ * isn't a task, or is a kind that shows no box). Like {@link FAVICON_SIZE}'s
+ * column it is chrome drawn INSIDE the box, so the cap subtracts it and the
+ * measurement adds it back — text wrapped without it would overflow the node
+ * by exactly the checkbox.
+ */
+export function checkboxOffset(n: {
+  type?: NodeType;
+  checked?: boolean;
+}): number {
+  return n.checked !== undefined && supportsCheckbox(n.type ?? "text")
+    ? CHECKBOX_SIZE + CHECKBOX_GAP
+    : 0;
+}
+
 /**
  * Width cap for a node's own TEXT: the shared content cap minus whatever chrome
  * its kind draws alongside (a favicon column, the markdown card's glyph and
@@ -48,17 +96,18 @@ export const MD_TITLE_MAX_W =
  */
 export function nodeContentMaxWidth(m: MindMapModel): number {
   const type: NodeType = m.type ?? "text";
+  // The task checkbox is chrome on any kind that can have one, so it comes off
+  // the cap here once instead of in each branch below.
+  const cap = NODE_MAX_CONTENT_WIDTH - checkboxOffset(m);
   switch (type) {
     case "link":
-      return (
-        NODE_MAX_CONTENT_WIDTH - (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0)
-      );
+      return cap - (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0);
     case "markdown":
       return MD_TITLE_MAX_W;
     case "image":
     case "text":
     case "object":
-      return NODE_MAX_CONTENT_WIDTH;
+      return cap;
     default:
       return assertNever(type);
   }
@@ -119,6 +168,8 @@ export interface MindMapNode {
   linkTitle?: string;
   /** Link nodes: favicon URL. */
   favicon?: string;
+  /** Task checkbox state (absent = not a task). See MindMapModel.checked. */
+  checked?: boolean;
   /** Expanded object node: card offsets (relative to the box CENTRE y). */
   card?: { titleOffsetY: number; sepOffsetY: number; keyColW: number };
   /** Field row rendered inside an object card (positioned after tree layout). */
@@ -144,6 +195,29 @@ export interface MindMapNode {
 /** Rendered favicon size (px) + gap before the link title. */
 export const FAVICON_SIZE = 16;
 export const FAVICON_GAP = 6;
+
+/**
+ * X offset from a node's box LEFT EDGE to where its text line starts: the box
+ * padding plus every chrome column drawn ahead of the text (the task checkbox,
+ * a link's favicon).
+ *
+ * Every path that positions text against the box goes through here — the
+ * canvas draw, the caret and selection overlay, the click→caret mapping and
+ * drag-select — so a new chrome column can't shift the painted text while
+ * leaving the caret behind it.
+ */
+export function nodeTextOffsetX(n: {
+  type?: NodeType;
+  checked?: boolean;
+  favicon?: string;
+}): number {
+  const isLink = (n.type ?? "text") === "link";
+  return (
+    NODE_PADDING +
+    checkboxOffset(n) +
+    (isLink && n.favicon ? FAVICON_SIZE + FAVICON_GAP : 0)
+  );
+}
 
 /**
  * A markdown node holds a whole document in `text`; render only a bounded
@@ -211,7 +285,7 @@ export function measureModelNode(
       bold: m.bold,
       maxWidth: nodeContentMaxWidth(m),
     });
-    return { width: box.width, height: box.height };
+    return { width: box.width + checkboxOffset(m), height: box.height };
   }
   const type: NodeType = m.type ?? "text";
   switch (type) {
@@ -226,7 +300,10 @@ export function measureModelNode(
         maxWidth: nodeContentMaxWidth(m),
       });
       return {
-        width: box.width + (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
+        width:
+          box.width +
+          checkboxOffset(m) +
+          (m.favicon ? FAVICON_SIZE + FAVICON_GAP : 0),
         height: box.height,
       };
     }
@@ -253,7 +330,7 @@ export function measureModelNode(
         bold: m.bold,
         maxWidth: nodeContentMaxWidth(m),
       });
-      return { width: box.width, height: box.height };
+      return { width: box.width + checkboxOffset(m), height: box.height };
     }
     default:
       return assertNever(type);
@@ -373,6 +450,7 @@ export function flattenToNodes(
       bold: m.bold,
       linkTitle: m.linkTitle,
       favicon: m.favicon,
+      checked: m.checked,
     });
     if (vis.kind === "none") return;
     for (const child of vis.children) walk(child);

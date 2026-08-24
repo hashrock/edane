@@ -86,6 +86,7 @@ export function normalizeTree(
   if (v.bold === true) node.bold = true;
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
+  if (typeof v.checked === "boolean") node.checked = v.checked;
   if (isNumFormat(v.numFormat)) node.numFormat = v.numFormat;
   if (
     typeof v.decimals === "number" &&

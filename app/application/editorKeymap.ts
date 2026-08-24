@@ -28,7 +28,8 @@
 import type { EditorAction, EditorState, UndoType } from "./editorReducer";
 import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
-import { findNode, findParentAndIndex } from "../domain/model";
+import { findNode, findParentAndIndex, nextCheckedState } from "../domain/model";
+import { supportsCheckbox } from "./nodeUtils";
 import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
@@ -573,6 +574,28 @@ export function buildKeymap(
         const next = deps.dispatch(
           { type: "setNodeStyle", nodeId: n.id, bold: !n.bold },
           "style"
+        );
+        if (next !== ctx.state) deps.saveNote(next.document.model);
+        return "handled";
+      },
+    },
+
+    {
+      id: "toggle-task",
+      label: "kmToggleTask",
+      keys: "⌘/Ctrl + Shift + D",
+      when: "both",
+      // "D" for done. NOT the ⌘/Ctrl+Enter chord most task apps use: the two
+      // Enter forms above are a preference-swapped PAIR, and both deliberately
+      // ignore Shift (see editorKeymap.test.ts), so every Enter combination is
+      // already spoken for by one half or the other.
+      match: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "d",
+      run: (ctx) => {
+        const n = ctx.node;
+        if (!n || !supportsCheckbox(n.type ?? "text")) return "handled";
+        const next = deps.dispatch(
+          { type: "setChecked", nodeId: n.id, checked: nextCheckedState(n.checked) },
+          "check"
         );
         if (next !== ctx.state) deps.saveNote(next.document.model);
         return "handled";
