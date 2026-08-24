@@ -54,6 +54,10 @@ const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));
 const NO_UI_FRAMEWORK_LAYERS = new Set(["domain", "lib", "application"]);
 const UI_FRAMEWORK_SPECIFIERS = /^(react|react-dom)(\/|$)/;
 
+// Test/bench files are scanned too, under the same rules as their layer's
+// production code. A domain or lib test that reaches into application (or
+// pulls in react) is the same reverse coupling this file exists to catch —
+// excluding *.test.ts would leave that path unguarded.
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -63,7 +67,6 @@ function listSourceFiles(dir: string): string[] {
       continue;
     }
     if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-    if (/\.(test|bench)\.(ts|tsx)$/.test(entry.name)) continue;
     out.push(full);
   }
   return out;
