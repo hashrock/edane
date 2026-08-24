@@ -1,6 +1,8 @@
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { GlobeIcon, LinkIcon, LockIcon } from "./icons";
-import { PRIVATE_NOTE_COPY_REASON } from "../application/publicNoteLink";
+import { privateNoteCopyReason } from "../application/publicNoteLink";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   isPublic: boolean;
@@ -9,15 +11,16 @@ interface Props {
   /**
    * 「リンクをコピー」を押したときのハンドラ。未指定なら項目自体を出さない
    * （共有できるURLが無い＝未保存ノート/ゲスト）。指定した場合、非公開の間は
-   * 無効化して理由を見せる（{@link PRIVATE_NOTE_COPY_REASON}）。
+   * 無効化して理由を見せる（{@link privateNoteCopyReason}）。
    */
   onCopyLink?: () => void;
 }
 
-const OPTIONS: { value: boolean; label: string; icon: React.ReactNode }[] = [
-  { value: false, label: "非公開", icon: <LockIcon width="15" height="15" /> },
-  { value: true, label: "公開", icon: <GlobeIcon width="15" height="15" /> },
-];
+// label はカタログキー（描画時に t() で解決 — 言語切り替えに追従する）。
+const OPTIONS = [
+  { value: false, label: "privateLabel", icon: <LockIcon width="15" height="15" /> },
+  { value: true, label: "publicLabel", icon: <GlobeIcon width="15" height="15" /> },
+] as const;
 
 /**
  * Publicity selector rendered as a dropdown (replaces the old "公開する"
@@ -33,6 +36,7 @@ export default function PublicityDropdown({
   onChange,
   onCopyLink,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const menu = useAnchoredPopover("down");
 
   return (
@@ -51,7 +55,7 @@ export default function PublicityDropdown({
             <LockIcon width="15" height="15" />
           )}
         </span>
-        {isPublic ? "公開" : "非公開"}
+        {isPublic ? t("publicLabel") : t("privateLabel")}
         <span
           className={`text-xs text-slate-500 transition-transform ${
             menu.open ? "rotate-180" : ""
@@ -79,7 +83,7 @@ export default function PublicityDropdown({
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100"
           >
             <span className="text-slate-500">{opt.icon}</span>
-            <span className="flex-1">{opt.label}</span>
+            <span className="flex-1">{t(opt.label)}</span>
             {opt.value === isPublic && <span className="text-slate-900">✓</span>}
           </button>
         ))}
@@ -100,10 +104,10 @@ export default function PublicityDropdown({
                 <LinkIcon width="15" height="15" />
               </span>
               <span className="flex-1">
-                リンクをコピー
+                {t("copyLinkLabel")}
                 {!isPublic && (
                   <span className="mt-0.5 block text-[11px] text-slate-400">
-                    {PRIVATE_NOTE_COPY_REASON}
+                    {privateNoteCopyReason()}
                   </span>
                 )}
               </span>

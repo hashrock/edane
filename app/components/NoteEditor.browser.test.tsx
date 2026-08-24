@@ -67,14 +67,14 @@ describe("NoteEditor header view controls", () => {
       document.querySelector('[data-testid="view-zoom-percent"]')!.textContent;
     expect(percent()).toBe("100%");
 
-    await page.getByLabelText("ズームイン").click();
+    await page.getByLabelText("Zoom in").click();
     await waitFor(() => percent() === "120%");
-    await page.getByLabelText("ズームアウト").click();
+    await page.getByLabelText("Zoom out").click();
     await waitFor(() => percent() === "100%");
 
     // Reset: zoom out twice, then click the percentage to snap back to 100%.
-    await page.getByLabelText("ズームアウト").click();
-    await page.getByLabelText("ズームアウト").click();
+    await page.getByLabelText("Zoom out").click();
+    await page.getByLabelText("Zoom out").click();
     await waitFor(() => percent() !== "100%");
     await page.getByTestId("view-zoom-percent").click();
     await waitFor(() => percent() === "100%");

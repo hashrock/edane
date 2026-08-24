@@ -1,5 +1,8 @@
 import { useEffect } from "react";
 import type { KeyBinding } from "../application/editorKeymap";
+import { t } from "../application/i18n";
+import type { MessageKey } from "../application/messages";
+import { useLocale } from "./useLocale";
 
 interface Props {
   bindings: KeyBinding[];
@@ -7,11 +10,11 @@ interface Props {
   onClose: () => void;
 }
 
-const GROUPS: { when: KeyBinding["when"]; title: string }[] = [
-  { when: "global", title: "共通" },
-  { when: "both", title: "ノード操作" },
-  { when: "selection", title: "ノード選択中" },
-  { when: "editing", title: "テキスト編集中" },
+const GROUPS: { when: KeyBinding["when"]; title: MessageKey }[] = [
+  { when: "global", title: "helpGroupGlobal" },
+  { when: "both", title: "helpGroupNode" },
+  { when: "selection", title: "helpGroupSelection" },
+  { when: "editing", title: "helpGroupEditing" },
 ];
 
 /**
@@ -20,6 +23,7 @@ const GROUPS: { when: KeyBinding["when"]; title: string }[] = [
  * keys) are hidden.
  */
 export default function ShortcutHelp({ bindings, open, onClose }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,13 +45,11 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="text-sm font-bold text-slate-800">
-            キーボードショートカット
-          </h2>
+          <h2 className="text-sm font-bold text-slate-800">{t("helpTitle")}</h2>
           <button
             onClick={onClose}
             className="rounded px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            aria-label="閉じる"
+            aria-label={t("close")}
           >
             ✕
           </button>
@@ -61,7 +63,7 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
             return (
               <div key={group.when} className="mb-4 last:mb-1">
                 <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  {group.title}
+                  {t(group.title)}
                 </h3>
                 <ul>
                   {rows.map((b) => (
@@ -69,7 +71,9 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
                       key={b.id}
                       className="flex items-center justify-between gap-4 py-1 text-sm"
                     >
-                      <span className="text-slate-700">{b.label}</span>
+                      <span className="text-slate-700">
+                        {b.label === "" ? "" : t(b.label)}
+                      </span>
                       <kbd className="whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-600">
                         {b.keys}
                       </kbd>

@@ -29,6 +29,8 @@ import ViewControls from "./ViewControls";
 import { TrashIcon } from "./icons";
 import type { NoteEditorEngine } from "./useNoteEditor";
 import { useTextInputHandlers } from "./useTextInputHandlers";
+import { t } from "../application/i18n";
+import { useLocale } from "./useLocale";
 
 interface Props {
   engine: NoteEditorEngine;
@@ -71,6 +73,7 @@ export default function OutlineEditor({
   layout,
   onLayoutChange,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const {
     state,
     stateRef,
@@ -269,7 +272,7 @@ export default function OutlineEditor({
   // 静的表示（readOnly）と編集ボタンの中身で共用するタイトル。
   const titleSpan = (
     <span className="truncate text-sm font-semibold tracking-tight">
-      {title || "無題"}
+      {title || t("untitled")}
     </span>
   );
 
@@ -281,10 +284,10 @@ export default function OutlineEditor({
       <ConfirmDialog
         open={leaveConfirm !== null}
         variant="danger"
-        title="保存に失敗しました"
-        message="未保存の変更があります。このまま移動すると変更が失われる可能性があります。移動しますか？"
-        confirmLabel="移動する"
-        cancelLabel="とどまる"
+        title={t("saveFailedTitle")}
+        message={t("leaveMessage")}
+        confirmLabel={t("leaveConfirm")}
+        cancelLabel={t("leaveCancel")}
         onConfirm={() => {
           const target = leaveConfirm;
           setLeaveConfirm(null);
@@ -300,8 +303,8 @@ export default function OutlineEditor({
         {!embed && (
           <Link
             href="/notes"
-            aria-label="一覧へ戻る"
-            title="一覧へ戻る"
+            aria-label={t("backToList")}
+            title={t("backToList")}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
           >
             <svg
@@ -336,7 +339,7 @@ export default function OutlineEditor({
               if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
             }}
             className="h-8 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            placeholder="タイトル"
+            placeholder={t("titlePlaceholder")}
           />
         ) : (
           <button
@@ -380,7 +383,7 @@ export default function OutlineEditor({
             }
             className="shrink-0 whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
           >
-            保存
+            {t("saveButton")}
           </button>
         )}
       </header>
@@ -424,7 +427,11 @@ export default function OutlineEditor({
                         isActive ? "text-slate-900" : "text-slate-400"
                       }`}
                       aria-label={
-                        hasChildren ? (collapsed ? "展開" : "折りたたむ") : "項目"
+                        hasChildren
+                          ? collapsed
+                            ? t("outlineExpand")
+                            : t("outlineCollapse")
+                          : t("outlineItem")
                       }
                     >
                       {hasChildren ? (
@@ -461,7 +468,7 @@ export default function OutlineEditor({
                           />
                         ) : (
                           <span className="block italic leading-6 text-slate-400">
-                            画像URL未設定
+                            {t("imageUrlUnset")}
                           </span>
                         )
                       ) : (
@@ -482,7 +489,7 @@ export default function OutlineEditor({
                           {type === "link"
                             ? node.linkTitle || node.text || "empty"
                             : isEmpty
-                              ? "空の項目"
+                              ? t("emptyItem")
                               : displayText}
                         </span>
                       )}
@@ -503,7 +510,7 @@ export default function OutlineEditor({
                           onChange={handleUrlChange}
                           onKeyDown={(e) => handleAuxInputKeys(e, dispatch)}
                           placeholder={
-                            type === "image" ? "画像のURL" : "リンクのURL"
+                            type === "image" ? t("imageUrlLabel") : t("linkUrlLabel")
                           }
                           className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                         />
@@ -532,7 +539,7 @@ export default function OutlineEditor({
             onClick={() => withSave("add-child", { type: "addChild", nodeId: model.id })}
             className="mx-auto mt-4 block rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50"
           >
-            ＋ 最初の項目を追加
+            {t("addFirstItem")}
           </button>
         )}
 
@@ -564,10 +571,10 @@ export default function OutlineEditor({
         <div className="flex shrink-0 items-stretch justify-around gap-1 border-t border-slate-200 bg-white px-1 py-1.5">
           {(
             [
-              { label: "⇤", title: "アウトデント", type: "tab" as const, shift: true },
-              { label: "⇥", title: "インデント", type: "tab" as const, shift: false },
-              { label: "↑", title: "上へ移動", type: "moveNodeUp" as const },
-              { label: "↓", title: "下へ移動", type: "moveNodeDown" as const },
+              { label: "⇤", title: t("kmOutdent"), type: "tab" as const, shift: true },
+              { label: "⇥", title: t("kmIndent"), type: "tab" as const, shift: false },
+              { label: "↑", title: t("moveUpTitle"), type: "moveNodeUp" as const },
+              { label: "↓", title: t("moveDownTitle"), type: "moveNodeDown" as const },
             ]
           ).map((b) => (
             <button
@@ -588,7 +595,7 @@ export default function OutlineEditor({
             </button>
           ))}
           <button
-            title="項目を追加"
+            title={t("addItem")}
             disabled={!activeNodeId}
             onClick={() => withSave("insert-sibling", { type: "insertSiblingAfter" })}
             className="flex-1 rounded-lg py-2 text-lg font-semibold text-emerald-700 disabled:text-slate-300 enabled:hover:bg-emerald-50 enabled:active:bg-emerald-100"
@@ -596,7 +603,7 @@ export default function OutlineEditor({
             ＋
           </button>
           <button
-            title="項目を削除"
+            title={t("deleteItem")}
             disabled={!bodyActive}
             onClick={() => {
               if (activeNodeId)

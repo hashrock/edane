@@ -17,6 +17,8 @@ export default defineConfig({
           include: ["app/**/*.test.ts"],
           benchmark: { include: ["app/**/*.bench.ts"] },
           environment: "node",
+          // UI言語を en に固定（実行マシンの言語で文言の期待値が揺れないように）
+          setupFiles: ["./vitest.setup.ts"],
         },
       },
       {
@@ -24,6 +26,8 @@ export default defineConfig({
         test: {
           name: "browser",
           include: ["app/**/*.browser.test.tsx"],
+          // UI言語を en に固定（実行マシンの言語で文言の期待値が揺れないように）
+          setupFiles: ["./vitest.setup.ts"],
           browser: {
             enabled: true,
             provider: playwright(),

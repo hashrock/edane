@@ -122,7 +122,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
         document.querySelectorAll<HTMLButtonElement>(
           '[data-testid="md-panel"] button'
         )
-      ).find((b) => b.textContent === "編集")
+      ).find((b) => b.textContent === "Edit")
     );
     editBtn.click();
 
@@ -174,7 +174,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
         document.querySelectorAll<HTMLButtonElement>(
           '[data-testid="md-panel"] button'
         )
-      ).find((b) => b.textContent === "編集")
+      ).find((b) => b.textContent === "Edit")
     );
     editBtn.click();
 
@@ -217,7 +217,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
       document.querySelectorAll<HTMLButtonElement>(
         '[data-testid="md-panel"] button'
       )
-    ).find((b) => b.textContent === "表示")!;
+    ).find((b) => b.textContent === "View")!;
     viewBtn.click();
     await waitFor(() => document.activeElement !== textarea);
     await userEvent.keyboard("[ArrowDown]");

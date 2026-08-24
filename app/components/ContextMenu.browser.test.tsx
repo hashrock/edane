@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import ContextMenu from "./ContextMenu";
-import { PRIVATE_NOTE_COPY_REASON } from "../application/publicNoteLink";
+import { privateNoteCopyReason } from "../application/publicNoteLink";
 
 /**
  * ノート一覧（app/pages/Notes/Index.tsx）の「リンクをコピー」は、非公開ノートでは
@@ -35,7 +35,7 @@ function renderMenu(disabled: boolean) {
         {
           label: "リンクをコピー",
           disabled,
-          disabledReason: PRIVATE_NOTE_COPY_REASON,
+          disabledReason: privateNoteCopyReason(),
           onSelect: () => picks().push("リンクをコピー"),
         },
       ]}
@@ -73,7 +73,7 @@ describe("ContextMenu disabled items (browser e2e)", () => {
     const item = await itemByLabel("リンクをコピー");
     expect(item).toBeTruthy();
     expect(item.disabled).toBe(true);
-    expect(item.textContent).toContain(PRIVATE_NOTE_COPY_REASON);
+    expect(item.textContent).toContain(privateNoteCopyReason());
   });
 
   it("does not run onSelect (nor close) when a disabled item is clicked", async () => {

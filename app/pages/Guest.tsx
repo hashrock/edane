@@ -1,4 +1,6 @@
 import { Head } from "@inertiajs/react";
+import { t } from "../application/i18n";
+import { useLocale } from "../components/useLocale";
 import NoteEditor from "../components/NoteEditor";
 import { stashPendingNote, type PendingNote } from "../application/guestNote";
 import type { SessionUser } from "../user";
@@ -10,6 +12,7 @@ export default function Guest({
   user: SessionUser | null;
   embed?: boolean;
 }) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   // Stash the current document, then break out of the iframe (window.top ===
   // self when not embedded) and send the visitor to login. After Google auth
   // they land on /notes, which imports the stashed note into a real one. When
@@ -22,7 +25,7 @@ export default function Guest({
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-950">
-      <Head title="ゲストエディタ" />
+      <Head title={t("guestEditorTitle")} />
       <NoteEditor embed={embed} onSaveToAccount={saveToAccount} />
     </div>
   );

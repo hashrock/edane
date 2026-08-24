@@ -13,6 +13,7 @@
 import type { MindMapModel, NodeType } from "../domain/model";
 import { generateId } from "../domain/model";
 import { assertNever } from "../lib/assertNever";
+import { t } from "./i18n";
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const UNORDERED = /^(\s*)[-*+]\s+(.*)$/;
@@ -111,7 +112,7 @@ export function markdownToModel(md: string): MindMapModel {
     const heading = line.match(HEADING);
     if (heading) {
       const level = heading[1].length; // 1..6
-      push(level - 1, stripInline(heading[2]) || "見出し");
+      push(level - 1, stripInline(heading[2]) || t("mdHeadingFallback"));
       contentDepth = level;
       continue;
     }

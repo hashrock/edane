@@ -5,6 +5,7 @@
 
 import type { MindMapModel } from "../domain/model";
 import { generateId, isNumFormat, isStoredNodeType } from "../domain/model";
+import { t } from "./i18n";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
 export function textToModel(title: string, content: string): MindMapModel {
@@ -153,32 +154,32 @@ export function createDefaultModel(title?: string): MindMapModel {
     children: [
       {
         id: generateId(),
-        text: "使い方",
+        text: t("sampleUsage"),
         children: [
           {
             id: generateId(),
-            text: "ノードをクリックして編集",
+            text: t("sampleClickToEdit"),
             children: [],
           },
           {
             id: generateId(),
-            text: "Enterで兄弟ノード追加",
+            text: t("sampleEnter"),
             children: [],
           },
-          { id: generateId(), text: "Tabでインデント", children: [] },
+          { id: generateId(), text: t("sampleTab"), children: [] },
         ],
       },
       {
         id: generateId(),
-        text: "特徴",
+        text: t("sampleFeatures"),
         children: [
           {
             id: generateId(),
-            text: "リアルタイムプレビュー",
+            text: t("sampleRealtime"),
             children: [],
           },
-          { id: generateId(), text: "JSONベース", children: [] },
-          { id: generateId(), text: "シンプル", children: [] },
+          { id: generateId(), text: t("sampleJson"), children: [] },
+          { id: generateId(), text: t("sampleSimple"), children: [] },
         ],
       },
     ],

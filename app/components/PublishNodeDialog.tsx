@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  PRIVATE_NOTE_PUBLISH_REASON,
-  publicationUrls,
-} from "../application/nodePublication";
+import { publicationUrls } from "../application/nodePublication";
+import { t } from "../application/i18n";
 import { copyText } from "../lib/clipboard";
+import { useLocale } from "./useLocale";
 
 interface Props {
   noteId: string;
@@ -34,6 +33,7 @@ export default function PublishNodeDialog({
   isPublic,
   onClose,
 }: Props) {
+  useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const [state, setState] = useState<State>(
     isPublic ? { kind: "loading" } : { kind: "private" }
   );
@@ -69,14 +69,14 @@ export default function PublishNodeDialog({
         if (!res.ok || !data.id) {
           setState({
             kind: "error",
-            message: data.error || "公開URLを発行できませんでした",
+            message: data.error || t("publishError"),
           });
           return;
         }
         setState({ kind: "ready", pubId: data.id });
       } catch {
         if (!cancelled)
-          setState({ kind: "error", message: "公開URLを発行できませんでした" });
+          setState({ kind: "error", message: t("publishError") });
       }
     })();
     return () => {
@@ -117,7 +117,7 @@ export default function PublishNodeDialog({
         }}
         className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
       >
-        {copied === format ? "コピーしました" : "コピー"}
+        {copied === format ? t("copied") : t("copy")}
       </button>
     </div>
   );
@@ -128,14 +128,14 @@ export default function PublishNodeDialog({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="ノードのWeb公開"
+      aria-label={t("publishDialogTitle")}
     >
       <div
         className="anim-modal w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-bold tracking-tight text-slate-950">
-          ノードのWeb公開
+          {t("publishDialogTitle")}
         </h2>
         <p className="mt-1 truncate text-sm text-slate-500" title={nodeText}>
           {nodeText}
@@ -143,13 +143,13 @@ export default function PublishNodeDialog({
 
         {state.kind === "private" && (
           <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
-            {PRIVATE_NOTE_PUBLISH_REASON}
-            （右上の公開メニューから切り替えられます）
+            {t("privateNotePublishReason")}
+            {t("publishToggleHint")}
           </p>
         )}
 
         {state.kind === "loading" && (
-          <p className="mt-4 text-sm text-slate-500">公開URLを発行中…</p>
+          <p className="mt-4 text-sm text-slate-500">{t("publishCreating")}</p>
         )}
 
         {state.kind === "error" && (
@@ -165,13 +165,11 @@ export default function PublishNodeDialog({
               {urlRow("Markdown", "md", urls.md)}
             </div>
             <p className="mt-3 text-xs leading-relaxed text-slate-500">
-              URLを知っている人は誰でもこの枝（ノードとその子孫）の最新内容を
-              取得できます。JSONはCORS対応（他サイトのスクリプトから直接fetch
-              可能）。公開中のURLの一覧は
+              {t("publishNoteBeforeLink")}
               <a href="/settings" className="text-emerald-700 underline">
-                設定ページ
+                {t("publishNoteLinkText")}
               </a>
-              で管理できます。
+              {t("publishNoteAfterLink")}
             </p>
           </>
         )}
@@ -183,7 +181,7 @@ export default function PublishNodeDialog({
               onClick={() => void revoke()}
               className="rounded-xl px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
             >
-              公開を解除
+              {t("publishRevoke")}
             </button>
           )}
           <button
@@ -191,7 +189,7 @@ export default function PublishNodeDialog({
             onClick={onClose}
             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
           >
-            閉じる
+            {t("close")}
           </button>
         </div>
       </div>

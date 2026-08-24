@@ -138,7 +138,7 @@ describe("read-only mindmap view (browser e2e)", () => {
 
   it("title is static text (no edit affordance) in the header", async () => {
     await setupCanvas();
-    expect(document.querySelector('button[title="タイトルを編集"]')).toBeNull();
+    expect(document.querySelector('button[title="Edit title"]')).toBeNull();
   });
 
   it("clicking a markdown node opens the panel in view-only mode", async () => {
@@ -152,7 +152,7 @@ describe("read-only mindmap view (browser e2e)", () => {
     const buttons = Array.from(panel.querySelectorAll("button")).map(
       (b) => b.textContent
     );
-    expect(buttons).not.toContain("編集");
+    expect(buttons).not.toContain("Edit");
     await waitFor(() =>
       panel.querySelector('[data-testid="md-panel-body"]')
     );
@@ -175,8 +175,8 @@ describe("read-only outline view (browser e2e)", () => {
     await waitFor(() => document.querySelector('[data-testid="outline-view"]'));
 
     // 下部の編集ツールバーが出ない。
-    expect(document.querySelector('button[title="項目を追加"]')).toBeNull();
-    expect(document.querySelector('button[title="インデント"]')).toBeNull();
+    expect(document.querySelector('button[title="Add item"]')).toBeNull();
+    expect(document.querySelector('button[title="Indent"]')).toBeNull();
 
     // 行をクリックしても編集用 textarea は現れない。
     const row = Array.from(document.querySelectorAll("span")).find(
@@ -192,12 +192,12 @@ describe("read-only outline view (browser e2e)", () => {
     await waitFor(() => document.querySelector('[data-testid="outline-view"]'));
 
     const toggle = await waitFor(() =>
-      document.querySelector('button[aria-label="折りたたむ"]')
+      document.querySelector('button[aria-label="Collapse"]')
     );
     await userEvent.click(toggle as Element);
     // 折りたたまれると子カウント "(1)" が表示され、ラベルが「展開」に変わる。
     await waitFor(() =>
-      document.querySelector('button[aria-label="展開"]')
+      document.querySelector('button[aria-label="Expand"]')
     );
   });
 });

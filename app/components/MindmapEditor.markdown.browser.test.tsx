@@ -83,7 +83,7 @@ async function settle() {
 }
 
 function dialogShown(): boolean {
-  return !!document.body.textContent?.includes("Markdownを検出しました");
+  return !!document.body.textContent?.includes("Markdown detected");
 }
 
 /** All node texts, depth-first. */
@@ -111,7 +111,7 @@ describe("MindmapEditor markdown paste", () => {
 
     pasteMarkdown("# Title\n- one\n- two");
     await waitFor(() =>
-      document.body.textContent?.includes("Markdownを検出しました")
+      document.body.textContent?.includes("Markdown detected")
     );
     // Model is untouched until a choice is made.
     expect(api().getModel().children.length).toBe(1);
@@ -127,7 +127,7 @@ describe("MindmapEditor markdown paste", () => {
     pasteMarkdown("# Doc\n- a\n- b");
     const btn = await waitFor(() =>
       [...document.querySelectorAll("button")].find((b) =>
-        b.textContent?.includes("Markdownノードとしてペースト")
+        b.textContent?.includes("Paste as a Markdown node")
       )
     );
     btn.click();
@@ -149,7 +149,7 @@ describe("MindmapEditor markdown paste", () => {
     pasteMarkdown("# Heading\n- one\n- two");
     const btn = await waitFor(() =>
       [...document.querySelectorAll("button")].find((b) =>
-        b.textContent?.includes("分解してペースト")
+        b.textContent?.includes("Decompose and paste")
       )
     );
     btn.click();
@@ -173,7 +173,7 @@ describe("MindmapEditor markdown paste", () => {
     pasteMarkdown("# Heading\n- one\n- two");
     const btn = await waitFor(() =>
       [...document.querySelectorAll("button")].find((b) =>
-        b.textContent?.includes("分解してペースト")
+        b.textContent?.includes("Decompose and paste")
       )
     );
     btn.click();

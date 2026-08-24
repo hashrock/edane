@@ -120,7 +120,7 @@ describe("node web publication (browser e2e)", () => {
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     rightClickNode("a");
-    const item = await waitFor(() => menuItem("Web公開"));
+    const item = await waitFor(() => menuItem("Publish to web"));
     item.click();
 
     // ダイアログが発行APIを叩き、返ってきたIDでJSON/Markdown両URLを出す
@@ -139,7 +139,7 @@ describe("node web publication (browser e2e)", () => {
     expect(post?.body).toEqual({ nodeId: "a" });
 
     // 公開を解除 → DELETE が飛んでダイアログが閉じる
-    const revoke = await waitFor(() => menuItem("公開を解除"));
+    const revoke = await waitFor(() => menuItem("Unpublish"));
     revoke.click();
     await waitFor(() =>
       requests.some(
@@ -163,11 +163,11 @@ describe("node web publication (browser e2e)", () => {
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     rightClickNode("a");
-    const item = await waitFor(() => menuItem("Web公開"));
+    const item = await waitFor(() => menuItem("Publish to web"));
     item.click();
 
     await waitFor(() =>
-      document.body.textContent?.includes("非公開ノートのノードは公開できません")
+      document.body.textContent?.includes("Nodes of a private note can't be published")
     );
     expect(document.querySelector('[data-testid="pub-url-json"]')).toBeNull();
     expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
@@ -181,7 +181,7 @@ describe("node web publication (browser e2e)", () => {
 
     rightClickNode("a");
     // メニュー自体は開く（枝をテキストコピーはある）が、公開項目は無い
-    await waitFor(() => menuItem("枝をテキストコピー"));
-    expect(menuItem("Web公開")).toBeNull();
+    await waitFor(() => menuItem("Copy branch as text"));
+    expect(menuItem("Publish to web")).toBeNull();
   });
 });

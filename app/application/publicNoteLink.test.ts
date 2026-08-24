@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  COPY_LINK_FAILURE,
-  COPY_LINK_SUCCESS,
-  PRIVATE_NOTE_COPY_REASON,
+  copyLinkFailure,
+  copyLinkSuccess,
+  privateNoteCopyReason,
   publicNoteUrl,
 } from "./publicNoteLink";
+import { MESSAGES_JA, MESSAGES_EN } from "./messages";
 
 describe("publicNoteUrl", () => {
   it("builds the absolute viewing URL of a note", () => {
@@ -46,8 +47,21 @@ describe("publicNoteUrl", () => {
 describe("copy-link wording", () => {
   // UIの分岐（無効化の理由 / 成功 / 失敗）が同じ文字列にならないことだけ確認する。
   it("keeps the three user-facing strings distinct and non-empty", () => {
-    const all = [PRIVATE_NOTE_COPY_REASON, COPY_LINK_SUCCESS, COPY_LINK_FAILURE];
+    const all = [privateNoteCopyReason(), copyLinkSuccess(), copyLinkFailure()];
     expect(all.every((s) => s.length > 0)).toBe(true);
     expect(new Set(all).size).toBe(3);
+  });
+
+  // 文言はカタログ経由になったので、両言語で同じ不変条件を確認する。
+  it("keeps the strings distinct in every locale catalog", () => {
+    for (const catalog of [MESSAGES_JA, MESSAGES_EN]) {
+      const all = [
+        catalog.privateNoteCopyReason,
+        catalog.copyLinkSuccess,
+        catalog.copyLinkFailure,
+      ];
+      expect(all.every((s) => s.length > 0)).toBe(true);
+      expect(new Set(all).size).toBe(3);
+    }
   });
 });
