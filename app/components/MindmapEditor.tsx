@@ -55,6 +55,7 @@ import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCa
 import {
   flattenToNodes,
   layoutObjectRows,
+  nodeDisplayText,
   FAVICON_SIZE,
   FAVICON_GAP,
   NODE_PADDING,
@@ -257,6 +258,32 @@ function countDescendants(model: MindMapModel, nodeId: string): number {
   return count;
 }
 
+/** One shape a node painted, as {@link MindmapTestApi.getNodeRender} reports it. */
+export interface RenderedText {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontStyle: string;
+  fill: string;
+}
+
+export interface RenderedImage {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NodeRender {
+  /** The node's box in world px (x/y = top-left). */
+  box: { x: number; y: number; width: number; height: number };
+  texts: RenderedText[];
+  images: RenderedImage[];
+}
+
 /** Imperative hooks exposed on `window` in non-production builds for e2e tests. */
 export interface RedrawStats {
   redrawCount: number;
@@ -288,6 +315,14 @@ export interface MindmapTestApi {
   getNodeRect: (
     id: string
   ) => { x: number; y: number; width: number; height: number } | null;
+  /**
+   * What a node ACTUALLY drew: its box plus every Konva shape sitting inside
+   * it, read back off the layer rather than recomputed. Coordinates are world
+   * px (the same space `node.x` lives in), so a test can assert that the
+   * painted text fits the box the layout measured — the one relationship no
+   * amount of re-deriving the expected value from the same helper can check.
+   */
+  getNodeRender: (id: string) => NodeRender | null;
   /** Main-canvas-redraw timing counters (the dominant per-keystroke cost). */
   getRedrawStats: () => RedrawStats;
   resetRedrawStats: () => void;
@@ -2205,8 +2240,17 @@ export function MindmapEditorView({
         textWidths.set(node.id, node.width);
         return;
       }
-      // For active node during editing, use editingText.
-      const displayRaw = activeNodeId === node.id ? editingText : node.text;
+      // The string this node actually PAINTS. Only a TEXT node swaps to its
+      // live buffer while edited — an image/link node keeps its preview and
+      // edits its URL in the box below (see `activeIsCustom` / the nodes memo),
+      // so its lines must come from the preview the box was measured for
+      // (nodeDisplayText: a link shows its fetched title, not the URL).
+      const isTextEditingThis =
+        editing &&
+        activeNodeId === node.id &&
+        node.type !== "image" &&
+        node.type !== "link";
+      const displayRaw = isTextEditingThis ? editingText : nodeDisplayText(node);
       // A card's title is ALWAYS drawn bold (see the isCard draw branch), so its
       // caret/line measurement must be bold too — otherwise the caret drifts by
       // the bold weight's extra width, since objectCardGeom already sizes the
@@ -2222,9 +2266,17 @@ export function MindmapEditorView({
         node.contentMaxWidth
       );
       lineDataMap.set(node.id, data);
+      // Content width — where the box ends, so connectors and the collapse
+      // toggle leave the node's real right edge. While a text node is edited
+      // the box follows the live buffer, so it comes from the lines; otherwise
+      // it's the measured width, which already counts the chrome the text
+      // measurement knows nothing about (a link's favicon column, an image's
+      // scaled size). An empty node paints the italic "empty" placeholder,
+      // which is wider than the nothing it measured.
+      const measured = isTextEditingThis ? lineDataWidth(data) : node.width;
       textWidths.set(
         node.id,
-        displayRaw === "" ? measureEmptyWidth() : lineDataWidth(data)
+        displayRaw === "" ? Math.max(measured, measureEmptyWidth()) : measured
       );
     });
     lineDataRef.current = lineDataMap;
@@ -2301,11 +2353,7 @@ export function MindmapEditorView({
       // never used for the single-Text path, so displayRaw ignores it here.
       const asMarkdown = isMarkdown;
       // Links display their fetched title (falling back to the raw URL).
-      const displayRaw = isTextEditing
-        ? editingText
-        : asLink
-          ? node.linkTitle || node.text
-          : node.text;
+      const displayRaw = isTextEditing ? editingText : nodeDisplayText(node);
       const isEmpty = displayRaw === "";
       const fontSize = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bold = !!node.bold;
@@ -3351,6 +3399,54 @@ export function MindmapEditorView({
           width: w * scale,
           height: h * scale,
         };
+      },
+      getNodeRender: (id: string) => {
+        const flat = nodesRef.current;
+        const node = flat.find((n) => n.id === id);
+        const layer = layerRef.current;
+        if (!node || !layer) return null;
+        const width = nodeBoxWidth(node.width, flat[0]?.id === id);
+        const height = nodeBoxHeight(node.height);
+        const box = { x: node.x, y: node.y - height / 2, width, height };
+        // Konva positions every shape in world coordinates (node.x/node.y are
+        // world too), so an inside-the-box test is a plain rect containment —
+        // with a small slack for glyphs that intentionally overhang, like the
+        // collapse toggle hugging the right edge.
+        // Konva itself is loaded lazily (konvaRef), so the shapes come back
+        // untyped here — same `any` the draw path uses.
+        const inside = (s: any) =>
+          s.x() >= box.x - 1 &&
+          s.x() <= box.x + width &&
+          s.y() >= box.y - 1 &&
+          s.y() <= box.y + height + 1;
+        const texts = layer
+          .find("Text")
+          .filter(inside)
+          .map((s: any) => {
+            const tx = s;
+            return {
+              text: tx.text(),
+              x: tx.x(),
+              y: tx.y(),
+              // Konva reports the MEASURED width of an auto-width Text, which
+              // is the width the glyphs really occupy on the canvas.
+              width: tx.width(),
+              height: tx.height(),
+              fontSize: tx.fontSize(),
+              fontStyle: tx.fontStyle(),
+              fill: String(tx.fill()),
+            };
+          });
+        const images = layer
+          .find("Image")
+          .filter(inside)
+          .map((s: any) => ({
+            x: s.x(),
+            y: s.y(),
+            width: s.width(),
+            height: s.height(),
+          }));
+        return { box, texts, images };
       },
       getRedrawStats: () => ({ ...perfRef.current }),
       resetRedrawStats: () => {

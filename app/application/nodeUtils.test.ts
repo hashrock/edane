@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
-import { measureModelNode, flattenToNodes } from "./nodeUtils";
+import {
+  measureModelNode,
+  flattenToNodes,
+  nodeDisplayText,
+  FAVICON_SIZE,
+  FAVICON_GAP,
+} from "./nodeUtils";
 import { NODE_MAX_CONTENT_WIDTH, LINE_HEIGHT } from "../lib/measureText";
 
 // "node" project: no DOM, so text measurement is the deterministic estimate and
@@ -83,5 +89,58 @@ describe("flattenToNodes width cap", () => {
     for (const n of nodes) {
       expect(n.width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
     }
+  });
+});
+
+describe("nodeDisplayText", () => {
+  it("shows a link's fetched title, not its URL", () => {
+    expect(
+      nodeDisplayText({ type: "link", text: "https://e/x", linkTitle: "T" })
+    ).toBe("T");
+  });
+
+  it("falls back to the URL when the title is absent or empty", () => {
+    expect(nodeDisplayText({ type: "link", text: "https://e/x" })).toBe(
+      "https://e/x"
+    );
+    expect(
+      nodeDisplayText({ type: "link", text: "https://e/x", linkTitle: "" })
+    ).toBe("https://e/x");
+  });
+
+  it("leaves every other kind on its own text", () => {
+    // A linkTitle left behind by a link → text conversion must not leak into
+    // what a text node shows.
+    expect(nodeDisplayText({ text: "plain", linkTitle: "stale" })).toBe("plain");
+    expect(nodeDisplayText({ type: "image", text: "https://e/i.png" })).toBe(
+      "https://e/i.png"
+    );
+  });
+
+  it("is the string the box is measured from", () => {
+    // The regression this pins: the box was sized from the title while the
+    // canvas painted the (far longer) URL, so the text overflowed its own node.
+    const m = model({
+      type: "link",
+      text: `https://example.com/${LONG}`,
+      linkTitle: "Short",
+    });
+    const titleOnly = measureModelNode(model({ text: "Short" }));
+    expect(measureModelNode(m).width).toBe(titleOnly.width);
+  });
+
+  it("counts the favicon column on top of the displayed title", () => {
+    const bare = measureModelNode(
+      model({ type: "link", text: "https://e/x", linkTitle: "Short" })
+    );
+    const withIcon = measureModelNode(
+      model({
+        type: "link",
+        text: "https://e/x",
+        linkTitle: "Short",
+        favicon: "https://e/f.ico",
+      })
+    );
+    expect(withIcon.width).toBe(bare.width + FAVICON_SIZE + FAVICON_GAP);
   });
 });

@@ -64,6 +64,30 @@ export function nodeContentMaxWidth(m: MindMapModel): number {
   }
 }
 
+/**
+ * The string a node actually DRAWS — a link shows its fetched title and falls
+ * back to the raw URL, every other kind shows its own `text`.
+ *
+ * Single authority for that fallback, read by BOTH sides that must agree on it:
+ * {@link measureModelNode} (which sizes the box) and the canvas draw (which
+ * builds the visual lines it paints, via lib/textGeometry's buildLineData).
+ * When only one of the two knew about `linkTitle`, a link with a fetched title
+ * was measured for the title but painted with the URL — the box and the text
+ * inside it disagreed by however much longer the URL was.
+ *
+ * Takes the structural subset both `MindMapModel` and {@link MindMapNode}
+ * satisfy, so neither side has to convert to call it. A markdown node is NOT
+ * covered here: its card paints a derived, ellipsised title (see
+ * {@link markdownTitle}) rather than a wrapped line block.
+ */
+export function nodeDisplayText(n: {
+  type?: NodeType;
+  text: string;
+  linkTitle?: string;
+}): string {
+  return (n.type ?? "text") === "link" ? n.linkTitle || n.text : n.text;
+}
+
 /** Flat node for rendering (computed from domain model via layout). */
 export interface MindMapNode {
   id: string;
@@ -196,8 +220,7 @@ export function measureModelNode(
       return { width: d.w, height: d.h + IMAGE_V_PAD };
     }
     case "link": {
-      const display = m.linkTitle || m.text;
-      const box = measureNodeBox(display, {
+      const box = measureNodeBox(nodeDisplayText(m), {
         fontSize: m.fontSize,
         bold: m.bold,
         maxWidth: nodeContentMaxWidth(m),
