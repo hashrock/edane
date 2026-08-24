@@ -65,14 +65,14 @@ describe("PublicityDropdown (browser e2e)", () => {
     calls().length = 0;
     render(<Harness initial={true} />);
     const label = (await trigger()).textContent ?? "";
-    expect(label).toContain("公開");
-    expect(label).not.toContain("非公開");
+    expect(label).toContain("Public");
+    expect(label).not.toContain("Private");
   });
 
-  it("shows 非公開 when private", async () => {
+  it("shows Private when private", async () => {
     calls().length = 0;
     render(<Harness initial={false} />);
-    expect((await trigger()).textContent).toContain("非公開");
+    expect((await trigger()).textContent).toContain("Private");
   });
 
   it("renders the menu in the top layer (popover), not a z-indexed div", async () => {
@@ -93,8 +93,8 @@ describe("PublicityDropdown (browser e2e)", () => {
 
     const items = menuItems();
     expect(items.map((b) => b.textContent?.replace("✓", "").trim())).toEqual([
-      "非公開",
-      "公開",
+      "Private",
+      "Public",
     ]);
     // The active (private) option carries the check mark.
     expect(items[0].textContent).toContain("✓");
@@ -105,8 +105,8 @@ describe("PublicityDropdown (browser e2e)", () => {
     // Menu closes after selecting.
     await waitFor(() => !isOpen());
     const label = (await trigger()).textContent ?? "";
-    expect(label).toContain("公開");
-    expect(label).not.toContain("非公開");
+    expect(label).toContain("Public");
+    expect(label).not.toContain("Private");
   });
 
   it("renders above a high z-index overlay (the reported bug)", async () => {
@@ -175,7 +175,7 @@ describe("PublicityDropdown リンクをコピー (browser e2e)", () => {
     await waitFor(isOpen);
 
     const item = copyItem()!;
-    expect(item.textContent).toContain("リンクをコピー");
+    expect(item.textContent).toContain("Copy link");
     expect(item.disabled).toBe(false);
     await userEvent.click(item);
     expect(copyCalls()).toEqual([1]);
@@ -194,7 +194,7 @@ describe("PublicityDropdown リンクをコピー (browser e2e)", () => {
     const item = copyItem()!;
     expect(item).not.toBeNull();
     expect(item.disabled).toBe(true);
-    expect(item.textContent).toContain("非公開のため共有できません");
+    expect(item.textContent).toContain("Private notes can't be shared");
 
     // 押しても何も起きず、メニューも開いたまま。
     item.click();

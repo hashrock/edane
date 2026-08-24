@@ -2,8 +2,9 @@
  * Application layer: UI言語（ロケール）の状態と `t()`。
  *
  * editorPreferences と同じく「このデバイスでどう表示するか」の設定なので
- * localStorage に永続化する（ノートの内容ではない）。デフォルトは従来表示の
- * "ja" — 既存ユーザー・既存テストの見た目を変えないため、自動判定はしない。
+ * localStorage に永続化する（ノートの内容ではない）。初期値はブラウザの言語
+ * （navigator.language）から自動判定し（ja以外はすべて en）、ユーザーが設定で
+ * 切り替えたらその選択（保存値）が常に優先される。
  *
  * React に依存しない素のストアなので、キーマップやレデューサなどの
  * アプリケーション層からもそのまま `t()` を呼べる。コンポーネント側は
@@ -44,16 +45,33 @@ const CATALOGS: Record<Locale, Record<MessageKey, string>> = {
   en: MESSAGES_EN,
 };
 
-/** Read the persisted locale (defaults on missing/invalid/SSR). */
+/**
+ * ブラウザ言語からの自動判定。対応言語は ja / en の2つなので、日本語系
+ * （"ja" / "ja-JP" …）だけ ja、それ以外はすべて en に倒す。navigator が無い
+ * 環境（SSR）は DEFAULT_LOCALE — サーバが出す `<html lang="ja">` と一致させる。
+ */
+export function detectLocale(
+  language: string | undefined = typeof navigator === "undefined"
+    ? undefined
+    : navigator.language
+): Locale {
+  if (!language) return DEFAULT_LOCALE;
+  return language.toLowerCase().startsWith("ja") ? "ja" : "en";
+}
+
+/**
+ * Resolve the locale: an explicit persisted choice wins; otherwise fall back
+ * to browser-language detection ({@link detectLocale}).
+ */
 export function loadLocale(
   storage: KeyValueStorage | undefined = defaultLocalStorage()
 ): Locale {
-  if (!storage) return DEFAULT_LOCALE;
+  if (!storage) return detectLocale();
   try {
     const raw = storage.getItem(LOCALE_KEY);
-    return isLocale(raw) ? raw : DEFAULT_LOCALE;
+    return isLocale(raw) ? raw : detectLocale();
   } catch {
-    return DEFAULT_LOCALE;
+    return detectLocale();
   }
 }
 

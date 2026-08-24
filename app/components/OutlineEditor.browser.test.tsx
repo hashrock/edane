@@ -151,7 +151,7 @@ describe("OutlineEditor custom nodes (browser e2e)", () => {
 
     // A URL editor input appears...
     const input = await waitFor(() =>
-      linkRow.querySelector<HTMLInputElement>('input[placeholder="リンクのURL"]')
+      linkRow.querySelector<HTMLInputElement>('input[placeholder="Link URL"]')
     );
     // ...while the link preview span stays visible (not opacity-0).
     const preview = linkRow.querySelector<HTMLElement>("span.text-blue-600");
@@ -184,7 +184,7 @@ describe("OutlineEditor custom nodes (browser e2e)", () => {
     // The <img> preview stays and a URL box appears.
     expect(imgRow.querySelector("img")).not.toBeNull();
     const input = await waitFor(() =>
-      imgRow.querySelector<HTMLInputElement>('input[placeholder="画像のURL"]')
+      imgRow.querySelector<HTMLInputElement>('input[placeholder="Image URL"]')
     );
     expect(input).not.toBeNull();
   });
@@ -269,7 +269,7 @@ describe("OutlineEditor (browser e2e)", () => {
 
     const indentBtn = await waitFor(() =>
       Array.from(document.querySelectorAll("button")).find(
-        (b) => b.getAttribute("title") === "インデント"
+        (b) => b.getAttribute("title") === "Indent"
       )
     );
     await userEvent.click(indentBtn);

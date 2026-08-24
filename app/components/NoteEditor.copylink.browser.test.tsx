@@ -57,7 +57,7 @@ const status = () =>
 async function openPublicityMenu() {
   const trigger = Array.from(
     document.querySelectorAll<HTMLButtonElement>("button[popovertarget]")
-  ).find((b) => /公開/.test(b.textContent ?? ""));
+  ).find((b) => /\b(Public|Private)\b/.test(b.textContent ?? ""));
   if (!trigger) throw new Error("publicity trigger not found");
   trigger.click();
   await waitFor(() => copyItem() !== null);
@@ -99,7 +99,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     await waitFor(() => written.length > 0);
     expect(written).toEqual([`${window.location.origin}/notes/${NOTE_ID}`]);
     // フィードバックはヘッダーの既存ステータス行に相乗りする。
-    await waitFor(() => status() === "リンクをコピーしました");
+    await waitFor(() => status() === "Link copied");
   });
 
   it("offers the same action in the outline layout", async () => {
@@ -123,7 +123,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     copyItem()!.click();
     await waitFor(() => written.length > 0);
     expect(written).toEqual([`${window.location.origin}/notes/${NOTE_ID}`]);
-    await waitFor(() => status() === "リンクをコピーしました");
+    await waitFor(() => status() === "Link copied");
   });
 
   it("disables the action with a reason while the note is private", async () => {
@@ -143,7 +143,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     await openPublicityMenu();
     const item = copyItem()!;
     expect(item.disabled).toBe(true);
-    expect(item.textContent).toContain("非公開のため共有できません");
+    expect(item.textContent).toContain("Private notes can't be shared");
     item.click();
     expect(written).toEqual([]);
   });
@@ -179,6 +179,6 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
 
     await openPublicityMenu();
     copyItem()!.click();
-    await waitFor(() => status() === "コピーできませんでした");
+    await waitFor(() => status() === "Couldn't copy");
   });
 });

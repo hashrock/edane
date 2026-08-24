@@ -173,14 +173,14 @@ describe("settings dialog", () => {
     await waitFor(
       () =>
         (document.activeElement as HTMLInputElement | null)?.placeholder ===
-        "コマンドを検索..."
+        "Search commands..."
     );
-    await userEvent.keyboard("エディタ設定");
+    await userEvent.keyboard("Editor settings");
     await userEvent.keyboard("{Enter}");
 
     const checkbox = await waitFor(() =>
       document.querySelector<HTMLInputElement>(
-        '[aria-label="エディタ設定"] input[type="checkbox"]'
+        '[aria-label="Editor settings"] input[type="checkbox"]'
       )
     );
     expect(checkbox.checked).toBe(true);

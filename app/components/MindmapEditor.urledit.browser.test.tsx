@@ -111,7 +111,7 @@ describe("MindmapEditor URL box editing for custom nodes (browser e2e)", () => {
 
     const input = await waitFor(urlInput);
     expect(input.value).toBe("https://example.com/");
-    expect(input.placeholder).toBe("リンクのURL");
+    expect(input.placeholder).toBe("Link URL");
     // The box owns the keyboard while open.
     await waitFor(() => document.activeElement === urlInput());
   });
@@ -149,7 +149,7 @@ describe("MindmapEditor URL box editing for custom nodes (browser e2e)", () => {
 
     const input = await waitFor(urlInput);
     expect(input.value).toBe("https://example.com/x.png");
-    expect(input.placeholder).toBe("画像のURL");
+    expect(input.placeholder).toBe("Image URL");
 
     await userEvent.fill(input, "https://example.com/y.png");
     await waitFor(

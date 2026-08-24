@@ -26,8 +26,8 @@ describe("markdownTitle", () => {
   });
 
   it("returns a placeholder for empty input", () => {
-    expect(markdownTitle("")).toBe("無題のMarkdown");
-    expect(markdownTitle("\n   \n")).toBe("無題のMarkdown");
+    expect(markdownTitle("")).toBe("Untitled Markdown");
+    expect(markdownTitle("\n   \n")).toBe("Untitled Markdown");
   });
 });
 

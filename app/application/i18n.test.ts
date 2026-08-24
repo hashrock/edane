@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   DEFAULT_LOCALE,
+  detectLocale,
   LOCALE_KEY,
   getLocale,
   isLocale,
@@ -22,20 +23,39 @@ function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage {
   };
 }
 
-// モジュールレベルの現在言語を書き換えるので、各テスト後にデフォルトへ戻す。
-afterEach(() => setLocale(DEFAULT_LOCALE, undefined));
+// モジュールレベルの現在言語を書き換えるので、各テスト後にテスト既定の en
+// （vitest.setup.ts が固定する）へ戻す。
+afterEach(() => setLocale("en", undefined));
 
-describe("loadLocale", () => {
-  it("defaults to ja without storage (SSR / node)", () => {
-    expect(loadLocale(undefined)).toBe("ja");
+describe("detectLocale", () => {
+  it("maps Japanese browser languages to ja and everything else to en", () => {
+    expect(detectLocale("ja")).toBe("ja");
+    expect(detectLocale("ja-JP")).toBe("ja");
+    expect(detectLocale("JA-JP")).toBe("ja");
+    expect(detectLocale("en-US")).toBe("en");
+    expect(detectLocale("de-DE")).toBe("en");
+    expect(detectLocale("zh-CN")).toBe("en");
   });
 
-  it("reads a persisted locale and rejects unknown values", () => {
+  it("falls back to the SSR default when no language is available", () => {
+    // undefined を明示的に渡すとデフォルト引数（navigator.language）が効いて
+    // しまうJSの仕様があるので、「言語なし」は空文字で表す。
+    expect(detectLocale("")).toBe(DEFAULT_LOCALE);
+  });
+});
+
+describe("loadLocale", () => {
+  it("prefers a persisted choice over detection", () => {
     expect(loadLocale(memoryStorage({ [LOCALE_KEY]: "en" }))).toBe("en");
+    expect(loadLocale(memoryStorage({ [LOCALE_KEY]: "ja" }))).toBe("ja");
+  });
+
+  it("falls back to detection for missing or unknown values", () => {
     expect(loadLocale(memoryStorage({ [LOCALE_KEY]: "fr" }))).toBe(
-      DEFAULT_LOCALE
+      detectLocale()
     );
-    expect(loadLocale(memoryStorage())).toBe(DEFAULT_LOCALE);
+    expect(loadLocale(memoryStorage())).toBe(detectLocale());
+    expect(loadLocale(undefined)).toBe(detectLocale());
   });
 
   it("survives a throwing storage", () => {
@@ -46,7 +66,7 @@ describe("loadLocale", () => {
       setItem: () => {},
       removeItem: () => {},
     };
-    expect(loadLocale(broken)).toBe(DEFAULT_LOCALE);
+    expect(loadLocale(broken)).toBe(detectLocale());
   });
 });
 
@@ -54,24 +74,25 @@ describe("setLocale / t", () => {
   it("switches the language t() resolves in and notifies subscribers", () => {
     let notified = 0;
     const unsub = subscribeLocale(() => notified++);
-    expect(t("statusSaved")).toBe(MESSAGES_JA.statusSaved);
-
-    setLocale("en", undefined);
-    expect(getLocale()).toBe("en");
-    expect(notified).toBe(1);
     expect(t("statusSaved")).toBe(MESSAGES_EN.statusSaved);
     expect(dateLocale()).toBe("en-US");
 
+    setLocale("ja", undefined);
+    expect(getLocale()).toBe("ja");
+    expect(notified).toBe(1);
+    expect(t("statusSaved")).toBe(MESSAGES_JA.statusSaved);
+    expect(dateLocale()).toBe("ja-JP");
+
     // Same locale again = no-op (no extra notification).
-    setLocale("en", undefined);
+    setLocale("ja", undefined);
     expect(notified).toBe(1);
     unsub();
   });
 
   it("persists the choice into the given storage", () => {
     const storage = memoryStorage();
-    setLocale("en", storage);
-    expect(storage.getItem(LOCALE_KEY)).toBe("en");
+    setLocale("ja", storage);
+    expect(storage.getItem(LOCALE_KEY)).toBe("ja");
   });
 
   it("interpolates {name} placeholders and leaves unknown ones visible", () => {
