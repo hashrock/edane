@@ -88,6 +88,16 @@ export interface MindMapModel {
   linkTitle?: string;
   /** Link nodes: favicon URL (rendered before the title). */
   favicon?: string;
+  /**
+   * Task checkbox: absent = not a task, `false` = open, `true` = done.
+   *
+   * A FLAG rather than a `NodeType`, because "is a task" is orthogonal to what
+   * a node holds — a link can be a task too — and because a node's kind decides
+   * its edit surface (see application/editSurface.ts) while a checkbox doesn't
+   * change how the node is edited at all. Which kinds show one is decided in
+   * exactly one place: `supportsCheckbox` in application/nodeUtils.ts.
+   */
+  checked?: boolean;
   /** Object-card field rows: numeric display format (absent = raw). */
   numFormat?: NumFormat;
   /** Object-card field rows: fixed fraction digits (absent = as typed). */
@@ -306,6 +316,40 @@ export function setLinkMeta(
     }
   }
   return cloned;
+}
+
+/**
+ * Set a node's task checkbox. `null` REMOVES it — the node stops being a task
+ * rather than becoming an open one, mirroring how setNodeStyle's `null` clears
+ * a font size back to absent. Returns a new model.
+ */
+export function setChecked(
+  model: MindMapModel,
+  nodeId: string,
+  checked: boolean | null
+): MindMapModel {
+  const cloned = cloneModel(model);
+  const node = findNode(cloned, nodeId);
+  if (node) {
+    if (checked === null) delete node.checked;
+    else node.checked = checked;
+  }
+  return cloned;
+}
+
+/**
+ * The state the "toggle task" gesture moves a checkbox to — one authority for
+ * the keyboard shortcut, the context menu and the click on the box itself:
+ *
+ *   絶対に無い → ☐ (open) → ☑ (done) → ☐ (open) …
+ *
+ * The first press turns a plain node INTO a task; after that the gesture only
+ * ever flips done/open, so repeating it can never destroy the checkbox (and the
+ * completed state) by accident. Removing it again is a separate, explicit
+ * action (the context menu / command palette), not the tail of a cycle.
+ */
+export function nextCheckedState(checked: boolean | undefined): boolean {
+  return checked === false;
 }
 
 /** Toggle (or set) a node's collapsed flag. Returns a new model. */

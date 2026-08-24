@@ -13,6 +13,8 @@ import {
   setNodeType,
   setNodeStyle,
   setLinkMeta,
+  setChecked,
+  nextCheckedState,
   toggleCollapse,
   addChildToNode,
   removeNode,
@@ -872,5 +874,44 @@ describe("isStoredNodeType / isNumFormat", () => {
       expect(isStoredNodeType(bad)).toBe(false);
       expect(isNumFormat(bad)).toBe(false);
     }
+  });
+});
+
+describe("task checkbox", () => {
+  const tree = (): MindMapModel => ({
+    id: "root",
+    text: "R",
+    children: [{ id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] }],
+  });
+
+  it("adds an open checkbox, then flips it done", () => {
+    const open = setChecked(tree(), "a", false);
+    expect(findNode(open, "a")!.checked).toBe(false);
+    const done = setChecked(open, "a", true);
+    expect(findNode(done, "a")!.checked).toBe(true);
+  });
+
+  it("removes the checkbox entirely on null (absent, not false)", () => {
+    const cleared = setChecked(setChecked(tree(), "a", true), "a", null);
+    expect(findNode(cleared, "a")!.checked).toBeUndefined();
+    expect("checked" in findNode(cleared, "a")!).toBe(false);
+  });
+
+  it("leaves descendants alone — each node's checkbox is its own", () => {
+    const done = setChecked(tree(), "a", true);
+    expect(findNode(done, "a1")!.checked).toBeUndefined();
+    expect(findNode(done, "root")!.checked).toBeUndefined();
+  });
+
+  it("does not mutate the input model", () => {
+    const before = tree();
+    setChecked(before, "a", true);
+    expect(findNode(before, "a")!.checked).toBeUndefined();
+  });
+
+  it("cycles 未設定 → open → done → open, never back to 未設定", () => {
+    expect(nextCheckedState(undefined)).toBe(false);
+    expect(nextCheckedState(false)).toBe(true);
+    expect(nextCheckedState(true)).toBe(false);
   });
 });

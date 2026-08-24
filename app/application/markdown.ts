@@ -22,6 +22,8 @@ const BLOCKQUOTE = /^\s*>\s?(.*)$/;
 const HR = /^\s*([-*_])\1{2,}\s*$/;
 const FENCE = /^\s*(```|~~~)/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
+/** GFM task-list marker at the start of a list item's body: `[ ]` / `[x]`. */
+const TASK = /^\[([ xX])\]\s+(.*)$/;
 const INLINE_LINK = /\[[^\]]+\]\([^)]+\)/;
 const INLINE_BOLD = /(\*\*|__)[^\s](?:.*?[^\s])?\1/;
 
@@ -75,8 +77,9 @@ export function markdownToModel(md: string): MindMapModel {
   // before any heading lives at the top level (depth 0).
   let contentDepth = 0;
 
-  const push = (depth: number, text: string) => {
+  const push = (depth: number, text: string, checked?: boolean) => {
     const node: MindMapModel = { id: generateId(), text, children: [] };
+    if (checked !== undefined) node.checked = checked;
     while (stack.length > 1 && stack[stack.length - 1].depth >= depth) {
       stack.pop();
     }
@@ -121,6 +124,14 @@ export function markdownToModel(md: string): MindMapModel {
     if (list) {
       const indent = list[1].replace(/\t/g, "  ").length;
       const depth = contentDepth + Math.floor(indent / 2);
+      // A GFM task item keeps its state as the node's checkbox rather than as
+      // literal "[ ]" text — the round trip through modelToMarkdown below
+      // writes the marker back.
+      const task = list[2].match(TASK);
+      if (task) {
+        push(depth, stripInline(task[2]), task[1] !== " ");
+        continue;
+      }
       push(depth, stripInline(list[2]));
       continue;
     }
@@ -176,12 +187,17 @@ function nodeToMarkdownText(node: MindMapModel): string {
  * inverse direction of {@link markdownToModel}, used by "Markdownとしてコピー".
  * The given node is the top-level item; children nest two spaces deeper per
  * level. Text nodes honour their `bold` flag; image/link nodes become their
- * Markdown image/link syntax.
+ * Markdown image/link syntax, and a task node keeps its checkbox as a GFM
+ * `- [ ]` / `- [x]` marker.
  */
 export function modelToMarkdown(node: MindMapModel): string {
   const lines: string[] = [];
   const walk = (n: MindMapModel, depth: number) => {
-    lines.push(`${"  ".repeat(depth)}- ${nodeToMarkdownText(n)}`);
+    // Task state rides on the list marker (GFM), so a task node round-trips
+    // through markdownToModel as a task rather than as literal text.
+    const box =
+      n.checked === undefined ? "" : n.checked ? "[x] " : "[ ] ";
+    lines.push(`${"  ".repeat(depth)}- ${box}${nodeToMarkdownText(n)}`);
     for (const child of n.children) walk(child, depth + 1);
   };
   walk(node, 0);

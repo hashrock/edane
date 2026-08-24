@@ -275,6 +275,85 @@ describe("cross-mode collapse chord (Cmd/Ctrl + .)", () => {
   });
 });
 
+describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
+  it("turns a plain node into an open task on the first press", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(dispatched).toEqual([
+      { type: "setChecked", nodeId: "a", checked: false },
+    ]);
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("flips an open task done, and a done task back open", () => {
+    const withTask = (checked: boolean) => {
+      const m = model();
+      m.children[0].checked = checked;
+      return m;
+    };
+    const open = makeDeps();
+    run(open.deps, state(withTask(false), "a", false), {
+      key: "D",
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    expect(open.dispatched).toEqual([
+      { type: "setChecked", nodeId: "a", checked: true },
+    ]);
+
+    const done = makeDeps();
+    run(done.deps, state(withTask(true), "a", false), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    // Never back to "no checkbox": removing one is an explicit, separate act.
+    expect(done.dispatched).toEqual([
+      { type: "setChecked", nodeId: "a", checked: false },
+    ]);
+  });
+
+  it("works while editing too, without disturbing the text", () => {
+    const { deps, dispatched } = makeDeps();
+    run(deps, state(model(), "a", true, "A"), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(dispatched).toEqual([
+      { type: "setChecked", nodeId: "a", checked: false },
+    ]);
+  });
+
+  it("does nothing on a kind that shows no checkbox", () => {
+    const m = model();
+    m.children[0].type = "image";
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(m, "a", false), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(dispatched).toEqual([]);
+    // Still swallowed: the chord is ours, it just has nothing to do here.
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("leaves plain ⌘/Ctrl + D to the browser", () => {
+    const { deps, dispatched } = makeDeps();
+    const { preventDefault } = run(deps, state(model(), "a", false), {
+      key: "d",
+      metaKey: true,
+    });
+    expect(dispatched).toEqual([]);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
 describe("reorder and bold (cross-mode)", () => {
   it("Alt+ArrowUp reorders up, in selection mode", () => {
     const { deps, dispatched } = makeDeps();

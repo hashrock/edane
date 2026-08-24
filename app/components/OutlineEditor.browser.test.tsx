@@ -46,6 +46,19 @@ const CUSTOM_MODEL: MindMapModel = {
 
 const CustomHarness = harnessFor(CUSTOM_MODEL);
 
+// Task rows: one open, one done, one plain node with no checkbox at all.
+const TASK_MODEL: MindMapModel = {
+  id: "root",
+  text: "Root",
+  children: [
+    { id: "open", text: "buy milk", checked: false, children: [] },
+    { id: "done", text: "buy bread", checked: true, children: [] },
+    { id: "plain", text: "just a note", children: [] },
+  ],
+};
+
+const TaskHarness = harnessFor(TASK_MODEL);
+
 function engine(): NoteEditorEngine {
   const e = (window as unknown as { __engine?: NoteEditorEngine }).__engine;
   if (!e) throw new Error("engine not exposed yet");
@@ -277,5 +290,59 @@ describe("OutlineEditor (browser e2e)", () => {
     await waitFor(() => findNode(engine().model, "a")?.children.length === 1);
     expect(engine().model.children.length).toBe(1);
     expect(findNode(engine().model, "a")?.children[0].id).toBe("b");
+  });
+});
+
+describe("OutlineEditor task checkbox", () => {
+  function row(text: string): HTMLElement {
+    const li = Array.from(
+      document.querySelectorAll<HTMLElement>("ul > li")
+    ).find((el) => el.textContent?.includes(text));
+    if (!li) throw new Error(`row not found: ${text}`);
+    return li;
+  }
+
+  /** The row's checkbox button (the bullet/disclosure is the other button). */
+  function checkbox(text: string): HTMLButtonElement | null {
+    return row(text).querySelector<HTMLButtonElement>("button[aria-pressed]");
+  }
+
+  it("shows a checkbox only on task rows, in the right state", async () => {
+    render(<TaskHarness />);
+    await waitFor(() => row("buy milk"));
+    expect(checkbox("buy milk")!.getAttribute("aria-pressed")).toBe("false");
+    expect(checkbox("buy bread")!.getAttribute("aria-pressed")).toBe("true");
+    expect(checkbox("just a note")).toBeNull();
+  });
+
+  it("strikes a done row's text through", async () => {
+    render(<TaskHarness />);
+    const done = await waitFor(() =>
+      row("buy bread").querySelector<HTMLElement>("span.line-through")
+    );
+    expect(done.textContent).toBe("buy bread");
+    expect(
+      row("buy milk").querySelector("span.line-through")
+    ).toBeNull();
+  });
+
+  it("toggles on click without dragging the caret into the row", async () => {
+    render(<TaskHarness />);
+    await waitFor(() => row("buy milk"));
+    await userEvent.click(checkbox("buy milk")!);
+    await waitFor(() => findNode(engine().model, "open")?.checked === true);
+    // The click is a toggle, not a row activation.
+    expect(engine().state.view.editing).toBe(false);
+
+    await userEvent.click(checkbox("buy milk")!);
+    await waitFor(() => findNode(engine().model, "open")?.checked === false);
+  });
+
+  it("keeps the checkbox out of the keyboard's way", async () => {
+    // The keyboard-escape invariant is about text fields; the box is a pointer
+    // affordance only, so it must never take focus (see CLAUDE.md).
+    render(<TaskHarness />);
+    await waitFor(() => row("buy milk"));
+    expect(checkbox("buy milk")!.tabIndex).toBe(-1);
   });
 });

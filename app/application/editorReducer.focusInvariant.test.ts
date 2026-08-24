@@ -116,6 +116,7 @@ const ACTIONS = {
   setNodeContent: { type: "setNodeContent", nodeId: "a1", text: "x" },
   setNodeStyle: { type: "setNodeStyle", nodeId: "a1", bold: true },
   setLinkMeta: { type: "setLinkMeta", nodeId: "a1", linkTitle: "t" },
+  setChecked: { type: "setChecked", nodeId: "a1", checked: true },
   setNumFormat: { type: "setNumFormat", nodeId: "a1", numFormat: "comma" },
   insertNodes: {
     type: "insertNodes",
