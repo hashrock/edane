@@ -3,6 +3,8 @@
  * Stored format: base64(iv + ciphertext + tag)
  */
 
+import { base64ToBytes, bytesToBase64 } from "./base64";
+
 const ALGO = "AES-GCM";
 const IV_LENGTH = 12; // 96-bit IV for AES-GCM
 
@@ -34,7 +36,7 @@ export async function encrypt(
   combined.set(iv, 0);
   combined.set(new Uint8Array(ciphertext), iv.length);
 
-  return btoa(String.fromCharCode(...combined));
+  return bytesToBase64(combined);
 }
 
 export async function decrypt(
@@ -42,7 +44,7 @@ export async function decrypt(
   secret: string
 ): Promise<string> {
   const key = await deriveKey(secret);
-  const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+  const combined = base64ToBytes(encoded);
 
   const iv = combined.slice(0, IV_LENGTH);
   const ciphertext = combined.slice(IV_LENGTH);
