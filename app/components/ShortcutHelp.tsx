@@ -10,12 +10,23 @@ interface Props {
   onClose: () => void;
 }
 
-const GROUPS: { when: KeyBinding["when"]; title: MessageKey }[] = [
-  { when: "global", title: "helpGroupGlobal" },
-  { when: "both", title: "helpGroupNode" },
-  { when: "selection", title: "helpGroupSelection" },
-  { when: "editing", title: "helpGroupEditing" },
-];
+/**
+ * Display title per `when` scope, in the order the overlay groups them.
+ * `satisfies Record<KeyBinding["when"], MessageKey>` makes this exhaustive
+ * both ways (same idiom as STORED_NODE_TYPE_SET in domain/model.ts): a plain
+ * array here would let a new `when` scope on KeyBinding compile silently and
+ * just vanish from the help overlay instead of erroring loudly at the type
+ * level. `Object.keys` preserves the string-key insertion order below, so the
+ * display order is still just the order written here.
+ */
+const GROUP_TITLES = {
+  global: "helpGroupGlobal",
+  both: "helpGroupNode",
+  selection: "helpGroupSelection",
+  editing: "helpGroupEditing",
+} as const satisfies Record<KeyBinding["when"], MessageKey>;
+
+const GROUP_ORDER = Object.keys(GROUP_TITLES) as (keyof typeof GROUP_TITLES)[];
 
 /**
  * Keyboard-shortcut cheat sheet, generated from the same keymap the editor
@@ -55,15 +66,15 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
           </button>
         </div>
         <div className="px-5 py-3">
-          {GROUPS.map((group) => {
+          {GROUP_ORDER.map((when) => {
             const rows = bindings.filter(
-              (b) => b.when === group.when && b.label !== ""
+              (b) => b.when === when && b.label !== ""
             );
             if (rows.length === 0) return null;
             return (
-              <div key={group.when} className="mb-4 last:mb-1">
+              <div key={when} className="mb-4 last:mb-1">
                 <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  {t(group.title)}
+                  {t(GROUP_TITLES[when])}
                 </h3>
                 <ul>
                   {rows.map((b) => (
