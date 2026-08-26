@@ -48,6 +48,7 @@ import {
   moveNodeUp,
   moveNodeDown,
   moveBranch,
+  violatesObjectCardNesting,
 } from "../domain/model";
 import { objectSiblingTemplate } from "./objectField";
 import { assertNever } from "../lib/assertNever";
@@ -437,6 +438,11 @@ function documentReducer(
       if (!activeNodeId || !source) return { document };
       const target = findNode(model, activeNodeId);
       if (!target) return { document };
+      // Pasting a copied object card onto another one would nest cards, which
+      // addChildToNode below refuses; check before touching the model so a
+      // blocked paste doesn't still expand the target or focus a fresh id
+      // that was never actually inserted.
+      if (violatesObjectCardNesting(target.type, source.type)) return { document };
       const fresh = cloneWithNewIds(source);
       // Expand the target so the pasted child is visible, then append it.
       let newModel = toggleCollapse(model, activeNodeId, false);

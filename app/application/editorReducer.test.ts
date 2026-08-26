@@ -346,6 +346,20 @@ describe("branch clipboard (cut / copy / paste)", () => {
     expect(editorReducer(s, { type: "pasteBranch" })).toBe(s);
   });
 
+  it("pasteBranch is a no-op when pasting an object card onto another object card", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "card1", text: "Card1", type: "object", children: [] },
+        { id: "card2", text: "Card2", type: "object", children: [] },
+      ],
+    };
+    const copied = editorReducer(stateAt(model, "card1"), { type: "copyBranch" });
+    const onCard2 = withView(copied, { activeNodeId: "card2" });
+    expect(editorReducer(onCard2, { type: "pasteBranch" })).toBe(onCard2);
+  });
+
   it("pasteBranch expands a collapsed target so the paste is visible", () => {
     const model = sampleModel();
     const copied = editorReducer(stateAt(model, "b"), { type: "copyBranch" });
