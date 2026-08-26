@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import type { SessionUser } from "../user";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
+import { siteEditPath } from "../application/siteTemplate";
 import { copyText } from "../lib/clipboard";
 import {
   LOCALE_LABELS,
@@ -361,6 +362,12 @@ export default function Settings({ user }: { user: User }) {
                           <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs">
                             {urlButton("JSON", urls.json)}
                             {urlButton("Markdown", urls.md)}
+                            <Link
+                              href={siteEditPath(pub.id)}
+                              className="text-emerald-700 hover:underline"
+                            >
+                              {t("siteOpenEditor")}
+                            </Link>
                             {pub.inactiveReason && (
                               <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">
                                 {t(INACTIVE_LABEL[pub.inactiveReason])}

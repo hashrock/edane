@@ -11,6 +11,7 @@
       "database_id": "aeb23f2c-ead6-4495-854b-dfec9fef53ae"
     }
   ],
+  "ai": { "binding": "AI", "remote": true },
   "r2_buckets": [
     {
       "binding": "IMAGES",
