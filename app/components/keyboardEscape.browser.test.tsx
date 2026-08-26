@@ -34,9 +34,9 @@ import type { MindMapModel, NodeType } from "../domain/model";
 
 // --- Fixtures -------------------------------------------------------------
 
-/** The middle node under test, one per NodeType. Multi-line / multi-row
- *  targets are deliberate: arrows should walk lines (and object-card rows)
- *  first and only then cross to the neighbour. */
+/** The middle node under test, one per NodeType. Multi-line targets are
+ *  deliberate: arrows should walk lines first and only then cross to the
+ *  neighbour. */
 const TARGETS = {
   text: {
     id: "target",
@@ -61,15 +61,6 @@ const TARGETS = {
     text: "# Title\n\nSome body text",
     type: "markdown",
     children: [],
-  },
-  object: {
-    id: "target",
-    text: "商品A",
-    type: "object",
-    children: [
-      { id: "row1", text: "価格: 1200", children: [] },
-      { id: "row2", text: "在庫: 5", children: [] },
-    ],
   },
 } as const satisfies Record<NodeType, MindMapModel>;
 
@@ -96,8 +87,8 @@ function totalChars(n: MindMapModel): number {
 }
 
 /** Upper bound on presses needed to escape vertically: one per text line, one
- *  per descendant row (object cards), one to cross, plus slack. If this many
- *  presses don't reach the neighbour, the keyboard is trapped. */
+ *  to cross, plus slack. If this many presses don't reach the neighbour, the
+ *  keyboard is trapped. */
 function pressBudget(target: MindMapModel): number {
   const lines = target.text.split("\n").length;
   const rows = countNodes(target) - 1;
@@ -105,9 +96,8 @@ function pressBudget(target: MindMapModel): number {
 }
 
 /** Same, horizontally: ←/→ step one CHARACTER at a time, so the budget is the
- *  text length of every node the caret walks through (the target plus, going
- *  right, its object-card rows), one press per crossing, plus slack for an
- *  initial range selection collapsing instead of moving. */
+ *  text length of every node the caret walks through, one press per crossing,
+ *  plus slack for an initial range selection collapsing instead of moving. */
 function hPressBudget(target: MindMapModel): number {
   return totalChars(target) + countNodes(target) + 3;
 }

@@ -654,21 +654,6 @@ describe("preference: tabBehavior = insert-child", () => {
     expect(dispatched).toEqual([{ type: "tab", shift: true }]);
   });
 
-  it("Tab is swallowed on a row of an object card (its subtree is hidden)", () => {
-    const m = model();
-    m.children[0].type = "object"; // "a" is a card; "a1" is one of its rows
-    const { deps, dispatched } = makeDeps();
-    const { preventDefault } = run(
-      deps,
-      state(m, "a1", false),
-      { key: "Tab" },
-      {},
-      prefs
-    );
-    expect(dispatched).toEqual([]);
-    expect(preventDefault).toHaveBeenCalled();
-  });
-
   it("Tab in editing mode also inserts a child and starts editing it", () => {
     const { deps, dispatched } = makeDeps();
     run(
@@ -711,20 +696,6 @@ describe("preference: tabBehavior = insert-child", () => {
     expect(dispatched).toEqual([{ type: "tab", shift: true }]);
   });
 
-  it("Tab in editing mode is swallowed on an object-card row", () => {
-    const m = model();
-    m.children[0].type = "object"; // "a" is a card; "a1" is one of its rows
-    const { deps, dispatched } = makeDeps();
-    const { preventDefault } = run(
-      deps,
-      state(m, "a1", true, "A1"),
-      { key: "Tab" },
-      {},
-      prefs
-    );
-    expect(dispatched).toEqual([]);
-    expect(preventDefault).toHaveBeenCalled();
-  });
 });
 
 describe("preference: arrowBehavior = navigate", () => {

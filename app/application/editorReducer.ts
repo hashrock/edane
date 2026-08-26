@@ -22,7 +22,7 @@
  * selectionEnd. There is no multi-node selection.
  */
 
-import type { MindMapModel, NodeType, NumFormat } from "../domain/model";
+import type { MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   findParentAndIndex,
@@ -44,13 +44,10 @@ import {
   setNodeStyle,
   setChecked,
   setLinkMeta,
-  setNumFormat,
   moveNodeUp,
   moveNodeDown,
   moveBranch,
-  violatesObjectCardNesting,
 } from "../domain/model";
-import { objectSiblingTemplate } from "./objectField";
 import { assertNever } from "../lib/assertNever";
 
 export interface DocumentState {
@@ -219,13 +216,6 @@ export type EditorAction =
     }
   // Task checkbox; `null` removes it (the node stops being a task).
   | { type: "setChecked"; nodeId: string; checked: boolean | null }
-  // Object-card field rows: numeric display format (null clears the field).
-  | {
-      type: "setNumFormat";
-      nodeId: string;
-      numFormat?: NumFormat | null;
-      decimals?: number | null;
-    }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -261,20 +251,6 @@ function documentReducer(
       const currentNode = findNode(model, activeNodeId);
       if (!currentNode) return { document };
 
-      if (currentNode.type === "object") {
-        // Enter on a card never splits its title — it creates the next card,
-        // prefilled with this card's keys ("schema by example").
-        const newNode = objectSiblingTemplate(currentNode);
-        return {
-          document: {
-            ...document,
-            model: addSiblingAfter(model, activeNodeId, newNode),
-          },
-          focusId: newNode.id,
-          focusCursorPos: 0,
-          focusSelectionEnd: 0,
-        };
-      }
 
       if (action.pos >= currentNode.text.length) {
         const newId = generateId();
@@ -314,14 +290,6 @@ function documentReducer(
 
     case "tab": {
       if (!activeNodeId) return { document };
-      if (!action.shift) {
-        // Indenting a card row would nest it under the previous row, where the
-        // card hides it (row subtrees don't render) — the caret would land on
-        // an invisible node. Block the footgun; Shift+Tab (out of the card)
-        // stays allowed.
-        const info = findParentAndIndex(document.model, activeNodeId);
-        if (info?.parent.type === "object") return { document };
-      }
       const newModel = action.shift
         ? dedentNode(document.model, activeNodeId)
         : indentNode(document.model, activeNodeId);
@@ -438,11 +406,6 @@ function documentReducer(
       if (!activeNodeId || !source) return { document };
       const target = findNode(model, activeNodeId);
       if (!target) return { document };
-      // Pasting a copied object card onto another one would nest cards, which
-      // addChildToNode below refuses; check before touching the model so a
-      // blocked paste doesn't still expand the target or focus a fresh id
-      // that was never actually inserted.
-      if (violatesObjectCardNesting(target.type, source.type)) return { document };
       const fresh = cloneWithNewIds(source);
       // Expand the target so the pasted child is visible, then append it.
       let newModel = toggleCollapse(model, activeNodeId, false);
@@ -487,12 +450,7 @@ function documentReducer(
 
     case "insertSiblingAfter": {
       if (!activeNodeId) return { document };
-      const current = findNode(document.model, activeNodeId);
-      // Sibling of an object card = the next card, keys prefilled (see enter).
-      const newNode: MindMapModel =
-        current?.type === "object"
-          ? objectSiblingTemplate(current)
-          : { id: generateId(), text: "", children: [] };
+      const newNode: MindMapModel = { id: generateId(), text: "", children: [] };
       return {
         document: {
           ...document,
@@ -560,11 +518,9 @@ function documentReducer(
         newModel = setNodeType(newModel, action.nodeId, action.nodeType);
       }
       const newDocument = { ...document, model: newModel };
-      // A nodeType change (e.g. to "object") can hide the active node the same
-      // way toggleCollapse can — its ancestor's grandchildren drop out of the
-      // flat order. Refocus onto the node whose content just changed, mirroring
-      // setNodeType, so "activeNodeId is always visible" holds regardless of
-      // which nodeType a future caller passes here.
+      // Refocus onto the node whose content just changed if the active node
+      // dropped out of the flat order, so "activeNodeId is always visible"
+      // holds regardless of what a future caller passes here.
       if (activeNodeId && !getFlatOrder(newModel).includes(activeNodeId)) {
         return { document: newDocument, focusId: action.nodeId };
       }
@@ -595,16 +551,6 @@ function documentReducer(
       const node = findNode(document.model, action.nodeId);
       if (!node) return { document };
       const newModel = setChecked(document.model, action.nodeId, action.checked);
-      return { document: { ...document, model: newModel } };
-    }
-
-    case "setNumFormat": {
-      const node = findNode(document.model, action.nodeId);
-      if (!node) return { document };
-      const newModel = setNumFormat(document.model, action.nodeId, {
-        numFormat: action.numFormat,
-        decimals: action.decimals,
-      });
       return { document: { ...document, model: newModel } };
     }
 
@@ -767,7 +713,6 @@ function viewReducer(
     case "setNodeStyle":
     case "setLinkMeta":
     case "setChecked":
-    case "setNumFormat":
     case "copyBranch":
       return view;
 
@@ -800,33 +745,12 @@ function viewReducer(
       if (!view.activeNodeId) return view;
       const dir = action.type === "moveUpSiblingFirst" ? -1 : 1;
       const info = findParentAndIndex(model, view.activeNodeId);
-      const node = findNode(model, view.activeNodeId);
       // THE RULE: these never descend into a node's children — going a level
       // deeper is → 's job. Otherwise "↓ on a parent" would mean one thing for
       // a node with a following sibling and another for the last child of a
       // branch (the flat order's next IS the first child), which is invisible
       // to the user and was exactly the bug this replaces.
       //
-      // The single exception is an expanded object card: it draws its children
-      // as rows INSIDE its own box, so the title and rows form one visual
-      // column and ↓ must step into the card rather than over it. A folded card
-      // hides its rows (visibleChildrenOf agrees) and a row's own subtree is
-      // never drawn, so the exception stops at the card's direct children.
-      //
-      // This is deliberately memoryless: ← back to the title and ↓ again
-      // re-enters the card rather than continuing past it, because what sits
-      // directly below the title on screen is the first row — always. Leaving
-      // the card means walking its rows (or folding it). Making ↓ "remember"
-      // that the rows were already visited would put the meaning of a key back
-      // into hidden state, which is the class of bug this rule exists to kill.
-      if (
-        dir === 1 &&
-        node?.type === "object" &&
-        !node.collapsed &&
-        node.children.length > 0
-      ) {
-        return focusView(view, model, node.children[0].id);
-      }
       // Siblings share a parent, so if the active node is visible they all are
       // — no collapsed check needed here (unlike moveToChild). The same holds
       // for the parent and for any ancestor's sibling below.
@@ -1042,9 +966,9 @@ function viewReducer(
 
     case "setNodeContent": {
       if (focusId !== undefined) {
-        // documentReducer only supplies focusId here when a nodeType change
-        // hid the previously-active node (e.g. an ancestor turned "object");
-        // land on it like the generic focus-handoff group above.
+        // documentReducer only supplies focusId here when the change hid the
+        // previously-active node; land on it like the generic focus-handoff
+        // group above.
         return focusView(view, model, focusId, focusCursorPos, focusSelectionEnd);
       }
       if (view.activeNodeId !== action.nodeId) return view;

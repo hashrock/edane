@@ -36,15 +36,6 @@ describe("measureModelNode width cap", () => {
       model({ type: "link", text: LONG, favicon: "https://e/f.ico" }),
     ],
     ["markdown", model({ type: "markdown", text: `# ${LONG}` })],
-    ["collapsed object", model({ type: "object", text: LONG, collapsed: true })],
-    [
-      "expanded object card",
-      model({
-        type: "object",
-        text: LONG,
-        children: [{ id: "r", text: `キー: ${LONG}`, children: [] }],
-      }),
-    ],
   ];
 
   for (const [name, m] of kinds) {
@@ -79,22 +70,14 @@ describe("measureModelNode width cap", () => {
 });
 
 describe("flattenToNodes width cap", () => {
-  it("caps every flat node, card rows included", () => {
+  it("caps every flat node", () => {
     const nodes = flattenToNodes(
       model({
         text: LONG,
-        children: [
-          model({ id: "t", text: LONG }),
-          model({
-            id: "o",
-            type: "object",
-            text: LONG,
-            children: [{ id: "f", text: `キー: ${LONG}`, children: [] }],
-          }),
-        ],
+        children: [model({ id: "t", text: LONG })],
       })
     );
-    expect(nodes.length).toBeGreaterThan(3);
+    expect(nodes.length).toBeGreaterThan(1);
     for (const n of nodes) {
       expect(n.width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
     }
@@ -162,7 +145,6 @@ describe("task checkbox geometry", () => {
     expect(supportsCheckbox("link")).toBe(true);
     expect(supportsCheckbox("image")).toBe(false);
     expect(supportsCheckbox("markdown")).toBe(false);
-    expect(supportsCheckbox("object")).toBe(false);
   });
 
   it("costs nothing until the node is actually a task", () => {

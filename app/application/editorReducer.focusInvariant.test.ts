@@ -4,9 +4,8 @@
  * non-null, must resolve to a node that actually exists AND is visible —
  * present in {@link getFlatOrder}'s result — in the resulting
  * `document.model`. Existence alone isn't enough: a node can exist while
- * hidden inside a collapsed ancestor or inside an "object" card's hidden
- * grandchild region, and several branches (toggleCollapse, setNodeType,
- * setNodeContent, pasteBranch) go out of their way to refocus rather than
+ * hidden inside a collapsed ancestor, and several branches (toggleCollapse,
+ * setNodeType, setNodeContent, pasteBranch) go out of their way to refocus rather than
  * leave activeNodeId pointing at an invisible node. Today that's only
  * enforced ad hoc, one branch at a time (the `!currentNode`/`!node` guards
  * covered by editorReducer.coverage.test.ts) plus, for undo/redo
@@ -117,7 +116,6 @@ const ACTIONS = {
   setNodeStyle: { type: "setNodeStyle", nodeId: "a1", bold: true },
   setLinkMeta: { type: "setLinkMeta", nodeId: "a1", linkTitle: "t" },
   setChecked: { type: "setChecked", nodeId: "a1", checked: true },
-  setNumFormat: { type: "setNumFormat", nodeId: "a1", numFormat: "comma" },
   insertNodes: {
     type: "insertNodes",
     targetId: "a1",

@@ -28,7 +28,7 @@
 import type { EditorAction, EditorState, UndoType } from "./editorReducer";
 import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
-import { findNode, findParentAndIndex, nextCheckedState } from "../domain/model";
+import { findNode, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
 import {
   DEFAULT_PREFERENCES,
@@ -280,11 +280,6 @@ export function buildKeymap(
               if (!n) return "handled";
               // Don't stack an empty child under an already-empty node.
               if (activeIsBlank(ctx)) return "handled";
-              // An object card's rows don't render their subtrees — a child
-              // inserted under a row would strand the caret on an invisible
-              // node. Same footgun the reducer blocks for indent.
-              const info = findParentAndIndex(ctx.state.document.model, n.id);
-              if (info?.parent.type === "object") return "handled";
               const next = deps.dispatch(
                 { type: "addChild", nodeId: n.id },
                 "add-child"
@@ -335,8 +330,6 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.altKey && e.key === "ArrowRight",
       run: () => {
-        // The object-card guard lives in the reducer's "tab" case, so it
-        // applies here too.
         deps.dispatch({ type: "tab", shift: false }, "indent");
         return "handled";
       },
@@ -417,10 +410,6 @@ export function buildKeymap(
               // Don't stack an empty child under an already-empty node (the
               // live editingText is what counts while editing).
               if (activeIsBlank(ctx)) return "handled";
-              // Same object-card guard as selection mode: a card row's subtree
-              // isn't rendered, so a child there would strand the caret.
-              const info = findParentAndIndex(ctx.state.document.model, n.id);
-              if (info?.parent.type === "object") return "handled";
               const next = deps.dispatch(
                 { type: "addChild", nodeId: n.id },
                 "add-child"

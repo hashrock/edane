@@ -37,20 +37,6 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
     });
     const vis = visibleChildrenOf(node);
     if (vis.kind === "none") return;
-    if (vis.kind === "leaves") {
-      // Rows with hidden children report `collapsed` so the count badge
-      // renders — see visibleChildrenOf for why this set of nodes matches
-      // what the caret can reach.
-      for (const c of vis.children) {
-        rows.push({
-          node: c,
-          depth: depth + 1,
-          hasChildren: c.children.length > 0,
-          collapsed: c.children.length > 0,
-        });
-      }
-      return;
-    }
     for (const c of vis.children) walk(c, depth + 1);
   }
   walk(model, 0);

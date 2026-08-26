@@ -98,18 +98,11 @@ export const MESSAGES_JA = {
   nodeTypeImage: "画像にする（URL）",
   nodeTypeLink: "リンクにする（URL）",
   nodeTypeMarkdown: "Markdownにする",
-  nodeTypeObject: "オブジェクトカードにする",
-  numFormatComma: "カンマ区切り（1,234）",
-  numFormatCurrency: "通貨（¥1,234）",
-  numFormatPercent: "パーセント（12%）",
   menuOpenLink: "リンクを開く",
   menuFetchLinkMeta: "リンク情報を取得（タイトル/favicon）",
   menuAddChild: "子ノードを追加",
   menuExpand: "展開する",
   menuCollapse: "折りたたむ",
-  menuMoreDecimals: "小数点桁数を増やす",
-  menuFewerDecimals: "小数点桁数を減らす",
-  menuAutoDecimals: "小数点桁数を自動に戻す",
   menuBiggerText: "文字を大きく",
   menuSmallerText: "文字を小さく",
   menuResetTextSize: "標準サイズに戻す",
@@ -303,7 +296,6 @@ export const MESSAGES_JA = {
   starterTopics: "トピック1\nトピック2",
 
   // --- アプリケーション層の文言 ---
-  addFieldLabel: "＋ フィールドを追加",
   untitledMarkdown: "無題のMarkdown",
   mdHeadingFallback: "見出し",
   privateNotePublishReason:
@@ -413,18 +405,11 @@ export const MESSAGES_EN = {
   nodeTypeImage: "Convert to image (URL)",
   nodeTypeLink: "Convert to link (URL)",
   nodeTypeMarkdown: "Convert to Markdown",
-  nodeTypeObject: "Convert to object card",
-  numFormatComma: "Thousands separator (1,234)",
-  numFormatCurrency: "Currency (¥1,234)",
-  numFormatPercent: "Percent (12%)",
   menuOpenLink: "Open link",
   menuFetchLinkMeta: "Fetch link info (title/favicon)",
   menuAddChild: "Add child node",
   menuExpand: "Expand",
   menuCollapse: "Collapse",
-  menuMoreDecimals: "More decimal places",
-  menuFewerDecimals: "Fewer decimal places",
-  menuAutoDecimals: "Reset decimals to auto",
   menuBiggerText: "Larger text",
   menuSmallerText: "Smaller text",
   menuResetTextSize: "Reset to default size",
@@ -619,7 +604,6 @@ export const MESSAGES_EN = {
   starterTopics: "Topic 1\nTopic 2",
 
   // --- Application-layer strings ---
-  addFieldLabel: "＋ Add field",
   untitledMarkdown: "Untitled Markdown",
   mdHeadingFallback: "Heading",
   privateNotePublishReason:
