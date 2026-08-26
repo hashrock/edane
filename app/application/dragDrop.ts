@@ -9,7 +9,6 @@
 
 import type { MindMapNode } from "./nodeUtils";
 import { nodeBoxWidth, nodeBoxHeight } from "./nodeUtils";
-import { violatesObjectCardNesting } from "../domain/model";
 
 /** Where a dragged branch would land if dropped at the current pointer. */
 export type DropTarget =
@@ -77,24 +76,6 @@ export function resolveDropTarget(
       continue;
     }
 
-    // A card field row is never a drop-INTO target (its subtree is hidden by
-    // the card — the branch would vanish); the whole row resolves to a
-    // sibling slot among the card's children instead. The card node itself
-    // isn't the row's flat parent (rows are layout leaves), so the slot comes
-    // from the row's own child index rather than siblingTarget's parent scan.
-    if (node.cardRow) {
-      const after = worldY > node.y;
-      const target: DropTarget = {
-        kind: "sibling",
-        parentId: node.cardRow.cardId,
-        index: node.cardRow.index + (after ? 1 : 0),
-        targetId: node.id,
-        position: after ? "after" : "before",
-      };
-      if (isCardIntoCard(nodes, draggedId, target)) return null;
-      return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
-    }
-
     // Root has no siblings — its whole box is a child drop.
     const zone = isRoot ? 0 : Math.min(h * 0.3, SIBLING_ZONE_MAX);
     let target: DropTarget;
@@ -105,25 +86,9 @@ export function resolveDropTarget(
     } else {
       target = { kind: "child", parentId: node.id, targetId: node.id };
     }
-    if (isCardIntoCard(nodes, draggedId, target)) return null;
     return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
   }
   return null;
-}
-
-/**
- * Blocks a drop whose resolved parent would violate
- * {@link violatesObjectCardNesting} — the same adjacency rule setNodeType
- * enforces when retyping a node instead of moving a branch.
- */
-function isCardIntoCard(
-  nodes: MindMapNode[],
-  draggedId: string,
-  target: DropTarget
-): boolean {
-  const dragged = nodes.find((n) => n.id === draggedId);
-  const parent = nodes.find((n) => n.id === target.parentId);
-  return violatesObjectCardNesting(parent?.type, dragged?.type);
 }
 
 /** Sibling insertion before/after `siblingId` under its parent. */
@@ -156,13 +121,7 @@ function isNoopFor(
   if (curParentId !== target.parentId) return false;
   const parent = nodes.find((n) => n.id === curParentId);
   if (!parent) return false;
-  // A card row isn't in its card's flat `children` (rows are layout leaves);
-  // its slot comes from cardRow.index instead.
-  const dragged = nodes.find((n) => n.id === draggedId);
-  const curIndex =
-    dragged?.cardRow && dragged.cardRow.cardId === curParentId
-      ? dragged.cardRow.index
-      : parent.children.indexOf(draggedId);
+  const curIndex = parent.children.indexOf(draggedId);
   if (target.kind === "child") {
     return curIndex === parent.children.length - 1;
   }

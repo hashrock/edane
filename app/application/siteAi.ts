@@ -42,7 +42,7 @@ const SYSTEM_PROMPT = `You design small static web pages from a tree of notes, w
 
 Runtime contract (strict):
 - Output ONE file, index.jsx. It must begin with: import { data } from './data.js';
-- \`data\` is a node: { id, type: "text"|"image"|"link"|"markdown"|"object", text, children: node[] }. For "image" and "link" nodes, \`text\` holds the URL.
+- \`data\` is a node: { id, type: "text"|"image"|"link"|"markdown", text, children: node[] }. For "image" and "link" nodes, \`text\` holds the URL.
 - Export a default function component that returns the page body (no <html>/<head>/<body>).
 - JSX is compiled by TypeScript with factory \`h\`; use \`class\` for CSS classes. Components are plain functions taking props. No hooks, no state, no event handlers, no <script>, no external imports other than './data.js', no fetch.
 - Styling: UnoCSS / Tailwind utility classes only (they are generated from the markup). No <style> blocks.

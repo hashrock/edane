@@ -114,11 +114,6 @@ describe("modelToMarkdown", () => {
     expect(modelToMarkdown(tree)).toBe("- [https://x.dev/](https://x.dev/)");
   });
 
-  it("renders an object node's title like a text node", () => {
-    const tree = node("Root", [node("card title", [], { type: "object" })]);
-    expect(modelToMarkdown(tree)).toBe("- Root\n  - card title");
-  });
-
   it("collapses newlines in a markdown node onto its bullet line", () => {
     const tree = node("# Title\n\nbody", [], { type: "markdown" });
     expect(modelToMarkdown(tree)).toBe("- # Title body");

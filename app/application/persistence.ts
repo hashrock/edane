@@ -4,7 +4,7 @@
  */
 
 import type { MindMapModel } from "../domain/model";
-import { generateId, isNumFormat, isStoredNodeType } from "../domain/model";
+import { generateId, isStoredNodeType } from "../domain/model";
 import { t } from "./i18n";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
@@ -87,14 +87,6 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
-  if (isNumFormat(v.numFormat)) node.numFormat = v.numFormat;
-  if (
-    typeof v.decimals === "number" &&
-    Number.isInteger(v.decimals) &&
-    v.decimals >= 0 &&
-    v.decimals <= 6
-  )
-    node.decimals = v.decimals;
 
   for (const child of v.children) {
     const normalized = normalizeTree(child, seen);

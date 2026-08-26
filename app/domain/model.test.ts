@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel, NodeType, NumFormat } from "./model";
+import type { MindMapModel, NodeType } from "./model";
 import {
   detachBranch,
   cloneWithNewIds,
@@ -26,7 +26,6 @@ import {
   mergeIntoPredecessor,
   mergeSuccessorInto,
   isStoredNodeType,
-  isNumFormat,
 } from "./model";
 
 /** Build a small fixed tree:
@@ -149,27 +148,12 @@ describe("cloneWithNewIds", () => {
 });
 
 describe("visibleChildrenOf", () => {
-  it("hides all children of a collapsed node, regardless of type", () => {
+  it("hides all children of a collapsed node", () => {
     const collapsedText: MindMapModel = { id: "c1", text: "C", collapsed: true, children: [{ id: "x", text: "X", children: [] }] };
-    const collapsedObject: MindMapModel = {
-      id: "c2",
-      text: "C",
-      type: "object",
-      collapsed: true,
-      children: [{ id: "y", text: "Y", children: [] }],
-    };
     expect(visibleChildrenOf(collapsedText)).toEqual({ kind: "none" });
-    expect(visibleChildrenOf(collapsedObject)).toEqual({ kind: "none" });
   });
 
-  it("exposes an object node's direct children as leaves, not recursed into", () => {
-    const grandchild: MindMapModel = { id: "gc", text: "GC", children: [] };
-    const child: MindMapModel = { id: "c", text: "C", children: [grandchild] };
-    const object: MindMapModel = { id: "o", text: "O", type: "object", children: [child] };
-    expect(visibleChildrenOf(object)).toEqual({ kind: "leaves", children: [child] });
-  });
-
-  it("recurses normally into a non-collapsed, non-object node's children", () => {
+  it("recurses normally into a non-collapsed node's children", () => {
     const model = sampleModel();
     expect(visibleChildrenOf(model)).toEqual({ kind: "recurse", children: model.children });
   });
@@ -306,37 +290,6 @@ describe("mergeIntoPredecessor", () => {
     expect(getFlatOrder(res.model)).toEqual(["root", "a", "a1", "b1"]);
   });
 
-  it("returns null instead of nesting an object card under a previous-sibling object card", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        { id: "a", text: "A", type: "object", children: [] },
-        {
-          id: "b",
-          text: "B",
-          children: [{ id: "c", text: "C", type: "object", children: [] }],
-        },
-      ],
-    };
-    expect(mergeIntoPredecessor(model, "b")).toBeNull();
-  });
-
-  it("returns null instead of nesting an object card under its object-card parent", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      type: "object",
-      children: [
-        {
-          id: "b",
-          text: "B",
-          children: [{ id: "c", text: "C", type: "object", children: [] }],
-        },
-      ],
-    };
-    expect(mergeIntoPredecessor(model, "b")).toBeNull();
-  });
 });
 
 describe("mergeSuccessorInto", () => {
@@ -388,43 +341,6 @@ describe("mergeSuccessorInto", () => {
     expect(mergeSuccessorInto(model, "missing")).toBe(model);
   });
 
-  it("returns the same reference instead of nesting an object card under an object-card node (child pulled up)", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        {
-          id: "a",
-          text: "A",
-          type: "object",
-          children: [
-            {
-              id: "row",
-              text: "row",
-              children: [{ id: "c", text: "C", type: "object", children: [] }],
-            },
-          ],
-        },
-      ],
-    };
-    expect(mergeSuccessorInto(model, "a")).toBe(model);
-  });
-
-  it("returns the same reference instead of nesting an object card under an object-card node (sibling merge)", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        { id: "a", text: "A", type: "object", children: [] },
-        {
-          id: "b",
-          text: "B",
-          children: [{ id: "c", text: "C", type: "object", children: [] }],
-        },
-      ],
-    };
-    expect(mergeSuccessorInto(model, "a")).toBe(model);
-  });
 });
 
 describe("addSiblingAfter edge cases", () => {
@@ -461,44 +377,6 @@ describe("setNodeType", () => {
     expect(findNode(result, "n")!.type).toBeUndefined();
   });
 
-  it("refuses to make a node 'object' when its parent is already an object card", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        {
-          id: "card",
-          text: "Card",
-          type: "object",
-          children: [{ id: "field", text: "k: v", children: [] }],
-        },
-      ],
-    };
-    const result = setNodeType(model, "field", "object");
-    expect(findNode(result, "field")!.type).toBeUndefined();
-  });
-
-  it("refuses to make a node 'object' when it already has an object-type child", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        {
-          id: "n",
-          text: "N",
-          children: [{ id: "card", text: "Card", type: "object", children: [] }],
-        },
-      ],
-    };
-    const result = setNodeType(model, "n", "object");
-    expect(findNode(result, "n")!.type).toBeUndefined();
-  });
-
-  it("still allows a node with no object neighbors to become 'object'", () => {
-    const model = sampleModel();
-    const result = setNodeType(model, "b", "object");
-    expect(findNode(result, "b")!.type).toBe("object");
-  });
 });
 
 describe("setNodeStyle branch conditions", () => {
@@ -561,17 +439,6 @@ describe("addChildToNode edge cases", () => {
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
   });
 
-  it("is a no-op when appending an object card under an object-card parent", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [{ id: "card", text: "Card", type: "object", children: [] }],
-    };
-    const newCard: MindMapModel = { id: "x", text: "X", type: "object", children: [] };
-    const result = addChildToNode(model, "card", newCard);
-    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
-    expect(findNode(result, "card")!.children).toHaveLength(0);
-  });
 });
 
 describe("removeNode edge cases", () => {
@@ -622,19 +489,6 @@ describe("indentNode edge cases", () => {
     expect(getFlatOrder(result)).toEqual(["root", "a", "a1", "b"]);
   });
 
-  it("is a no-op when indenting an object card under an object-card previous sibling", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        { id: "card1", text: "Card1", type: "object", children: [] },
-        { id: "card2", text: "Card2", type: "object", children: [] },
-      ],
-    };
-    const result = indentNode(model, "card2");
-    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
-    expect(findNode(result, "card1")!.children).toHaveLength(0);
-  });
 });
 
 describe("dedentNode edge cases", () => {
@@ -656,29 +510,6 @@ describe("dedentNode edge cases", () => {
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
   });
 
-  it("is a no-op when dedenting an object card up into a direct child of its object-card grandparent", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        {
-          id: "card",
-          text: "Card",
-          type: "object",
-          children: [
-            {
-              id: "row",
-              text: "row",
-              children: [{ id: "nested", text: "Nested", type: "object", children: [] }],
-            },
-          ],
-        },
-      ],
-    };
-    const result = dedentNode(model, "nested");
-    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
-    expect(findNode(result, "row")!.children).toHaveLength(1);
-  });
 });
 
 describe("moveNodeUp / moveNodeDown", () => {
@@ -819,18 +650,6 @@ describe("moveBranch", () => {
     expect(moveBranch(model, "a", "nope")).toBe(model);
   });
 
-  it("returns the SAME reference instead of nesting an object card under an object-card parent", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        { id: "a", text: "A", type: "object", children: [] },
-        { id: "b", text: "B", type: "object", children: [] },
-      ],
-    };
-    expect(moveBranch(model, "b", "a")).toBe(model);
-  });
-
   it("returns the SAME reference for a no-op append (already last child)", () => {
     const model = wideModel();
     expect(moveBranch(model, "c", "root")).toBe(model);
@@ -864,7 +683,7 @@ describe("null-node branch coverage for model mutations", () => {
   });
 });
 
-describe("isStoredNodeType / isNumFormat", () => {
+describe("isStoredNodeType", () => {
   // Every non-"text" NodeType member, spelled out so this test fails to
   // typecheck (not just fails at runtime) if a member is ever renamed without
   // updating the list below.
@@ -872,19 +691,15 @@ describe("isStoredNodeType / isNumFormat", () => {
     "image",
     "link",
     "markdown",
-    "object",
   ];
-  const numFormats: NumFormat[] = ["comma", "currency", "percent"];
 
-  it("accepts every declared StoredNodeType/NumFormat literal", () => {
+  it("accepts every declared StoredNodeType literal", () => {
     for (const t of storedTypes) expect(isStoredNodeType(t)).toBe(true);
-    for (const f of numFormats) expect(isNumFormat(f)).toBe(true);
   });
 
   it("rejects text, unknown strings and non-strings", () => {
     for (const bad of ["text", "bogus", 1, null, undefined, {}]) {
       expect(isStoredNodeType(bad)).toBe(false);
-      expect(isNumFormat(bad)).toBe(false);
     }
   });
 });

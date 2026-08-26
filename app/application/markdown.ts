@@ -172,8 +172,7 @@ function nodeToMarkdownText(node: MindMapModel): string {
       // the bullet line (a full re-embed would break the outline's list
       // structure).
       return node.text.replace(/\n+/g, " ").trim();
-    case "text":
-    case "object": {
+    case "text": {
       const text = node.text;
       return node.bold && text.trim() !== "" ? `**${text}**` : text;
     }

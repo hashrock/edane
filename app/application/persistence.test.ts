@@ -21,7 +21,6 @@ const STORED_NODE_TYPES: readonly Exclude<NodeType, "text">[] = [
   "image",
   "link",
   "markdown",
-  "object",
 ] satisfies NodeType[];
 
 /** Strip IDs so we can compare tree structure and text only */

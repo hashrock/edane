@@ -43,7 +43,7 @@ function key(k: string, mods: Partial<AuxKeyEvent> = {}) {
 
 describe("EDIT_SURFACE registry", () => {
   it("declares a surface for every layout × NodeType (compile-time via satisfies; sanity-check at runtime)", () => {
-    const all: NodeType[] = ["text", "image", "link", "markdown", "object"];
+    const all: NodeType[] = ["text", "image", "link", "markdown"];
     for (const layout of ["canvas", "outline"] as const) {
       for (const t of all) {
         expect(EDIT_SURFACE[layout][t].kind).toMatch(

@@ -20,8 +20,7 @@ const TREE: MindMapModel = {
         {
           id: "a1",
           text: "price: 1200",
-          numFormat: "currency",
-          decimals: 2,
+          fontSize: 20,
           children: [],
         },
       ],
@@ -87,8 +86,7 @@ describe("publishedNodeJson", () => {
     expect(out.children[0].id).toBe("a");
     expect(out.children[0].children[0]).toMatchObject({
       text: "price: 1200",
-      numFormat: "currency",
-      decimals: 2,
+      fontSize: 20,
     });
     expect(out.children[1]).toMatchObject({
       type: "link",

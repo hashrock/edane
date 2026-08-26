@@ -73,14 +73,12 @@ export const EDIT_SURFACE = {
   canvas: {
     text: { kind: "keymap-textarea" },
     markdown: { kind: "modal-panel" },
-    object: { kind: "keymap-textarea" },
     image: { kind: "aux-input" },
     link: { kind: "aux-input" },
   },
   outline: {
     text: { kind: "keymap-textarea" },
     markdown: { kind: "keymap-textarea" },
-    object: { kind: "keymap-textarea" },
     image: { kind: "aux-input" },
     link: { kind: "aux-input" },
   },

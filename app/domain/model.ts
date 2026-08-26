@@ -5,12 +5,9 @@
 
 /**
  * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
- * `markdown` stores a raw Markdown blob in `text` (rendered as a source card);
- * `object` renders as a card whose direct children are its `key: value` field
- * rows (the children stay plain nodes — the card is a VIEW of the subtree, not
- * a separate data structure, so converting back to `text` loses nothing).
+ * `markdown` stores a raw Markdown blob in `text` (rendered as a source card).
  */
-export type NodeType = "text" | "image" | "link" | "markdown" | "object";
+export type NodeType = "text" | "image" | "link" | "markdown";
 
 /**
  * Node kind as stored in JSON. `"text"` is represented by absence so that
@@ -29,46 +26,10 @@ const STORED_NODE_TYPE_SET = {
   image: true,
   link: true,
   markdown: true,
-  object: true,
 } as const satisfies Record<StoredNodeType, true>;
 
 export function isStoredNodeType(value: unknown): value is StoredNodeType {
   return typeof value === "string" && value in STORED_NODE_TYPE_SET;
-}
-
-/**
- * An object node (card) can't be the direct parent or direct child of
- * another object node: a card renders its direct children as key/value rows
- * (objectCardGeom in application/objectCard.ts only special-cases
- * image/link/markdown), so a nested card's own subtree would be mangled into
- * a row instead of shown as a card. Single source of truth for this
- * adjacency check — used both when retyping a node ({@link setNodeType}) and
- * when moving a branch by drag-and-drop (isCardIntoCard in
- * application/dragDrop.ts).
- */
-export function violatesObjectCardNesting(
-  parentType: NodeType | undefined,
-  childType: NodeType | undefined
-): boolean {
-  return parentType === "object" && childType === "object";
-}
-
-/**
- * Display format for a numeric field-row value inside an object card. This is
- * Excel's value/display split: the node's `text` keeps the raw value, only the
- * card rendering changes.
- */
-export type NumFormat = "comma" | "currency" | "percent";
-
-/** Same exhaustiveness trick as {@link STORED_NODE_TYPE_SET}, for NumFormat. */
-const NUM_FORMAT_SET = {
-  comma: true,
-  currency: true,
-  percent: true,
-} as const satisfies Record<NumFormat, true>;
-
-export function isNumFormat(value: unknown): value is NumFormat {
-  return typeof value === "string" && value in NUM_FORMAT_SET;
 }
 
 /** Tree node model (stored as JSON) */
@@ -98,10 +59,6 @@ export interface MindMapModel {
    * exactly one place: `supportsCheckbox` in application/nodeUtils.ts.
    */
   checked?: boolean;
-  /** Object-card field rows: numeric display format (absent = raw). */
-  numFormat?: NumFormat;
-  /** Object-card field rows: fixed fraction digits (absent = as typed). */
-  decimals?: number;
 }
 
 // --- ID generation ---
@@ -146,27 +103,22 @@ export function findParentAndIndex(
  * The tree-visibility rule shared by keyboard navigation ({@link getFlatOrder}),
  * canvas layout (`flattenToNodes` in application/nodeUtils.ts) and the outline
  * row list (`outlineRows` in application/outline.ts): a collapsed node hides its
- * descendants entirely; an "object" node's direct children are visible rows but
- * their own subtrees stay hidden inside the card. Defining the rule once here
- * keeps the three traversals — which independently need it for three different
- * output shapes — from drifting apart.
+ * descendants entirely. Defining the rule once here keeps the three
+ * traversals — which independently need it for three different output
+ * shapes — from drifting apart.
  */
 export type VisibleChildren =
   | { kind: "none" }
-  | { kind: "leaves"; children: MindMapModel[] }
   | { kind: "recurse"; children: MindMapModel[] };
 
 export function visibleChildrenOf(node: MindMapModel): VisibleChildren {
   if (node.collapsed) return { kind: "none" };
-  if (node.type === "object") return { kind: "leaves", children: node.children };
   return { kind: "recurse", children: node.children };
 }
 
 /**
  * DFS order of node IDs (navigation order). Descendants of a collapsed node are
- * skipped so keyboard navigation never lands on a hidden node. An object node's
- * direct children are its visible card rows, but their own subtrees are hidden
- * inside the card — navigation stops at the rows for the same reason.
+ * skipped so keyboard navigation never lands on a hidden node.
  */
 export function getFlatOrder(model: MindMapModel): string[] {
   const result: string[] = [];
@@ -174,10 +126,6 @@ export function getFlatOrder(model: MindMapModel): string[] {
     result.push(node.id);
     const vis = visibleChildrenOf(node);
     if (vis.kind === "none") return;
-    if (vis.kind === "leaves") {
-      for (const child of vis.children) result.push(child.id);
-      return;
-    }
     for (const child of vis.children) walk(child);
   }
   walk(model);
@@ -224,14 +172,7 @@ export function addSiblingAfter(
   return cloned;
 }
 
-/**
- * Set a node's kind. Returns a new model. `text` is stored as absent.
- *
- * Refuses a change to "object" that would violate
- * {@link violatesObjectCardNesting} on either side of the node (as its new
- * parent or as one of its existing children). On a blocked change the model
- * is returned unchanged.
- */
+/** Set a node's kind. Returns a new model. `text` is stored as absent. */
 export function setNodeType(
   model: MindMapModel,
   nodeId: string,
@@ -240,14 +181,6 @@ export function setNodeType(
   const cloned = cloneModel(model);
   const node = findNode(cloned, nodeId);
   if (!node) return cloned;
-  if (type === "object") {
-    const parentEntry = findParentAndIndex(cloned, nodeId);
-    const parentIsObject = violatesObjectCardNesting(parentEntry?.parent.type, "object");
-    const hasObjectChild = node.children.some((c) =>
-      violatesObjectCardNesting("object", c.type)
-    );
-    if (parentIsObject || hasObjectChild) return cloned;
-  }
   node.type = type === "text" ? undefined : type;
   return cloned;
 }
@@ -268,30 +201,6 @@ export function setNodeStyle(
     if (style.bold !== undefined) {
       if (style.bold) node.bold = true;
       else delete node.bold;
-    }
-  }
-  return cloned;
-}
-
-/**
- * Set a field row's numeric display format (`null` clears back to absent, like
- * setNodeStyle's fontSize). Returns a new model.
- */
-export function setNumFormat(
-  model: MindMapModel,
-  nodeId: string,
-  patch: { numFormat?: NumFormat | null; decimals?: number | null }
-): MindMapModel {
-  const cloned = cloneModel(model);
-  const node = findNode(cloned, nodeId);
-  if (node) {
-    if (patch.numFormat !== undefined) {
-      if (patch.numFormat === null) delete node.numFormat;
-      else node.numFormat = patch.numFormat;
-    }
-    if (patch.decimals !== undefined) {
-      if (patch.decimals === null) delete node.decimals;
-      else node.decimals = patch.decimals;
     }
   }
   return cloned;
@@ -364,14 +273,7 @@ export function toggleCollapse(
   return cloned;
 }
 
-/**
- * Append newNode as parent's last child. A no-op (parent unchanged) when that
- * would violate {@link violatesObjectCardNesting} — same adjacency rule
- * setNodeType, indentNode/dedentNode and moveBranch enforce, applied here so
- * that pasting a copied object card onto another one (editorReducer's
- * pasteBranch, the only caller that can hand this a non-"text" newNode)
- * can't create the nested-card state they all refuse to create.
- */
+/** Append newNode as parent's last child. */
 export function addChildToNode(
   model: MindMapModel,
   parentId: string,
@@ -380,7 +282,6 @@ export function addChildToNode(
   const cloned = cloneModel(model);
   const parent = findNode(cloned, parentId);
   if (!parent) return cloned;
-  if (violatesObjectCardNesting(parent.type, newNode.type)) return cloned;
   parent.children.push(newNode);
   return cloned;
 }
@@ -436,11 +337,6 @@ export function cloneWithNewIds(node: MindMapModel): MindMapModel {
  * {@link visibleChildrenOf}); the sibling being collapsed doesn't hide
  * itself, so the node being indented could otherwise vanish from
  * `getFlatOrder` while still being the active node.
- *
- * Also a no-op when the previous sibling is an object card and the node
- * being indented is itself one ({@link violatesObjectCardNesting}) — same
- * adjacency rule setNodeType and dragDrop's isCardIntoCard enforce, applied
- * here so Tab can't create the nested-card state they refuse to create.
  */
 export function indentNode(
   model: MindMapModel,
@@ -452,20 +348,13 @@ export function indentNode(
   if (!result || result.index === 0) return cloned;
   const node = result.parent.children[result.index];
   const prevSibling = result.parent.children[result.index - 1];
-  if (violatesObjectCardNesting(prevSibling.type, node.type)) return cloned;
   result.parent.children.splice(result.index, 1);
   prevSibling.collapsed = false;
   prevSibling.children.push(node);
   return cloned;
 }
 
-/**
- * Dedent: move node to parent's level, after parent. Also a no-op when the
- * grandparent is an object card and the node being dedented is itself one
- * ({@link violatesObjectCardNesting}) — dedenting a card row's child up to
- * become a direct sibling of the row would otherwise land a card directly
- * inside a card, the same state setNodeType and dragDrop already refuse.
- */
+/** Dedent: move node to parent's level, after parent. */
 export function dedentNode(
   model: MindMapModel,
   nodeId: string
@@ -477,7 +366,6 @@ export function dedentNode(
   const grandResult = findParentAndIndex(cloned, result.parent.id);
   if (!grandResult) return cloned;
   const node = result.parent.children[result.index];
-  if (violatesObjectCardNesting(grandResult.parent.type, node.type)) return cloned;
   result.parent.children.splice(result.index, 1);
   grandResult.parent.children.splice(grandResult.index + 1, 0, node);
   return cloned;
@@ -522,11 +410,8 @@ export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel 
  * they are BEFORE the move (undefined = append); a same-parent move compensates
  * for the slot freed by the removal. Returns the SAME model reference when the
  * move is impossible or a no-op — root move, dropping on itself or one of its
- * own descendants, unknown ids, a position identical to the current one, or a
- * {@link violatesObjectCardNesting} destination — so callers can treat
- * identity as "skip undo/save". The nesting check is enforced here (not just
- * by dragDrop's isCardIntoCard, the only caller today) so this stays true for
- * any future caller of the domain mutation, not only the current UI path.
+ * own descendants, unknown ids, or a position identical to the current one —
+ * so callers can treat identity as "skip undo/save".
  */
 export function moveBranch(
   model: MindMapModel,
@@ -541,7 +426,6 @@ export function moveBranch(
   if (findNode(node, newParentId)) return model;
   const newParent = findNode(model, newParentId);
   if (!newParent) return model;
-  if (violatesObjectCardNesting(newParent.type, node.type)) return model;
   const cur = findParentAndIndex(model, nodeId);
   if (!cur) return model;
 
@@ -584,10 +468,7 @@ export function moveBranch(
  *     parent can't be collapsed here: a collapsed node hides its own
  *     descendants (including `node`, which is being merged), so `node`
  *     couldn't have been reachable/active in the first place.
- * The root has no predecessor → returns null (caller treats as no-op). Also
- * returns null when the merge would land one of `node`'s children directly
- * under an object-card target ({@link violatesObjectCardNesting}) — same
- * no-op-on-blocked-change convention as setNodeType/indentNode/dedentNode.
+ * The root has no predecessor → returns null (caller treats as no-op).
  *
  * Returns the new model, the id the caret should land on (the merge target) and
  * the caret offset (the target's text length *before* the merge).
@@ -605,8 +486,6 @@ export function mergeIntoPredecessor(
   if (info.index > 0) {
     // Merge into the previous sibling; children trail the sibling's own.
     const target = info.parent.children[info.index - 1];
-    if (node.children.some((c) => violatesObjectCardNesting(target.type, c.type)))
-      return null;
     target.collapsed = false;
     const caretPos = target.text.length;
     target.text += node.text;
@@ -617,8 +496,6 @@ export function mergeIntoPredecessor(
 
   // First child: merge into the parent; the node's children take its slot.
   const target = info.parent;
-  if (node.children.some((c) => violatesObjectCardNesting(target.type, c.type)))
-    return null;
   const caretPos = target.text.length;
   target.text += node.text;
   info.parent.children.splice(info.index, 1, ...node.children);
@@ -632,9 +509,7 @@ export function mergeIntoPredecessor(
  * take that child's slot), otherwise the node's next sibling (whose children
  * are appended to the node). When the node has neither — its DFS-successor
  * would live in an unrelated, shallower subtree — the SAME model reference is
- * returned so callers can treat identity as "no-op". Also a no-op when the
- * successor's children would land directly under an object-card `node`
- * ({@link violatesObjectCardNesting}), same convention as moveBranch.
+ * returned so callers can treat identity as "no-op".
  */
 export function mergeSuccessorInto(
   model: MindMapModel,
@@ -644,9 +519,6 @@ export function mergeSuccessorInto(
   if (!node) return model;
 
   if (!node.collapsed && node.children.length > 0) {
-    const child = node.children[0];
-    if (child.children.some((c) => violatesObjectCardNesting(node.type, c.type)))
-      return model;
     const cloned = cloneModel(model);
     const target = findNode(cloned, nodeId)!;
     const clonedChild = target.children[0];
@@ -657,9 +529,6 @@ export function mergeSuccessorInto(
 
   const info = findParentAndIndex(model, nodeId);
   if (info && info.index < info.parent.children.length - 1) {
-    const sibling = info.parent.children[info.index + 1];
-    if (sibling.children.some((c) => violatesObjectCardNesting(node.type, c.type)))
-      return model;
     const cloned = cloneModel(model);
     const ci = findParentAndIndex(cloned, nodeId)!;
     const target = ci.parent.children[ci.index];

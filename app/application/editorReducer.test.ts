@@ -346,20 +346,6 @@ describe("branch clipboard (cut / copy / paste)", () => {
     expect(editorReducer(s, { type: "pasteBranch" })).toBe(s);
   });
 
-  it("pasteBranch is a no-op when pasting an object card onto another object card", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        { id: "card1", text: "Card1", type: "object", children: [] },
-        { id: "card2", text: "Card2", type: "object", children: [] },
-      ],
-    };
-    const copied = editorReducer(stateAt(model, "card1"), { type: "copyBranch" });
-    const onCard2 = withView(copied, { activeNodeId: "card2" });
-    expect(editorReducer(onCard2, { type: "pasteBranch" })).toBe(onCard2);
-  });
-
   it("pasteBranch expands a collapsed target so the paste is visible", () => {
     const model = sampleModel();
     const copied = editorReducer(stateAt(model, "b"), { type: "copyBranch" });
@@ -1097,96 +1083,6 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
     expect(editorReducer(root, { type: "moveUpSiblingFirst" })).toBe(root);
   });
 
-  // An object card renders its children as rows inside the card box, so the
-  // title and rows read as one column — the single case where ↓ steps into a
-  // node's children. The exception stops at the card's direct rows.
-  describe("object cards are one visual column", () => {
-    /** Root → Card(r1, r2){type: object}, T */
-    function cardModel(collapsed = false): MindMapModel {
-      return {
-        id: "root",
-        text: "Root",
-        children: [
-          {
-            id: "card",
-            text: "Card",
-            type: "object",
-            collapsed,
-            children: [
-              { id: "r1", text: "価格: 1200", children: [] },
-              { id: "r2", text: "在庫: 5", children: [] },
-            ],
-          },
-          { id: "t", text: "T", children: [] },
-        ],
-      };
-    }
-
-    it("walks title → rows → the node after the card", () => {
-      const model = cardModel();
-      let s = stateAt(model, "card");
-      s = editorReducer(s, { type: "moveDownSiblingFirst" });
-      expect(s.view.activeNodeId).toBe("r1");
-      s = editorReducer(s, { type: "moveDownSiblingFirst" });
-      expect(s.view.activeNodeId).toBe("r2");
-      s = editorReducer(s, { type: "moveDownSiblingFirst" });
-      expect(s.view.activeNodeId).toBe("t");
-    });
-
-    it("walks back up out of the card", () => {
-      const model = cardModel();
-      let s = stateAt(model, "r1");
-      s = editorReducer(s, { type: "moveUpSiblingFirst" });
-      expect(s.view.activeNodeId).toBe("card");
-    });
-
-    it("skips the rows of a folded card", () => {
-      const s = stateAt(cardModel(true), "card");
-      expect(
-        editorReducer(s, { type: "moveDownSiblingFirst" }).view.activeNodeId
-      ).toBe("t");
-    });
-
-    it("does not descend into a row's own subtree (the card never draws it)", () => {
-      const model = cardModel();
-      model.children[0].children[0].children = [
-        { id: "hidden", text: "隠れた子", children: [] },
-      ];
-      // r1 has a child, but the card only draws its direct rows: ↓ goes to the
-      // next row, exactly as it would without the subtree.
-      expect(
-        editorReducer(stateAt(model, "r1"), { type: "moveDownSiblingFirst" })
-          .view.activeNodeId
-      ).toBe("r2");
-      // ...and from the last row, out of the card entirely.
-      expect(
-        editorReducer(stateAt(model, "r2"), { type: "moveDownSiblingFirst" })
-          .view.activeNodeId
-      ).toBe("t");
-    });
-
-    // Deliberate: ↓ on the title always means "the first row", with no memory
-    // of having been inside. You leave the card by walking its rows.
-    it("re-enters the card when ↓ is pressed on the title again", () => {
-      const model = cardModel();
-      let s = stateAt(model, "card");
-      s = editorReducer(s, { type: "moveDownSiblingFirst" }); // r1
-      s = editorReducer(s, { type: "moveToParent" }); // back to the title
-      expect(s.view.activeNodeId).toBe("card");
-      s = editorReducer(s, { type: "moveDownSiblingFirst" });
-      expect(s.view.activeNodeId).toBe("r1");
-    });
-
-    it("does not step into an empty card", () => {
-      const model = cardModel();
-      model.children[0].children = [];
-      expect(
-        editorReducer(stateAt(model, "card"), { type: "moveDownSiblingFirst" })
-          .view.activeNodeId
-      ).toBe("t");
-    });
-  });
-
   it("records the visited child so ← then → round-trips", () => {
     // Walking siblings must feed lastChildByParent the same way moveDown does.
     const model = siblingModel();
@@ -1426,34 +1322,6 @@ describe("setNodeContent", () => {
     ).toBe(s);
   });
 
-  it("refocuses onto the changed node when a nodeType change hides the active node", () => {
-    // "hidden" is a GRANDCHILD of "a" (child of its row "a1"); converting "a"
-    // to an object card hides grandchildren (only the direct child rows stay
-    // visible), so the previously-active "hidden" would otherwise dangle
-    // outside the flat order.
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
-        {
-          id: "a",
-          text: "A",
-          children: [
-            { id: "a1", text: "a1: v", children: [{ id: "hidden", text: "H", children: [] }] },
-          ],
-        },
-      ],
-    };
-    const s = stateAt(model, "hidden");
-    const next = editorReducer(s, {
-      type: "setNodeContent",
-      nodeId: "a",
-      text: "A",
-      nodeType: "object",
-    });
-    expect(next.view.activeNodeId).toBe("a");
-    expect(getFlatOrder(next.document.model)).toContain(next.view.activeNodeId);
-  });
 });
 
 describe("setNodeStyle", () => {

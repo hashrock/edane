@@ -54,7 +54,6 @@ import {
 import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
 import {
   flattenToNodes,
-  layoutObjectRows,
   nodeDisplayText,
   nodeTextOffsetX,
   checkboxOffset,
@@ -69,19 +68,9 @@ import {
   MD_CARD_BADGE,
   MD_TITLE_MAX_W,
 } from "../application/nodeUtils";
-import {
-  KEY_FONT_SIZE,
-  CARD_HINT_H,
-  addFieldLabel,
-  ADD_FIELD_FONT_SIZE,
-  addFieldButtonWidth,
-  rowKeyColOffset,
-} from "../application/objectCard";
 import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
 import { useLocale } from "./useLocale";
-import { parseField, inferValueKind } from "../application/objectField";
-import type { NumFormat } from "../domain/model";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import {
   nodeRect,
@@ -155,7 +144,6 @@ const NODE_TYPE_LABEL = {
   image: "nodeTypeImage",
   link: "nodeTypeLink",
   markdown: "nodeTypeMarkdown",
-  object: "nodeTypeObject",
 } as const satisfies Record<NodeType, MessageKey>;
 
 // Pre-release: node types that ship hidden. They are only kept out of the
@@ -165,16 +153,7 @@ const NODE_TYPE_LABEL = {
 // To ship the type, drop it from this set; that's the whole switch.
 // (Commenting out its NODE_TYPE_LABEL entry above would not work: the
 // `satisfies Record<NodeType, string>` there is exhaustive by design.)
-const HIDDEN_NODE_TYPES: ReadonlySet<NodeType> = new Set(["object"]);
-
-// Message keys for the numeric-format context menu, keyed by NumFormat. Same
-// exhaustiveness idiom as NODE_TYPE_LABEL above: adding a NumFormat refuses
-// to compile here until it's given a label.
-const NUM_FORMAT_LABEL = {
-  comma: "numFormatComma",
-  currency: "numFormatCurrency",
-  percent: "numFormatPercent",
-} as const satisfies Record<NumFormat, MessageKey>;
+const HIDDEN_NODE_TYPES: ReadonlySet<NodeType> = new Set();
 
 // Zoom factor per click of the floating +/− buttons. Deliberately coarser than
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
@@ -641,8 +620,6 @@ export function MindmapEditorView({
     );
     if (flat.length > 0) {
       layoutMindMap(flat);
-      // Object-card field rows are layout leaves; anchor them in their card.
-      layoutObjectRows(flat);
     }
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -713,21 +690,6 @@ export function MindmapEditorView({
       }
     }, 0);
   }, []);
-
-  // Append a first field to an (empty) object card. Backs the on-canvas
-  // "＋ フィールドを追加" button drawn inside an empty card — same effect as the
-  // context menu's "子ノードを追加", but reachable without opening the menu.
-  const addFieldToCard = useCallback(
-    (cardId: string) => {
-      const next = dispatch({ type: "addChild", nodeId: cardId }, "add-child");
-      if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
-      if (noteId) saveNote(next.document.model);
-      focusEditorSoon();
-    },
-    [dispatch, flashNodes, noteId, saveNote, focusEditorSoon]
-  );
-  const addFieldToCardRef = useRef(addFieldToCard);
-  addFieldToCardRef.current = addFieldToCard;
 
   // Flip a task node between done and open. Backs the checkbox drawn inside
   // the node (a click on the box itself) — the same edit ⌘/Ctrl+Shift+D makes.
@@ -1277,60 +1239,10 @@ export function MindmapEditorView({
     }
     groups.push(typeGroup);
 
-    // --- Numeric display format (field rows of an object card only) ---
-    // The raw value stays on the node; only the card's rendering changes.
-    const numGroup: ContextMenuAction[] = [];
-    const parentInfo = findParentAndIndex(modelRef.current, nodeId);
-    if (!readOnly && parentInfo?.parent.type === "object" && type === "text") {
-      const { value } = parseField(node.text);
-      if (inferValueKind(value) === "number") {
-        const applyNum = (patch: {
-          numFormat?: NumFormat | null;
-          decimals?: number | null;
-        }) => {
-          const next = dispatch({ type: "setNumFormat", nodeId, ...patch }, "style");
-          if (noteId) saveNote(next.document.model);
-        };
-        const fmtItem = (fmt: NumFormat, label: MessageKey): ContextMenuAction => ({
-          label: `${node.numFormat === fmt ? "✓ " : ""}${t(label)}`,
-          onSelect: () =>
-            applyNum({ numFormat: node.numFormat === fmt ? null : fmt }),
-        });
-        for (const [fmt, label] of Object.entries(NUM_FORMAT_LABEL) as [
-          NumFormat,
-          MessageKey,
-        ][]) {
-          numGroup.push(fmtItem(fmt, label));
-        }
-        if ((node.decimals ?? 0) < 4)
-          numGroup.push({
-            label: t("menuMoreDecimals"),
-            onSelect: () => applyNum({ decimals: (node.decimals ?? 0) + 1 }),
-          });
-        if (node.decimals !== undefined)
-          numGroup.push({
-            label:
-              node.decimals === 0 ? t("menuAutoDecimals") : t("menuFewerDecimals"),
-            onSelect: () =>
-              applyNum({
-                decimals: node.decimals! > 0 ? node.decimals! - 1 : null,
-              }),
-          });
-      }
-    }
-    groups.push(numGroup);
-
     // --- Task checkbox ---
-    // Offered for the kinds that can show one (supportsCheckbox), except a
-    // card's field rows: a row is laid out by objectCardGeom's key/value
-    // columns, which have no checkbox column to give it.
+    // Offered for the kinds that can show one (supportsCheckbox).
     const taskGroup: ContextMenuAction[] = [];
-    if (
-      !readOnly &&
-      !isRoot &&
-      supportsCheckbox(type) &&
-      parentInfo?.parent.type !== "object"
-    ) {
+    if (!readOnly && !isRoot && supportsCheckbox(type)) {
       if (node.checked === undefined) {
         taskGroup.push({
           label: t("menuAddCheckbox"),
@@ -1350,10 +1262,8 @@ export function MindmapEditorView({
     groups.push(taskGroup);
 
     // --- Text formatting (font size / bold) ---
-    // Card field rows render at the card's fixed rhythm, so per-node font
-    // styling is hidden for them (the numeric format group above applies).
     const formatGroup: ContextMenuAction[] = [];
-    if (!readOnly && type === "text" && parentInfo?.parent.type !== "object") {
+    if (!readOnly && type === "text") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
       const current = node.fontSize ?? DEFAULT_FONT_SIZE;
       const bigger = SIZES.find((s) => s > current);
@@ -1753,19 +1663,11 @@ export function MindmapEditorView({
           const byId = new Map(flat.map((n) => [n.id, n]));
           const parentOf = new Map<string, string>();
           for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
-          // Card field rows aren't in their card's flat `children` (layout
-          // leaves) — wire their parenthood explicitly so drop resolution
-          // sees them as the card's children.
-          for (const n of flat) if (n.cardRow) parentOf.set(n.id, n.cardRow.cardId);
           const excluded = new Set<string>();
           (function collect(id: string) {
             excluded.add(id);
             byId.get(id)?.children.forEach(collect);
           })(drag.nodeId);
-          // Dragging a card must exclude its rows too (dropping a card onto
-          // its own row would be a cycle).
-          for (const n of flat)
-            if (n.cardRow && excluded.has(n.cardRow.cardId)) excluded.add(n.id);
           drag.excluded = excluded;
           drag.parentOf = parentOf;
           buildGhost(drag.nodeId, drag.descendants);
@@ -1896,10 +1798,7 @@ export function MindmapEditorView({
         let charIdx = 0;
         if (data) {
           const blockHeight = data.lines.length * data.lineHeight;
-          // An object card's editable text (its title) sits at the top of the
-          // card, not the box centre — same offset the draw/caret paths use.
-          const textCenterY = node.y + (node.card?.titleOffsetY ?? 0);
-          const relY = worldY - (textCenterY - blockHeight / 2);
+          const relY = worldY - (node.y - blockHeight / 2);
           const line = Math.max(
             0,
             Math.min(data.lines.length - 1, Math.floor(relY / data.lineHeight))
@@ -2213,9 +2112,7 @@ export function MindmapEditorView({
 
     const screenX =
       (activeNode.x + nodeTextOffsetX(activeNode) + cursorX) * scale + stage.x();
-    // Object cards edit their title at the top of the card box.
-    const textCenterY = activeNode.y + (activeNode.card?.titleOffsetY ?? 0);
-    const screenY = (textCenterY + lineCenterOffset) * scale + stage.y();
+    const screenY = (activeNode.y + lineCenterOffset) * scale + stage.y();
     setInputPos({ x: screenX, y: screenY });
   }, [activeNodeId, nodes, cursorPos, editingText]);
 
@@ -2333,11 +2230,7 @@ export function MindmapEditorView({
         node.type !== "image" &&
         node.type !== "link";
       const displayRaw = isTextEditingThis ? editingText : nodeDisplayText(node);
-      // A card's title is ALWAYS drawn bold (see the isCard draw branch), so its
-      // caret/line measurement must be bold too — otherwise the caret drifts by
-      // the bold weight's extra width, since objectCardGeom already sizes the
-      // box with bold:true.
-      const measuredBold = !!(node.card || node.bold);
+      const measuredBold = !!node.bold;
       // The very cap measureModelNode sized this node's box with (carried on
       // the node, so the per-kind decision is made in exactly one place), which
       // makes the caret's visual lines the ones the box was measured for.
@@ -2426,12 +2319,6 @@ export function MindmapEditorView({
       const isTextEditing = isEditing && !isCustom;
       const asImage = node.type === "image";
       const asLink = node.type === "link";
-      // Object card (expanded object node) and its field rows. The card's
-      // editable text (its title) sits at the top of the box, offset from the
-      // centre; rows are separate flat nodes positioned inside the card.
-      const isCard = !!node.card;
-      const isRow = !!node.cardRow;
-      const titleOffsetY = node.card?.titleOffsetY ?? 0;
       // A markdown node draws its styled block-level render (see the asMarkdown
       // branch below); it's tinted and tagged with an "MD" label. Its raw text is
       // never used for the single-Text path, so displayRaw ignores it here.
@@ -2471,10 +2358,7 @@ export function MindmapEditorView({
       // link and text are all sized there, so there's no per-kind branch here.
       let rectWidth: number;
       let rectHeight: number;
-      // Cards and rows keep their measured card geometry even while text-
-      // editing — the geometry already tracks the live buffer (see the nodes
-      // memo), and re-deriving it here would tear the box from its rows.
-      if (isTextEditing && !isCard && !isRow) {
+      if (isTextEditing) {
         const textWidth = textWidths.get(node.id) || 100;
         rectWidth = nodeBoxWidth(textWidth, isRoot);
         rectHeight = Math.max(32, blockHeight + 14);
@@ -2485,181 +2369,47 @@ export function MindmapEditorView({
 
       const group = new Konva.Group();
 
-      if (isRow) {
-        // A field row draws no box of its own — just a highlight when active.
-        // The fill stays set even when transparent so the rect keeps a Konva
-        // hit region (the row is the click/drag target for its node).
-        group.add(
-          new Konva.Rect({
-            x: node.x + 6,
-            y: node.y - rectHeight / 2 + 1,
-            width: rectWidth - 12,
-            height: rectHeight - 2,
-            cornerRadius: 8,
-            fill: isEditing ? "#f8fafc" : isSelected ? "#f1f5f9" : "transparent",
-            stroke: isEditing ? "#10b981" : isSelected ? "#000000" : undefined,
-            strokeWidth: isEditing ? 2 : isSelected ? 1.5 : 0,
-            perfectDrawEnabled: false,
-          })
-        );
-      } else {
-        const rect = new Konva.Rect({
-          x: node.x,
-          y: node.y - rectHeight / 2,
-          width: rectWidth,
-          height: rectHeight,
-          cornerRadius: 12,
-          fill: isCard
-            ? "#ffffff"
-            : isEditing
-              ? isRoot
-                ? "#1e293b"
-                : "#f1f5f9"
-              : isRoot
-                ? "#0f172a"
-                : asMarkdown
-                  ? "#faf5ff"
-                  : isEmpty
-                    ? "#f8fafc"
-                    : "#ffffff",
-          // Editing gets the emerald accent so "I'm typing here" reads distinctly
-          // from a mere selection (black); everything else keeps its resting edge.
-          stroke: isEditing
-            ? "#10b981"
-            : isSelected
-              ? "#000000"
-              : isRoot
-                ? "#0f172a"
-                : isCard
-                  ? "#7dd3fc"
-                  : asMarkdown
-                    ? "#d8b4fe"
-                    : "#e2e8f0",
-          strokeWidth: isEditing ? 2.5 : isSelected ? 2 : isCard ? 1.5 : 1,
-          // Shadow blur is the dominant raster cost; keep the soft shadow only on
-          // the single root node and drop the near-invisible one on every other.
-          shadowColor: "#0f172a",
-          shadowBlur: isRoot ? 16 : 0,
-          shadowOpacity: isRoot ? 0.18 : 0,
-          shadowOffsetY: isRoot ? 6 : 0,
-          // Skip Konva's extra offscreen buffer for fill+stroke shapes.
-          perfectDrawEnabled: false,
-        });
-        group.add(rect);
-      }
+      const rect = new Konva.Rect({
+        x: node.x,
+        y: node.y - rectHeight / 2,
+        width: rectWidth,
+        height: rectHeight,
+        cornerRadius: 12,
+        fill: isEditing
+          ? isRoot
+            ? "#1e293b"
+            : "#f1f5f9"
+          : isRoot
+            ? "#0f172a"
+            : asMarkdown
+              ? "#faf5ff"
+              : isEmpty
+                ? "#f8fafc"
+                : "#ffffff",
+        // Editing gets the emerald accent so "I'm typing here" reads distinctly
+        // from a mere selection (black); everything else keeps its resting edge.
+        stroke: isEditing
+          ? "#10b981"
+          : isSelected
+            ? "#000000"
+            : isRoot
+              ? "#0f172a"
+              : asMarkdown
+                ? "#d8b4fe"
+                : "#e2e8f0",
+        strokeWidth: isEditing ? 2.5 : isSelected ? 2 : 1,
+        // Shadow blur is the dominant raster cost; keep the soft shadow only on
+        // the single root node and drop the near-invisible one on every other.
+        shadowColor: "#0f172a",
+        shadowBlur: isRoot ? 16 : 0,
+        shadowOpacity: isRoot ? 0.18 : 0,
+        shadowOffsetY: isRoot ? 6 : 0,
+        // Skip Konva's extra offscreen buffer for fill+stroke shapes.
+        perfectDrawEnabled: false,
+      });
+      group.add(rect);
 
-      if (isRow && !isTextEditing) {
-        // Field row: gray key column + kind-styled value. While the row is
-        // being text-edited it falls through to the generic raw-text path
-        // below, so the caret math and the drawn text always agree.
-        const r = node.cardRow!;
-        if (r.key !== null) {
-          // The key sits in the SAME single-line box as the value (a taller
-          // lineHeight scales its 12px glyph into the 18px value line), so both
-          // share one vertical centre — the smaller key no longer floats above
-          // the value's baseline the way top-anchoring made it.
-          group.add(
-            new Konva.Text({
-              x: node.x + nodePadding,
-              y: node.y - lineHeightPx / 2 + 2,
-              width: r.keyColW,
-              text: r.key,
-              fontSize: KEY_FONT_SIZE,
-              fontFamily: "sans-serif",
-              lineHeight: lineHeightPx / KEY_FONT_SIZE,
-              fill: "#64748b",
-              wrap: "none",
-              ellipsis: true,
-              listening: false,
-            })
-          );
-        }
-        const valueX = node.x + nodePadding + rowKeyColOffset(r.key, r.keyColW);
-        if (r.kind === "image") {
-          const d = imageDisplaySize(node.text);
-          if (d.status === "loaded" && d.img && r.thumbW && r.thumbH) {
-            group.add(
-              new Konva.Image({
-                image: d.img,
-                x: valueX,
-                y: node.y - r.thumbH / 2,
-                width: r.thumbW,
-                height: r.thumbH,
-                cornerRadius: 6,
-                listening: false,
-              })
-            );
-          } else {
-            group.add(
-              new Konva.Text({
-                x: valueX,
-                y: node.y - 6,
-                text: d.status === "error" ? t("imageLoadError") : t("loading"),
-                fontSize: 11,
-                fontFamily: "sans-serif",
-                fill: "#94a3b8",
-                listening: false,
-              })
-            );
-          }
-        } else {
-          // Pre-wrapped by objectCardGeom to the room this column actually has,
-          // so a long value grows the row's height instead of the card's width.
-          // No lines at all means the row has no value: show a placeholder.
-          const placeholder =
-            r.displayLines.length === 0 ? (r.key !== null ? "—" : "empty") : null;
-          const valueText = placeholder ?? r.displayLines.join("\n");
-          const lineCount = placeholder ? 1 : r.displayLines.length;
-          group.add(
-            new Konva.Text({
-              x: valueX,
-              y: node.y - (lineCount * lineHeightPx) / 2 + 2,
-              text: valueText,
-              fontSize: DEFAULT_FONT_SIZE,
-              fontFamily: "sans-serif",
-              lineHeight: konvaLineHeight,
-              fill: placeholder
-                ? "#94a3b8"
-                : r.kind === "url"
-                  ? "#2563eb"
-                  : r.kind === "date"
-                    ? "#0f766e"
-                    : "#0f172a",
-              fontStyle: placeholder ? "italic" : "normal",
-              textDecoration: r.kind === "url" ? "underline" : "",
-              listening: false,
-            })
-          );
-        }
-        // Hidden-subtree pill: the card shows only direct children, so a row
-        // with children of its own surfaces the count (like a collapse badge).
-        if (node.childCount > 0) {
-          const badgeR = 8;
-          const badgeX = node.x + rectWidth - 12 - badgeR;
-          group.add(
-            new Konva.Circle({
-              x: badgeX,
-              y: node.y,
-              radius: badgeR,
-              fill: "#64748b",
-              listening: false,
-            })
-          );
-          group.add(
-            new Konva.Text({
-              x: badgeX - badgeR,
-              y: node.y - 5,
-              width: badgeR * 2,
-              align: "center",
-              text: `+${node.childCount}`,
-              fontSize: 9,
-              fontFamily: "sans-serif",
-              fill: "#ffffff",
-              listening: false,
-            })
-          );
-        }
-      } else if (asImage) {
+      if (asImage) {
         const d = imageDisplaySize(node.text);
         if (d.status === "loaded" && d.img) {
           group.add(
@@ -2687,88 +2437,6 @@ export function MindmapEditorView({
               listening: false,
             })
           );
-        }
-      } else if (isCard) {
-        // Card chrome: bold title at the top + separator above the rows (the
-        // rows themselves are separate flat nodes drawn right after this one).
-        // The title text doubles as the raw editing view — drawnText is the
-        // (wrapped) live buffer while the title is being edited.
-        group.add(
-          new Konva.Text({
-            x: node.x + nodePadding,
-            y: node.y + titleOffsetY - blockHeight / 2 + 2,
-            text: drawnText,
-            fontSize,
-            fontFamily: "sans-serif",
-            lineHeight: konvaLineHeight,
-            fill: isEmpty ? "#94a3b8" : "#0369a1",
-            fontStyle: isEmpty ? "italic" : "bold",
-            listening: false,
-          })
-        );
-        const sepY = node.y + (node.card?.sepOffsetY ?? 0);
-        group.add(
-          new Konva.Line({
-            points: [node.x + 10, sepY, node.x + rectWidth - 10, sepY],
-            stroke: "#bae6fd",
-            strokeWidth: 1,
-            listening: false,
-          })
-        );
-        if (node.childCount === 0 && !readOnly) {
-          // Empty card: an inline "add field" button in place of the hint text.
-          // Clicking it appends the first field row (see addFieldToCard); the
-          // handler stops bubbling so the card's own mousedown doesn't also
-          // activate the title for editing.
-          const btnH = CARD_HINT_H - 2;
-          const btnY = sepY + 6;
-          const btnX = node.x + nodePadding;
-          const btnW = Math.min(
-            rectWidth - nodePadding * 2,
-            addFieldButtonWidth()
-          );
-          const addBtn = new Konva.Group();
-          addBtn.add(
-            new Konva.Rect({
-              x: btnX,
-              y: btnY,
-              width: btnW,
-              height: btnH,
-              cornerRadius: 6,
-              fill: "#e0f2fe",
-              stroke: "#7dd3fc",
-              strokeWidth: 1,
-            })
-          );
-          addBtn.add(
-            new Konva.Text({
-              x: btnX,
-              y: btnY,
-              width: btnW,
-              height: btnH,
-              align: "center",
-              verticalAlign: "middle",
-              text: addFieldLabel(),
-              fontSize: ADD_FIELD_FONT_SIZE,
-              fontFamily: "sans-serif",
-              fill: "#0369a1",
-              listening: false,
-            })
-          );
-          addBtn.on("mousedown touchstart", (e: any) => {
-            if (isNonPrimaryButton(e)) return;
-            e.cancelBubble = true;
-            addFieldToCardRef.current(node.id);
-          });
-          addBtn.on("mouseenter", () => {
-            const st = konvaStageRef.current;
-            if (st) st.container().style.cursor = "pointer";
-          });
-          addBtn.on("mouseleave", () => {
-            const st = konvaStageRef.current;
-            if (st) st.container().style.cursor = "";
-          });
-          group.add(addBtn);
         }
       } else if (asMarkdown) {
         // Compact card: a document glyph, the derived title, and a line-count
@@ -2967,8 +2635,7 @@ export function MindmapEditorView({
         if (asImage || asLink || asMarkdown) {
           charIdx = node.text.length;
         } else {
-          // Cards edit their title at the top of the box (titleOffsetY).
-          const relY = worldY - (node.y + titleOffsetY - blockHeight / 2);
+          const relY = worldY - (node.y - blockHeight / 2);
           const line = Math.max(
             0,
             Math.min(lineCount - 1, Math.floor(relY / data.lineHeight))
@@ -3243,9 +2910,7 @@ export function MindmapEditorView({
       const data = lineDataRef.current.get(activeNodeId);
       const lineHeight = data ? data.lineHeight : LINE_HEIGHT;
       const blockHeight = (data ? data.lines.length : 1) * lineHeight;
-      // Object cards edit their title at the top of the card box.
-      const textTop =
-        activeNode.y + (activeNode.card?.titleOffsetY ?? 0) - blockHeight / 2;
+      const textTop = activeNode.y - blockHeight / 2;
       // Selection / caret half-height scales with the node's font size
       // (10px at the 14px baseline).
       const caretHalf = Math.round(
@@ -3527,8 +3192,7 @@ export function MindmapEditorView({
         const data = lineDataRef.current.get(id);
         const textW = data ? lineDataWidth(data) || 40 : 40;
         const worldX = node.x + nodeTextOffsetX(node) + textW / 2;
-        // A card's clickable text (its title) sits at the top of the box.
-        const worldY = node.y + (node.card?.titleOffsetY ?? 0);
+        const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
       getToggleButtonPoint: (id: string) => {
