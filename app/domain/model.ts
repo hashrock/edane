@@ -364,6 +364,14 @@ export function toggleCollapse(
   return cloned;
 }
 
+/**
+ * Append newNode as parent's last child. A no-op (parent unchanged) when that
+ * would violate {@link violatesObjectCardNesting} — same adjacency rule
+ * setNodeType, indentNode/dedentNode and moveBranch enforce, applied here so
+ * that pasting a copied object card onto another one (editorReducer's
+ * pasteBranch, the only caller that can hand this a non-"text" newNode)
+ * can't create the nested-card state they all refuse to create.
+ */
 export function addChildToNode(
   model: MindMapModel,
   parentId: string,
@@ -371,7 +379,9 @@ export function addChildToNode(
 ): MindMapModel {
   const cloned = cloneModel(model);
   const parent = findNode(cloned, parentId);
-  if (parent) parent.children.push(newNode);
+  if (!parent) return cloned;
+  if (violatesObjectCardNesting(parent.type, newNode.type)) return cloned;
+  parent.children.push(newNode);
   return cloned;
 }
 

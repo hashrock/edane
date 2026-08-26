@@ -560,6 +560,18 @@ describe("addChildToNode edge cases", () => {
     const result = addChildToNode(model, "nonexistent", newNode);
     expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
   });
+
+  it("is a no-op when appending an object card under an object-card parent", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "card", text: "Card", type: "object", children: [] }],
+    };
+    const newCard: MindMapModel = { id: "x", text: "X", type: "object", children: [] };
+    const result = addChildToNode(model, "card", newCard);
+    expect(getFlatOrder(result)).toEqual(getFlatOrder(model));
+    expect(findNode(result, "card")!.children).toHaveLength(0);
+  });
 });
 
 describe("removeNode edge cases", () => {
