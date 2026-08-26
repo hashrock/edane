@@ -58,13 +58,20 @@ describe("validateSuggestRequest", () => {
 describe("extractTemplate", () => {
   it("strips <think> and code fences", () => {
     const out = extractTemplate("<think>hmm</think>\nHere:\n```jsx\nimport { data } from './data.js';\nexport default function P(){return <div/>}\n```\nEnjoy");
-    expect(out).toBe("import { data } from './data.js';\nexport default function P(){return <div/>}\n");
+    expect(out).toEqual({ kind: "ok", template: "import { data } from './data.js';\nexport default function P(){return <div/>}\n" });
   });
   it("prepends the data import when missing", () => {
-    expect(extractTemplate("export default function P(){return null}")).toMatch(/^import \{ data \} from '\.\/data\.js';/);
+    const out = extractTemplate("export default function P(){return null}");
+    expect(out.kind).toBe("ok");
+    expect(out.kind === "ok" && out.template).toMatch(/^import \{ data \} from '\.\/data\.js';/);
   });
-  it("returns null for non-code answers", () => {
-    expect(extractTemplate("<think>...</think> I can't help.")).toBeNull();
-    expect(extractTemplate("")).toBeNull();
+  it("reports non-code answers as none", () => {
+    expect(extractTemplate("<think>...</think> I can't help.")).toEqual({ kind: "none" });
+    expect(extractTemplate("")).toEqual({ kind: "none" });
+  });
+  it("reports a cut-off answer as truncated instead of returning the fence", () => {
+    expect(extractTemplate("```jsx\nimport { data } from './data.js';\n\nexport default function Page()\n")).toEqual({ kind: "truncated" });
+    expect(extractTemplate("<think>still thinking")).toEqual({ kind: "truncated" });
+    expect(extractTemplate("```jsx\nexport default function P(){}\n```", { truncated: true })).toEqual({ kind: "truncated" });
   });
 });

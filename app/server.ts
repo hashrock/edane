@@ -637,13 +637,23 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
   const request = validateSuggestRequest(body);
   const messages = buildSuggestMessages({ data: toSiteNode(owned.node), ...request });
   try {
-    const result = (await c.env.AI.run(SITE_AI_MODEL, {
-      messages,
-      max_tokens: 4096,
-    })) as { response?: string };
-    const template = extractTemplate(result.response ?? "");
-    if (!template) return c.json({ error: "AI returned no template" }, 502);
-    return c.json({ template });
+    // The model sometimes stops mid-file (unclosed fence / finish_reason
+    // "length"). One retry covers most of those; a second failure is reported.
+    let last: ReturnType<typeof extractTemplate> = { kind: "none" };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = (await c.env.AI.run(SITE_AI_MODEL, {
+        messages,
+        max_tokens: 4096,
+      })) as { response?: string; choices?: { finish_reason?: string }[] };
+      last = extractTemplate(result.response ?? "", {
+        truncated: result.choices?.[0]?.finish_reason === "length",
+      });
+      if (last.kind === "ok") return c.json({ template: last.template });
+    }
+    return c.json(
+      { error: last.kind === "truncated" ? "AI response was cut off" : "AI returned no template" },
+      502
+    );
   } catch (e) {
     return c.json({ error: "AI request failed", detail: String(e) }, 502);
   }

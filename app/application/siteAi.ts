@@ -94,18 +94,36 @@ export function buildSuggestMessages(input: SuggestRequest & { data: SiteNode })
   ];
 }
 
+export type ExtractResult =
+  | { kind: "ok"; template: string }
+  /** 途中で切れた応答（閉じフェンスが無い / finish_reason=length）。 */
+  | { kind: "truncated" }
+  /** コードらしきものが無い。 */
+  | { kind: "none" };
+
 /**
  * モデル応答からテンプレート本文を取り出す。Qwen3 の <think>…</think> と
  * コードフェンスを剥がし、`import { data }` が無ければ先頭に補う。
- * コードらしきものが取れなければ null。
+ *
+ * 途中で切れた応答（開きフェンスだけで閉じが無い、または呼び出し側が
+ * `truncated` と判定）は "truncated" にして、壊れたコードを返さない。
  */
-export function extractTemplate(response: string): string | null {
+export function extractTemplate(
+  response: string,
+  opts: { truncated?: boolean } = {}
+): ExtractResult {
   let s = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  const fence = s.match(/```(?:jsx|tsx|js|javascript)?\s*\n([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  if (!s || !/export\s+default|function\s+\w+/.test(s)) return null;
+  if (/<think>/.test(s)) return { kind: "truncated" }; // 思考の途中で切れた
+  const fence = s.match(/```(?:jsx|tsx|js|javascript)?[^\n]*\n([\s\S]*?)```/);
+  if (fence) {
+    s = fence[1].trim();
+  } else if (/```/.test(s)) {
+    return { kind: "truncated" }; // 開きフェンスだけ
+  }
+  if (opts.truncated) return { kind: "truncated" };
+  if (!s || !/export\s+default|function\s+\w+/.test(s)) return { kind: "none" };
   if (!/from\s+['"]\.\/data\.js['"]/.test(s)) {
     s = `import { data } from './data.js';\n\n` + s;
   }
-  return s + "\n";
+  return { kind: "ok", template: s + "\n" };
 }
