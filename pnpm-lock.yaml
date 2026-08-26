@@ -11,6 +11,9 @@ importers:
       '@chenglou/pretext':
         specifier: ^0.0.7
         version: 0.0.7
+      '@hashrock/ono':
+        specifier: 0.2.0
+        version: 0.2.0
       '@hono/inertia':
         specifier: ^0.2.0
         version: 0.2.0(hono@4.12.23)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3))
@@ -23,6 +26,15 @@ importers:
       '@inertiajs/react':
         specifier: ^3.3.0
         version: 3.3.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@unocss/core':
+        specifier: ^66.8.1
+        version: 66.8.1
+      '@unocss/preset-uno':
+        specifier: ^66.8.1
+        version: 66.8.1
+      '@unocss/reset':
+        specifier: ^66.8.1
+        version: 66.8.1
       dompurify:
         specifier: ^3.4.11
         version: 3.4.11
@@ -828,6 +840,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@hashrock/ono@0.2.0':
+    resolution: {integrity: sha512-bo7PsO7c61TwXOcrOjwPrpSKVfIHUqWqOGX4uQzsFZm1H75zPuy6pmaLU6m8ASx/cYu1xqnTZLU1j1tNjnwiww==}
+    engines: {node: '>=22.3.0'}
+    hasBin: true
+
   '@hono/inertia@0.2.0':
     resolution: {integrity: sha512-pqwHs/lHQYlUPRxOx3OWwx6XKAQ4xKMcYWhB/fEg8Pef5gR+qO7jJkDnnR1bqsJa2Z0xP8Es4xjhZk1/gz2ZEA==}
     engines: {node: '>=18.0.0'}
@@ -1253,6 +1270,27 @@ packages:
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
+  '@unocss/core@66.8.1':
+    resolution: {integrity: sha512-ze/3qTloXZtFn6TXiNjL6ai1vgMvTCXIm8nqTzoU/Dt5d5MRxA86ERfUmgTX70rEBam5l6vnsaEVZO6WnHhdRA==}
+
+  '@unocss/extractor-arbitrary-variants@66.8.1':
+    resolution: {integrity: sha512-Gm2hInbjPCasx+YXrBpNbmX7ST8Cl4a2DjNjwX2DA7Tayu7mZcqu/KBKv0f7S0Iam/N+XDYgMOMHMWgml0XFXQ==}
+
+  '@unocss/preset-mini@66.8.1':
+    resolution: {integrity: sha512-yN/qCSuOYUKpd+H8L3UyP9DXG4Fi+hf5lfFeXSK+M9+k4jzO7kv4UcsLLtI7+kn+vG2yMVbgD7KhYHSceEogsw==}
+
+  '@unocss/preset-uno@66.8.1':
+    resolution: {integrity: sha512-WImRJjYxhmMEOvlrAOOBF9LNFTtijpYTVTnq3JVPsZL9AwTTdEDrVuhQImooHdRPqZ948ZX98Sh+oZoIwwrtDA==}
+
+  '@unocss/preset-wind3@66.8.1':
+    resolution: {integrity: sha512-scsm2wGhrLcCwgGV93pNeRIJ9azmUDS7T5Hjex9Y04cuh0BEJC4TQ+cRq04hpR8vqy955VJDHuGFRvF40kgF4Q==}
+
+  '@unocss/reset@66.8.1':
+    resolution: {integrity: sha512-3YWNFIP3sAAZUhGcHoZHoXwkJzKT8RUgFPsws5/RG9sgUpVmQWEQS2adBTovat1XE6H4Z1aCtOTYUKOOoRfvSQ==}
+
+  '@unocss/rule-utils@66.8.1':
+    resolution: {integrity: sha512-EQ9bhifqIodIsl7+eOmkCVWXkZ7dnwkmTURFyAosVpUc8j4WYsfnQC+3SjKnJfT44s1rIqHJtoBBaG9X97opdA==}
+
   '@vitejs/plugin-react@6.0.2':
     resolution: {integrity: sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1650,6 +1688,9 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+
+  magic-string@1.2.2:
+    resolution: {integrity: sha512-veT/+7iXrXzT39XnEN4lOxtNl72dMgJ8Lp+5Bd6YcMSWpb0n0MjBM8Uuooi6jgJr8dhUW2swQgBmoZVMni5SVg==}
 
   magicast@0.5.3:
     resolution: {integrity: sha512-pVKE4UdSQ7DvHzivsCIFx2BJn1mHG6KsyrFcaxFx6tONdneEuThrDx0Cj3AMg58KyN4pzYT+LHOotxDQDjNvkw==}
@@ -2409,6 +2450,13 @@ snapshots:
   '@esbuild/win32-x64@0.28.0':
     optional: true
 
+  '@hashrock/ono@0.2.0':
+    dependencies:
+      '@unocss/core': 66.8.1
+      '@unocss/preset-uno': 66.8.1
+      '@unocss/reset': 66.8.1
+      typescript: 5.9.3
+
   '@hono/inertia@0.2.0(hono@4.12.23)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3))':
     dependencies:
       hono: 4.12.23
@@ -2731,6 +2779,36 @@ snapshots:
 
   '@types/trusted-types@2.0.7':
     optional: true
+
+  '@unocss/core@66.8.1': {}
+
+  '@unocss/extractor-arbitrary-variants@66.8.1':
+    dependencies:
+      '@unocss/core': 66.8.1
+
+  '@unocss/preset-mini@66.8.1':
+    dependencies:
+      '@unocss/core': 66.8.1
+      '@unocss/extractor-arbitrary-variants': 66.8.1
+      '@unocss/rule-utils': 66.8.1
+
+  '@unocss/preset-uno@66.8.1':
+    dependencies:
+      '@unocss/core': 66.8.1
+      '@unocss/preset-wind3': 66.8.1
+
+  '@unocss/preset-wind3@66.8.1':
+    dependencies:
+      '@unocss/core': 66.8.1
+      '@unocss/preset-mini': 66.8.1
+      '@unocss/rule-utils': 66.8.1
+
+  '@unocss/reset@66.8.1': {}
+
+  '@unocss/rule-utils@66.8.1':
+    dependencies:
+      '@unocss/core': 66.8.1
+      magic-string: 1.2.2
 
   '@vitejs/plugin-react@6.0.2(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3))':
     dependencies:
@@ -3105,6 +3183,10 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.32.0
 
   magic-string@0.30.21:
+    dependencies:
+      '@jridgewell/sourcemap-codec': 1.5.5
+
+  magic-string@1.2.2:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 

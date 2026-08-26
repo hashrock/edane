@@ -10,6 +10,7 @@ export type Env = {
   Bindings: {
     DB: D1Database;
     IMAGES: R2Bucket;
+    AI: Ai;
     GOOGLE_ID: string;
     GOOGLE_SECRET: string;
     SESSION_SECRET: string;
