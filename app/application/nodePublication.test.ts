@@ -99,6 +99,18 @@ describe("publishedNodeJson", () => {
     publishedNodeJson(TREE);
     expect(JSON.stringify(TREE)).toBe(before);
   });
+
+  it("drops fields outside the allowlist, not just collapsed", () => {
+    // Simulates a future internal-only MindMapModel field: allowlisting
+    // means it's dropped automatically, with no per-field exclusion needed.
+    const withExtra = {
+      id: "x",
+      text: "hi",
+      children: [],
+      draftCursor: 42,
+    } as unknown as MindMapModel;
+    expect(publishedNodeJson(withExtra)).not.toHaveProperty("draftCursor");
+  });
 });
 
 describe("nodePathTexts", () => {
