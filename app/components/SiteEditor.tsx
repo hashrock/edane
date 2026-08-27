@@ -4,10 +4,11 @@ import {
   renderSiteResponse,
   siteDataModule,
   siteUrl,
-  DEFAULT_SITE_TEMPLATE,
   type SiteBuild,
   type SiteNode,
 } from "../application/siteTemplate";
+import { parseSchema, inferSchema, formatSchema, shapeRecords, defaultTemplate } from "../application/siteSchema";
+import { effectiveSchema } from "../application/siteAi";
 import { t } from "../application/i18n";
 import { copyText } from "../lib/clipboard";
 import { useLocale } from "./useLocale";
@@ -19,6 +20,8 @@ export interface SiteEditorProps {
   /** 公開している枝（/pub/:id.json と同じ内容を薄くしたもの）。 */
   data: SiteNode;
   template: string;
+  /** スキーマ文字列（siteSchema.ts の書式）。空なら推定。 */
+  schema: string;
   /** サーバーに公開済みのビルドがあるか。 */
   published: boolean;
 }
@@ -61,10 +64,12 @@ export default function SiteEditor({
   noteId,
   data,
   template: initialTemplate,
+  schema: initialSchema,
   published: initiallyPublished,
 }: SiteEditorProps) {
   useLocale();
   const [template, setTemplate] = useState(initialTemplate);
+  const [schemaText, setSchemaText] = useState(initialSchema);
   const [build, setBuild] = useState<SiteBuild | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [compiling, setCompiling] = useState(false);
@@ -76,12 +81,19 @@ export default function SiteEditor({
   const [copied, setCopied] = useState(false);
 
   const published = initiallyPublished || publish.kind === "done";
+
+  // スキーマ: 不正なら直前の有効なものではなく推定にフォールバックし、エラーだけ見せる。
+  const inferredText = useMemo(() => formatSchema(inferSchema(data)), [data]);
+  const parsedSchema = useMemo(() => parseSchema(schemaText), [schemaText]);
+  const schemaError = parsedSchema.ok ? null : parsedSchema.error;
+  const schema = useMemo(() => effectiveSchema(schemaText, data), [schemaText, data]);
+  const schemaWarnings = useMemo(() => shapeRecords(data, schema).warnings, [data, schema]);
+  const dataModule = useMemo(() => siteDataModule(data, schema), [data, schema]);
   const apiBase = `/api/sites/${encodeURIComponent(publicationId)}`;
 
   const workerRef = useRef<Worker | null>(null);
   const reqIdRef = useRef(0);
 
-  // 枝データは変わらないので Worker 起動時に一度だけ送る。
   useEffect(() => {
     const worker = new Worker(new URL("./siteCompiler.worker.ts", import.meta.url), {
       type: "module",
@@ -96,15 +108,16 @@ export default function SiteEditor({
         setCompileError(e.data.error);
       }
     };
-    const init: CompileRequest = { type: "init", dataModule: siteDataModule(data) };
-    worker.postMessage(init);
     workerRef.current = worker;
     return () => worker.terminate();
-  }, [data]);
+  }, []);
 
+  // データモジュール（枝 × スキーマ）が変わったら Worker に送り直してから再コンパイル。
   useEffect(() => {
     const worker = workerRef.current;
     if (!worker) return;
+    const init: CompileRequest = { type: "init", dataModule };
+    worker.postMessage(init);
     const id = ++reqIdRef.current;
     setCompiling(true);
     const timer = setTimeout(() => {
@@ -112,7 +125,7 @@ export default function SiteEditor({
       worker.postMessage(req);
     }, 400);
     return () => clearTimeout(timer);
-  }, [template]);
+  }, [template, dataModule]);
 
   const previewDoc = useMemo(
     () => (build ? renderSiteResponse(build, data.text).body : ""),
@@ -122,16 +135,16 @@ export default function SiteEditor({
   const doPublish = useCallback(async () => {
     if (!build) return;
     setPublish({ kind: "busy" });
-    const r = await siteApi(apiBase, "PUT", { template, ...build }, t("sitePublishFailed"));
+    const r = await siteApi(apiBase, "PUT", { template, schema: schemaText, ...build }, t("sitePublishFailed"));
     setPublish(r.ok ? { kind: "done" } : { kind: "error", message: r.error });
-  }, [apiBase, build, template]);
+  }, [apiBase, build, template, schemaText]);
 
   const doSuggest = useCallback(async () => {
     setAi({ kind: "busy" });
     const r = await siteApi<{ template?: string }>(
       `${apiBase}/suggest`,
       "POST",
-      { instruction: aiInstruction, template },
+      { instruction: aiInstruction, template, schema: schemaText },
       t("siteAiFailed")
     );
     if (!r.ok || !r.body.template) {
@@ -141,7 +154,7 @@ export default function SiteEditor({
     setAiUndo(template);
     setTemplate(r.body.template);
     setAi({ kind: "done" });
-  }, [apiBase, aiInstruction, template]);
+  }, [apiBase, aiInstruction, template, schemaText]);
 
   const publicUrl = siteUrl(window.location.origin, publicationId);
 
@@ -199,6 +212,48 @@ export default function SiteEditor({
       <p className="border-b border-slate-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
         {t("siteEditorHint")}
       </p>
+      <div className="border-b border-slate-200 bg-white px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <label className="shrink-0 text-xs font-medium text-slate-600" htmlFor="site-schema">
+            {t("siteSchemaLabel")}
+          </label>
+          <input
+            id="site-schema"
+            value={schemaText}
+            onChange={(e) => setSchemaText(e.target.value)}
+            placeholder={t("siteSchemaPlaceholder", { schema: inferredText })}
+            spellCheck={false}
+            data-testid="site-schema"
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 font-mono text-xs outline-none focus:border-slate-400"
+          />
+          {!schemaText && inferredText && (
+            <button
+              type="button"
+              onClick={() => setSchemaText(inferredText)}
+              className="shrink-0 text-xs text-slate-500 hover:underline"
+            >
+              {t("siteSchemaAdopt")}
+            </button>
+          )}
+        </div>
+        {schemaError ? (
+          <p className="mt-1 text-xs text-red-600" data-testid="site-schema-error">{schemaError}</p>
+        ) : (
+          <p className="mt-1 text-xs text-slate-400">{t("siteSchemaHint")}</p>
+        )}
+        {schemaWarnings.length > 0 && (
+          <details className="mt-1 text-xs text-amber-700" data-testid="site-schema-warnings">
+            <summary className="cursor-pointer">
+              {t("siteSchemaWarnings")} ({schemaWarnings.length})
+            </summary>
+            <ul className="ml-4 list-disc">
+              {schemaWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
       <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
         <input
           value={aiInstruction}
@@ -237,7 +292,7 @@ export default function SiteEditor({
         <section className="flex min-h-0 flex-col border-r border-slate-200">
           <div className="flex items-center justify-between px-3 py-1 text-xs text-slate-500">
             <span>{t("siteTemplateLabel")}</span>
-            <button type="button" onClick={() => setTemplate(DEFAULT_SITE_TEMPLATE)} className="hover:underline">
+            <button type="button" onClick={() => setTemplate(defaultTemplate(schema))} className="hover:underline">
               {t("siteResetTemplate")}
             </button>
           </div>

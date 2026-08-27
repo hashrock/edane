@@ -10,6 +10,7 @@
  * ここには Worker とサーバーの両方が共有する、DOM 非依存の部分だけを置く。
  */
 import type { MindMapModel, NodeType } from "../domain/model";
+import { shapeRecords, type SiteSchema } from "./siteSchema";
 
 /**
  * テンプレートに渡すデータ。エディタ内部の MindMapModel をそのまま晒さず、
@@ -36,45 +37,22 @@ export function toSiteNode(node: MindMapModel): SiteNode {
 export const SITE_DATA_FILE = "data.js";
 export const SITE_ENTRY_FILE = "index.jsx";
 
-export function siteDataModule(root: SiteNode): string {
-  // `</script>` を含む文字列でも安全なように、JSON 内の `<` をエスケープする。
-  return `export const data = ${JSON.stringify(root).replace(/</g, "\\u003c")};\n`;
-}
-
 /**
- * 既定テンプレート。2階層目 = 1件のカード、3階層目 = そのフィールドという
- * 読み方。`data-search` / `data-card` は配信時に付与される検索スクリプトの
- * 目印（siteSearchScript）。
+ * `data`（生の木）、`title`（枝の見出し）、`items`（スキーマで整形した
+ * レコード）を export する。
+ * スキーマが空なら実データから推定したもので整形するので、`items` は常に使える。
  */
-export const DEFAULT_SITE_TEMPLATE = `import { data } from './data.js';
-
-function Field({ node }) {
-  if (node.type === 'image') return <img src={node.text} class="rounded-lg max-h-48 object-cover" />;
-  if (node.type === 'link') return <a href={node.text} class="text-emerald-700 underline break-all">{node.text}</a>;
-  return <p class="text-slate-600 text-sm">{node.text}</p>;
-}
-
-function Card({ node }) {
+export function siteDataModule(root: SiteNode, schema: SiteSchema): string {
+  // `</script>` を含む文字列でも安全なように、JSON 内の `<` をエスケープする。
+  const json = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
+  const { items } = shapeRecords(root, schema);
   return (
-    <article data-card class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-2">
-      <h2 class="font-semibold text-slate-900">{node.text}</h2>
-      {node.children.map((c) => <Field node={c} />)}
-    </article>
+    `export const data = ${json(root)};\n` +
+    `export const title = ${json(root.text)};\n` +
+    `export const items = ${json(items)};\n` +
+    `export const schema = ${json(schema)};\n`
   );
 }
-
-export default function Page() {
-  return (
-    <main class="min-h-screen bg-slate-50 p-6 font-sans">
-      <h1 class="text-2xl font-bold text-slate-900">{data.text}</h1>
-      <input data-search placeholder="検索…" class="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2" />
-      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {data.children.map((c) => <Card node={c} />)}
-      </div>
-    </main>
-  );
-}
-`;
 
 /**
  * 配信 HTML に埋め込む検索スクリプト。`input[data-search]` の入力で、
@@ -99,6 +77,7 @@ export interface SiteBuild {
 }
 
 export const SITE_TEMPLATE_MAX_BYTES = 64 * 1024;
+export const SITE_SCHEMA_MAX_BYTES = 4 * 1024;
 export const SITE_BUILD_MAX_BYTES = 2 * 1024 * 1024;
 
 function escapeHtml(s: string): string {
@@ -165,14 +144,15 @@ export function renderSiteResponse(
 
 /** 保存リクエストの検証。サイズと型だけ（内容は CSP で守る）。 */
 export function validateSiteSave(body: unknown):
-  | { ok: true; template: string; build: SiteBuild }
+  | { ok: true; template: string; schema: string; build: SiteBuild }
   | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: false, error: "Invalid body" };
-  const { template, html, css } = body as Record<string, unknown>;
-  if (typeof template !== "string" || typeof html !== "string" || typeof css !== "string") {
+  const { template, schema = "", html, css } = body as Record<string, unknown>;
+  if (typeof template !== "string" || typeof html !== "string" || typeof css !== "string" || typeof schema !== "string") {
     return { ok: false, error: "template, html and css are required" };
   }
   if (template.length > SITE_TEMPLATE_MAX_BYTES) return { ok: false, error: "Template too large" };
+  if (schema.length > SITE_SCHEMA_MAX_BYTES) return { ok: false, error: "Schema too large" };
   if (html.length + css.length > SITE_BUILD_MAX_BYTES) return { ok: false, error: "Build too large" };
-  return { ok: true, template, build: { html, css } };
+  return { ok: true, template, schema, build: { html, css } };
 }

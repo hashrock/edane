@@ -3,7 +3,8 @@
  * ためのプロンプト組み立てと応答の後処理。モデル呼び出し自体はサーバー
  * （server.ts の /api/sites/:pubId/suggest）にあり、ここは純粋関数だけ。
  */
-import { DEFAULT_SITE_TEMPLATE, type SiteNode } from "./siteTemplate";
+import type { SiteNode } from "./siteTemplate";
+import { defaultTemplate, formatSchema, parseSchema, inferSchema, shapeRecords, type SiteSchema, type SiteItem } from "./siteSchema";
 
 export const SITE_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 
@@ -17,47 +18,45 @@ export interface ChatMessage {
 }
 
 /**
- * 枝を「構造が分かる程度」に切り詰めた JSON。子が多い場合は先頭数件＋省略印。
- * text は長すぎれば切る。
+ * `items` の先頭数件を、長い値を切り詰めて JSON にする。モデルには木ではなく
+ * テンプレートが実際に受け取る形だけを見せる（木を見せると data.children を
+ * 歩き始める）。
  */
-export function sampleSiteData(root: SiteNode, maxChars = SITE_AI_DATA_MAX_CHARS): string {
-  const shrink = (n: SiteNode, depth: number): Record<string, unknown> => {
-    const out: Record<string, unknown> = {
-      type: n.type,
-      text: n.text.length > 120 ? n.text.slice(0, 120) + "…" : n.text,
-    };
-    if (n.children.length) {
-      const limit = depth === 0 ? 6 : 8;
-      const shown = n.children.slice(0, limit).map((c) => shrink(c, depth + 1));
-      const rest = n.children.length - limit;
-      out.children = rest > 0 ? [...shown, `…(+${rest} more)`] : shown;
-    }
-    return out;
-  };
-  const json = JSON.stringify(shrink(root, 0), null, 1);
-  return json.length > maxChars ? json.slice(0, maxChars) + "\n…(truncated)" : json;
+export function sampleItems(items: SiteItem[], maxChars = SITE_AI_DATA_MAX_CHARS): string {
+  const clip = (v: string) => (v.length > 120 ? v.slice(0, 120) + "…" : v);
+  const shown = items.slice(0, 5).map((item) =>
+    Object.fromEntries(
+      Object.entries(item).map(([k, v]) => [k, Array.isArray(v) ? v.slice(0, 8).map(clip) : v === undefined ? undefined : clip(v)])
+    )
+  );
+  const json = JSON.stringify(shown, null, 1);
+  const note = items.length > 5 ? `\n…(+${items.length - 5} more items)` : "";
+  return (json.length > maxChars ? json.slice(0, maxChars) + "\n…(truncated)" : json) + note;
 }
 
-const SYSTEM_PROMPT = `You design small static web pages from a tree of notes, written as a JSX template.
+const SYSTEM_PROMPT = `You design small static web pages from a list of records, written as a JSX template.
 
 Runtime contract (strict):
-- Output ONE file, index.jsx. It must begin with: import { data } from './data.js';
-- \`data\` is a node: { id, type: "text"|"image"|"link"|"markdown", text, children: node[] }. For "image" and "link" nodes, \`text\` holds the URL.
+- Output ONE file, index.jsx. It must begin with: import { items, title } from './data.js';
+- \`title\` is the page heading (string). \`items\` is an array of records whose fields are described by the schema in the user message. Render the list as \`items.map((item) => …)\` and read fields by key: item.title, item.<key>. Fields may be undefined; guard with \`&&\`. List fields (string[]) are rendered with .map.
+- These two are the ONLY exports of data.js. There is no tree, no \`children\`, no \`type\`, no \`data\`.
 - Export a default function component that returns the page body (no <html>/<head>/<body>).
-- JSX is compiled by TypeScript with factory \`h\`; use \`class\` for CSS classes. Components are plain functions taking props. No hooks, no state, no event handlers, no <script>, no external imports other than './data.js', no fetch.
+- JSX is compiled by TypeScript with factory \`h\`; use \`class\` for CSS classes. Components are plain functions taking props. No hooks, no state, no event handlers, no <script>, no imports other than './data.js', no fetch.
 - Styling: UnoCSS / Tailwind utility classes only (they are generated from the markup). No <style> blocks.
-- Search (REQUIRED): render exactly one \`<input data-search placeholder="…">\`, and put the \`data-card\` attribute on the outermost element of EVERY record (each child of data). The hosting page injects a script that filters [data-card] elements by the text typed into [data-search]; without these attributes search is broken.
-- Never nest cards inside cards. Guard against missing children (children may be empty).
+- Search (REQUIRED): render exactly one \`<input data-search placeholder="…">\`, and put the \`data-card\` attribute on the outermost element of EVERY record. The hosting page injects a script that filters [data-card] elements by the text typed into [data-search]; without these attributes search is broken.
+- Never nest cards inside cards.
 
 Design guidance:
-- Read the sample data: the first level under the root is usually one record per node, the level below it is that record's fields (in order). Infer what each field position/type means (title, description, URL, image, price, date…) and lay it out accordingly.
-- Choose a look that suits the content (catalog, directory, gallery, timeline, FAQ…), with a clear heading using data.text, good spacing, responsive grid, readable typography. Be tasteful, not gaudy.
+- Read the schema and the sample items to understand what each field means (description, URL, image, price, date, tags…) and lay it out accordingly: images as <img>, URLs as <a>, lists as chips, etc.
+- Choose a look that suits the content (catalog, directory, gallery, timeline, FAQ…), with a clear heading using title, good spacing, responsive grid, readable typography. Be tasteful, not gaudy.
 - Reply with ONLY the JSX code in a single \`\`\`jsx fenced block. No explanations.`;
 
 export interface SuggestRequest {
   instruction: string;
   /** 作者のテンプレート。既定のまま／空なら「まだ何もない」として扱う。 */
   currentTemplate: string;
+  /** スキーマ文字列（空なら推定）。 */
+  schema: string;
 }
 
 /** `/api/sites/:id/suggest` のボディ。型が違えば黙って既定値にする（内容は AI が読むだけ）。 */
@@ -66,6 +65,7 @@ export function validateSuggestRequest(body: unknown): SuggestRequest {
   return {
     instruction: typeof b.instruction === "string" ? b.instruction : "",
     currentTemplate: typeof b.template === "string" ? b.template : "",
+    schema: typeof b.schema === "string" ? b.schema : "",
   };
 }
 
@@ -73,16 +73,33 @@ export function validateSuggestRequest(body: unknown): SuggestRequest {
  * 既定テンプレートは「現在のテンプレート」として見せない — 見せると色替え
  * だけの提案に引きずられ、ゼロから考えなくなる。
  */
-function authoredTemplate(template: string): string {
+function authoredTemplate(template: string, schema: SiteSchema): string {
   const t = template.trim();
-  return t === DEFAULT_SITE_TEMPLATE.trim() ? "" : t;
+  return t === defaultTemplate(schema).trim() ? "" : t;
+}
+
+/** 空／不正なスキーマは推定で補う（サーバーもエディタも同じ規則）。 */
+export function effectiveSchema(schemaText: string, data: SiteNode): SiteSchema {
+  const parsed = parseSchema(schemaText);
+  return parsed.ok && parsed.schema.length ? parsed.schema : inferSchema(data);
+}
+
+function describeItems(schema: SiteSchema): string {
+  const fields = schema
+    .map((f) => `  ${f.key}: ${f.list ? "string[]" : "string"} | undefined${f.type && f.type !== "text" ? `  // ${f.type} URL` : ""}`)
+    .join("\n");
+  return `{\n  id: string,\n  title: string,\n${fields}\n}`;
 }
 
 export function buildSuggestMessages(input: SuggestRequest & { data: SiteNode }): ChatMessage[] {
   const instruction = input.instruction.trim().slice(0, SITE_AI_INSTRUCTION_MAX_CHARS);
-  const current = authoredTemplate(input.currentTemplate);
+  const schema = effectiveSchema(input.schema, input.data);
+  const current = authoredTemplate(input.currentTemplate, schema);
   const user =
-    `Sample of the data (truncated):\n\`\`\`json\n${sampleSiteData(input.data)}\n\`\`\`\n\n` +
+    `Schema (field order = child order): ${formatSchema(schema) || "(none)"}\n` +
+    `Each element of \`items\` has the shape:\n\`\`\`ts\n${describeItems(schema)}\n\`\`\`\n\n` +
+    `title: ${JSON.stringify(input.data.text)}\n` +
+    `Sample of items:\n\`\`\`json\n${sampleItems(shapeRecords(input.data, schema).items)}\n\`\`\`\n\n` +
     (current
       ? `Current template (the author's work so far — keep its intent, improve it or restructure as requested):\n\`\`\`jsx\n${current.slice(0, 4000)}\n\`\`\`\n\n`
       : "") +
@@ -103,7 +120,7 @@ export type ExtractResult =
 
 /**
  * モデル応答からテンプレート本文を取り出す。Qwen3 の <think>…</think> と
- * コードフェンスを剥がし、`import { data }` が無ければ先頭に補う。
+ * コードフェンスを剥がし、data.js の import が無ければ先頭に補う。
  *
  * 途中で切れた応答（開きフェンスだけで閉じが無い、または呼び出し側が
  * `truncated` と判定）は "truncated" にして、壊れたコードを返さない。
@@ -123,7 +140,7 @@ export function extractTemplate(
   if (opts.truncated) return { kind: "truncated" };
   if (!s || !/export\s+default|function\s+\w+/.test(s)) return { kind: "none" };
   if (!/from\s+['"]\.\/data\.js['"]/.test(s)) {
-    s = `import { data } from './data.js';\n\n` + s;
+    s = `import { items, title } from './data.js';\n\n` + s;
   }
   return { kind: "ok", template: s + "\n" };
 }
