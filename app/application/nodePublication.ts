@@ -65,10 +65,38 @@ export function canServePublication(
  * 公開JSONとして配信する形。ビュー状態（collapsed）だけを落とし、内容
  * （text / type / 書式 / リンクメタ / 子）はそのまま。`id` は消費側が
  * ノードを安定して同定できるよう残す。
+ *
+ * フィールドを明示列挙する allowlist にしてあるのは、`MindMapModel` に
+ * 編集専用の内部フィールドが増えたとき、ここに明示的に足さない限り公開
+ * JSONへ自動で漏れないようにするため（siteTemplate.ts の `SiteNode` と
+ * 同じ考え方 — spread してから除外する blocklist だと逆に、除外し忘れた
+ * 新フィールドがデフォルトで公開されてしまう）。
  */
-export function publishedNodeJson(node: MindMapModel): MindMapModel {
-  const { collapsed: _collapsed, ...rest } = node;
-  return { ...rest, children: node.children.map(publishedNodeJson) };
+export interface PublishedNode {
+  id: string;
+  text: string;
+  type?: MindMapModel["type"];
+  fontSize?: number;
+  bold?: boolean;
+  linkTitle?: string;
+  favicon?: string;
+  checked?: boolean;
+  children: PublishedNode[];
+}
+
+export function publishedNodeJson(node: MindMapModel): PublishedNode {
+  const { id, text, type, fontSize, bold, linkTitle, favicon, checked, children } = node;
+  return {
+    id,
+    text,
+    ...(type !== undefined && { type }),
+    ...(fontSize !== undefined && { fontSize }),
+    ...(bold !== undefined && { bold }),
+    ...(linkTitle !== undefined && { linkTitle }),
+    ...(favicon !== undefined && { favicon }),
+    ...(checked !== undefined && { checked }),
+    children: children.map(publishedNodeJson),
+  };
 }
 
 /**
