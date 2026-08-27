@@ -198,7 +198,7 @@ export const MESSAGES_JA = {
   siteOpenEditor: "サイトを作る（実験的）",
   siteEditorTitle: "公開サイト",
   siteEditorHint:
-    "この枝を JSX テンプレートで Web ページにします。data.js の `data` に枝（id / type / text / children）が入ります。<input data-search> と [data-card] を置くと検索が動きます。",
+    "この枝を JSX テンプレートで Web ページにします。data.js の `items` にスキーマで整形したレコード（title と各キー）、`data` に生の枝が入ります。<input data-search> と [data-card] を置くと検索が動きます。",
   siteTemplateLabel: "テンプレート（index.jsx）",
   sitePreviewLabel: "プレビュー",
   siteCompiling: "コンパイル中…",
@@ -215,6 +215,12 @@ export const MESSAGES_JA = {
   siteAiInstructionPlaceholder: "希望があれば（例: ダークテーマ、写真を大きく、一覧は表で）",
   siteAiFailed: "AIの提案に失敗しました",
   siteAiUndo: "AI提案前に戻す",
+  siteSchemaLabel: "スキーマ",
+  siteSchemaPlaceholder: "推定: {schema}",
+  siteSchemaHint:
+    "フィールドの位置に名前を付けます（例: description, url:link, image:image, tags[]）。空なら実データから推定。テンプレートでは items[i].キー で読めます。",
+  siteSchemaAdopt: "推定を採用",
+  siteSchemaWarnings: "データとのずれ",
 
   // --- 公開ドロップダウン ---
   publicLabel: "公開",
@@ -506,7 +512,7 @@ export const MESSAGES_EN = {
   siteOpenEditor: "Build a site (experimental)",
   siteEditorTitle: "Published site",
   siteEditorHint:
-    "Turn this branch into a web page with a JSX template. `data` in data.js holds the branch (id / type / text / children). Add <input data-search> and [data-card] to get search.",
+    "Turn this branch into a web page with a JSX template. `items` in data.js holds the records shaped by the schema (title + your keys); `data` is the raw branch. Add <input data-search> and [data-card] to get search.",
   siteTemplateLabel: "Template (index.jsx)",
   sitePreviewLabel: "Preview",
   siteCompiling: "Compiling…",
@@ -523,6 +529,12 @@ export const MESSAGES_EN = {
   siteAiInstructionPlaceholder: "Optional wishes (e.g. dark theme, bigger photos, a table layout)",
   siteAiFailed: "AI suggestion failed",
   siteAiUndo: "Undo AI suggestion",
+  siteSchemaLabel: "Schema",
+  siteSchemaPlaceholder: "Inferred: {schema}",
+  siteSchemaHint:
+    "Name the field positions (e.g. description, url:link, image:image, tags[]). Empty = inferred from the data. Templates read them as items[i].key.",
+  siteSchemaAdopt: "Use inferred",
+  siteSchemaWarnings: "Mismatches with the data",
 
   // --- Publicity dropdown ---
   publicLabel: "Public",

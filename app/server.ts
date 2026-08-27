@@ -25,17 +25,14 @@ import {
   publishedNodeJson,
   nodePathTexts,
 } from "./application/nodePublication";
-import {
-  toSiteNode,
-  renderSiteResponse,
-  validateSiteSave,
-  DEFAULT_SITE_TEMPLATE,
-} from "./application/siteTemplate";
+import { toSiteNode, renderSiteResponse, validateSiteSave } from "./application/siteTemplate";
+import { defaultTemplate } from "./application/siteSchema";
 import {
   SITE_AI_MODEL,
   buildSuggestMessages,
   extractTemplate,
   validateSuggestRequest,
+  effectiveSchema,
 } from "./application/siteAi";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
@@ -611,7 +608,13 @@ app.put("/api/sites/:pubId", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
 
   const updatedAt = new Date().toISOString();
-  const row = { template: parsed.template, html: parsed.build.html, css: parsed.build.css, updatedAt };
+  const row = {
+    template: parsed.template,
+    schema: parsed.schema,
+    html: parsed.build.html,
+    css: parsed.build.css,
+    updatedAt,
+  };
   await db
     .insert(sites)
     .values({ publicationId: pubId, userId: user.id, ...row })
@@ -868,17 +871,20 @@ const routes = app
     const pubId = c.req.param("pubId");
     const [owned, site] = await Promise.all([
       loadOwnedPublicationNode(db, pubId, user.id, c.env.ENCRYPTION_KEY),
-      db.select({ template: sites.template }).from(sites).where(eq(sites.publicationId, pubId)).get(),
+      db.select({ template: sites.template, schema: sites.schema }).from(sites).where(eq(sites.publicationId, pubId)).get(),
     ]);
     if ("error" in owned) {
       return owned.error === "decrypt" ? c.text("Decryption failed", 500) : c.notFound();
     }
+    const data = toSiteNode(owned.node);
+    const schema = site?.schema ?? "";
     return c.render("Sites/Edit", {
       user,
       publicationId: pubId,
       noteId: owned.note.id,
-      data: toSiteNode(owned.node),
-      template: site?.template ?? DEFAULT_SITE_TEMPLATE,
+      data,
+      schema,
+      template: site?.template ?? defaultTemplate(effectiveSchema(schema, data)),
       published: !!site,
     });
   })
