@@ -17,7 +17,7 @@
  * 「まず自由に書く → 後から読み方を決める」ので、同じ枝を別のスキーマで
  * 読む 2 つのサイトも作れる。
  */
-import type { NodeType } from "../domain/model";
+import { STORED_NODE_TYPES, type NodeType } from "../domain/model";
 import type { SiteNode } from "./siteTemplate";
 
 export interface SchemaField {
@@ -80,8 +80,7 @@ export function inferSchema(root: SiteNode): SiteSchema {
     const at = records.map((r) => r.children[i]).filter((n): n is SiteNode => !!n);
     const count = (pred: (n: SiteNode) => boolean) => at.filter(pred).length;
     const majority = (n: number) => n * 2 > at.length;
-    const types: NodeType[] = ["image", "link", "markdown"];
-    const type = types.find((t) => majority(count((n) => n.type === t)));
+    const type = STORED_NODE_TYPES.find((t) => majority(count((n) => n.type === t)));
     const list = majority(count((n) => n.children.length > 0));
     let base = type === "image" ? "image" : type === "link" ? "url" : type === "markdown" ? "body" : list ? "items" : "field";
     let key = base === "field" ? `field${i + 1}` : base;

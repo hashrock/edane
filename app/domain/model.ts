@@ -32,6 +32,14 @@ export function isStoredNodeType(value: unknown): value is StoredNodeType {
   return typeof value === "string" && value in STORED_NODE_TYPE_SET;
 }
 
+/**
+ * The non-"text" `NodeType` members as an array, derived from
+ * {@link STORED_NODE_TYPE_SET} so callers that need to enumerate them (rather
+ * than just test membership via {@link isStoredNodeType}) stay in sync
+ * automatically when a `NodeType` member is added, renamed, or removed.
+ */
+export const STORED_NODE_TYPES = Object.keys(STORED_NODE_TYPE_SET) as StoredNodeType[];
+
 /** Tree node model (stored as JSON) */
 export interface MindMapModel {
   id: string;
