@@ -19,17 +19,10 @@ const tree: MindMapModel = {
 };
 
 describe("outlineRows", () => {
-  it("includes the root first, then descendants in DFS order with depth", () => {
+  it("starts at the top-level nodes (the root is the title, not a row), DFS order with depth", () => {
     const rows = outlineRows(tree);
-    expect(rows.map((r) => r.node.id)).toEqual([
-      "root",
-      "a",
-      "a1",
-      "a2",
-      "b",
-      "b1",
-    ]);
-    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2, 2, 1, 2]);
+    expect(rows.map((r) => r.node.id)).toEqual(["a", "a1", "a2", "b", "b1"]);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 0, 1]);
   });
 
   it("reports hasChildren for parents", () => {
@@ -45,7 +38,7 @@ describe("outlineRows", () => {
       children: [{ ...tree.children[0], collapsed: true }, tree.children[1]],
     };
     const rows = outlineRows(collapsed);
-    expect(rows.map((r) => r.node.id)).toEqual(["root", "a", "b", "b1"]);
+    expect(rows.map((r) => r.node.id)).toEqual(["a", "b", "b1"]);
     const a = rows.find((r) => r.node.id === "a")!;
     expect(a.collapsed).toBe(true);
     expect(a.hasChildren).toBe(true);

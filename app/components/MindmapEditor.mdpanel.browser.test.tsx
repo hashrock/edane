@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
-import { userEvent } from "vitest/browser";
+import { userEvent, page } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
@@ -9,9 +9,10 @@ const MD_SOURCE =
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
+  // "plain" comes first so it (not the markdown card) is selected on load.
   children: [
-    { id: "md", text: MD_SOURCE, type: "markdown", children: [] },
     { id: "plain", text: "plain", children: [] },
+    { id: "md", text: MD_SOURCE, type: "markdown", children: [] },
   ],
 };
 
@@ -44,7 +45,11 @@ const findNode = (m: MindMapModel, id: string): MindMapModel | null =>
     null
   );
 
-beforeEach(() => {
+// The default 414px-wide test viewport can't reach clicks on the right of the
+// canvas: the first tree is centred on open, so its toggle / second tree sit
+// beyond x=414. Widen it like NoteEditor.browser.test.tsx does.
+beforeEach(async () => {
+  await page.viewport(1280, 800);
   const style = document.createElement("style");
   style.textContent = `
     [data-testid="mm-canvas"] {
@@ -59,7 +64,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const mdRect = await waitFor(() => api().getNodeRect("md"));
@@ -73,7 +78,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     // Select the markdown node, then press Space (edit intent → panel).
@@ -102,7 +107,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const point = await waitFor(() => api().getNodeClickPoint("md"));
@@ -155,7 +160,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const point = await waitFor(() => api().getNodeClickPoint("md"));
@@ -220,7 +225,8 @@ describe("MindmapEditor markdown compact card + panel", () => {
     ).find((b) => b.textContent === "View")!;
     viewBtn.click();
     await waitFor(() => document.activeElement !== textarea);
-    await userEvent.keyboard("[ArrowDown]");
+    // "plain" is the tree above "md" (see MODEL order).
+    await userEvent.keyboard("[ArrowUp]");
     await waitFor(() => api().getActiveNodeId() === "plain");
   });
 });

@@ -53,7 +53,9 @@ describe("MindmapEditor (browser e2e)", () => {
     );
 
     // Wait until Konva has laid out and the test API can locate the node.
-    const point = await waitFor(() => api().getNodeClickPoint("hello"));
+    // "world" rather than "hello": the first top-level node starts selected,
+    // so a click on it would already be the edit-entering re-click.
+    const point = await waitFor(() => api().getNodeClickPoint("world"));
 
     const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]');
     expect(canvas).toBeTruthy();
@@ -66,7 +68,7 @@ describe("MindmapEditor (browser e2e)", () => {
     // The node becomes active and — the regression we guard against — the hidden
     // input must keep focus even though the click landed on the canvas (which is
     // not focusable and would otherwise blur the input on the trailing click).
-    await waitFor(() => api().getActiveNodeId() === "hello");
+    await waitFor(() => api().getActiveNodeId() === "world");
     await waitFor(
       () =>
         (document.activeElement as HTMLElement | null)?.tagName === "TEXTAREA"
@@ -77,8 +79,8 @@ describe("MindmapEditor (browser e2e)", () => {
     // edit mode. The point of this test is that typing reaches the focused input.
     await userEvent.keyboard("X");
     const text = await waitFor(() => {
-      const t = api().getModel().children[0].text;
-      return t !== "Hello" ? t : null;
+      const t = api().getModel().children[1].text;
+      return t !== "World" ? t : null;
     });
 
     expect(text).toBe("X");

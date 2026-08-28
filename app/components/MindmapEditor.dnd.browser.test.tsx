@@ -4,7 +4,7 @@ import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
-// DFS order: root, a, a1, b
+// Root is the title (not a canvas node). DFS order: a, a1, b
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -53,7 +53,8 @@ async function setup(model: MindMapModel = MODEL) {
   render(
     <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  // The first top-level node starts selected.
+  await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
   // Konva binds its pointer handlers to the inner canvas; dispatch native
@@ -113,13 +114,24 @@ describe("MindmapEditor drag & drop node move", () => {
     expect(api().getSelection().editing).toBe(false);
   });
 
-  it("dropping on a node's top edge inserts as the sibling before it", async () => {
+  it("dropping on a nested node's top edge inserts as the sibling before it", async () => {
+    const { drag } = await setup();
+    const rect = await waitFor(() => api().getNodeRect("a1"));
+    await drag("b", rect.x + rect.width / 2, rect.y + 2);
+
+    await waitFor(() => childIds(api().getModel(), "a")[0] === "b");
+    expect(childIds(api().getModel(), "a")).toEqual(["b", "a1"]);
+    expect(childIds(api().getModel(), "root")).toEqual(["a"]);
+  });
+
+  it("a tree root has no sibling zone: its top edge still nests (no accidental new tree)", async () => {
     const { drag } = await setup();
     const rect = await waitFor(() => api().getNodeRect("a"));
     await drag("b", rect.x + rect.width / 2, rect.y + 2);
 
-    await waitFor(() => childIds(api().getModel(), "root")[0] === "b");
-    expect(childIds(api().getModel(), "root")).toEqual(["b", "a"]);
+    await waitFor(() => childIds(api().getModel(), "a").length === 2);
+    expect(childIds(api().getModel(), "a")).toEqual(["a1", "b"]);
+    expect(childIds(api().getModel(), "root")).toEqual(["a"]);
   });
 
   it("moves the whole subtree with the node", async () => {
@@ -143,10 +155,25 @@ describe("MindmapEditor drag & drop node move", () => {
     expect(JSON.stringify(api().getModel())).toBe(before);
   });
 
-  it("dropping over empty space cancels the drag", async () => {
+  it("dropping over empty space places the tree there (free position)", async () => {
+    const { drag } = await setup();
+    const before = await waitFor(() => api().getNodeRect("b"));
+    await drag("b", 700, 500);
+
+    // Still a top-level tree, now pinned to a position of its own.
+    await waitFor(() => api().getModel().children[1]?.position != null);
+    expect(childIds(api().getModel(), "root")).toEqual(["a", "b"]);
+    const after = await waitFor(() => {
+      const r = api().getNodeRect("b");
+      return r && r.x !== before.x ? r : null;
+    });
+    expect(after.x).toBeGreaterThan(before.x);
+  });
+
+  it("dropping a nested node over empty space is a no-drop (trees are made on purpose)", async () => {
     const { drag } = await setup();
     const before = JSON.stringify(api().getModel());
-    await drag("b", 700, 500);
+    await drag("a1", 700, 500);
 
     await new Promise((r) => setTimeout(r, 100));
     expect(JSON.stringify(api().getModel())).toBe(before);
@@ -171,12 +198,13 @@ describe("MindmapEditor drag & drop node move", () => {
       '[data-testid="mm-canvas"]'
     )!;
 
-    // Enter edit mode on "a" (click to select, Space to start editing).
+    // Enter edit mode on "a": it starts selected, so a click on it is the
+    // "second click" that drops the caret in.
     await userEvent.click(canvas, {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
     await waitFor(() => api().getActiveNodeId() === "a");
-    await userEvent.keyboard("[Space]");
+    if (!api().getSelection().editing) await userEvent.keyboard("[Space]");
     await waitFor(() => api().getSelection().editing === true);
 
     // Drag within the edited node: a text drag-select, not a node move.

@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { router } from "@inertiajs/react";
-import type { MindMapModel } from "../domain/model";
+import { type MindMapModel, findNode, firstNavigableId } from "../domain/model";
 import {
   editorReducer,
   type EditorState,
@@ -120,15 +120,17 @@ export function useNoteEditor({
   readOnly = false,
 }: NoteEditorInit): NoteEditorEngine {
   // --- Single source of truth: the full editor state ---
-  // Exactly one node is always selected; the root starts active.
+  // Exactly one node is always selected; the first top-level node starts
+  // active (the root is the title, not a node).
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
+    const firstId = firstNavigableId(model);
     return {
       document: { model, clipboard: null },
       view: {
-        activeNodeId: model.id,
+        activeNodeId: firstId,
         editing: false,
-        editingText: model.text,
+        editingText: findNode(model, firstId)?.text ?? "",
         cursorPos: 0,
         selectionEnd: 0,
         lastChildByParent: {},
@@ -376,7 +378,7 @@ export function useNoteEditor({
   // Undo/redo restore only the document; the current selection/caret (view
   // state) is carried over as-is. The `replace` reducer reconciles it against
   // the restored document, so if the active node no longer exists there it
-  // falls back to the root instead of dangling.
+  // falls back to the first top-level node instead of dangling.
   const restoreDocument = useCallback(
     (restored: EditorState["document"] | null) => {
       if (!restored) return;

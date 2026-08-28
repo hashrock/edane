@@ -3,7 +3,7 @@ import { render } from "vitest-browser-react";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
-// DFS order: root, a, a1, b
+// DFS order: a, a1, b (the root is the title, not a node)
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -60,7 +60,7 @@ async function setup(model: MindMapModel = MODEL) {
   render(
     <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
   const canvas = document.querySelector<HTMLElement>(

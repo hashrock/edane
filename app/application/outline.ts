@@ -7,24 +7,27 @@
  * and the logic is unit-testable without a DOM.
  */
 
-import { type MindMapModel, visibleChildrenOf } from "../domain/model";
+import {
+  type MindMapModel,
+  topLevelNodes,
+  visibleChildrenOf,
+} from "../domain/model";
 import { verticalMove } from "../lib/textGeometry";
 
 export interface OutlineRow {
   node: MindMapModel;
-  /** Root = 0; its children = 1; grandchildren = 2; … (indent level). */
+  /** Top-level nodes = 0; their children = 1; … (indent level). */
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
 }
 
 /**
- * Visible outline rows in DFS order, INCLUDING the root as the first row (depth
- * 0). The root is still mirrored in the header title, but giving it a real row
- * means caret navigation matches {@link getFlatOrder} (which also starts at the
- * root): pressing ↑ from the first child lands on the root instead of hitting a
- * wall. Descendants of a collapsed node are omitted; the collapsed node itself
- * stays and still reports `hasChildren` so the disclosure control renders.
+ * Visible outline rows in DFS order, starting at the top-level nodes (depth 0).
+ * The root is the note title, shown in the header, and is not a row — the same
+ * rule as {@link getFlatOrder}, so caret navigation and the row list agree.
+ * Descendants of a collapsed node are omitted; the collapsed node itself stays
+ * and still reports `hasChildren` so the disclosure control renders.
  */
 export function outlineRows(model: MindMapModel): OutlineRow[] {
   const rows: OutlineRow[] = [];
@@ -39,7 +42,7 @@ export function outlineRows(model: MindMapModel): OutlineRow[] {
     if (vis.kind === "none") return;
     for (const c of vis.children) walk(c, depth + 1);
   }
-  walk(model, 0);
+  for (const top of topLevelNodes(model)) walk(top, 0);
   return rows;
 }
 

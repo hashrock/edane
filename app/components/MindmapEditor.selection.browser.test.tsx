@@ -4,7 +4,7 @@ import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
-// DFS order: root, a, b
+// DFS order: a, b (the root is the title, not a node; "a" starts selected)
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -16,10 +16,15 @@ const MODEL: MindMapModel = {
 
 // A single-child chain: the layout gives the only child the *same* Y as its
 // parent, which is what made a tiny post-click drag re-target the parent.
+// "lead" goes first so "only" is not the initially selected node (a press on
+// the selected node is the edit-entering re-click, not a select).
 const CHAIN_MODEL: MindMapModel = {
   id: "root",
   text: "Root",
-  children: [{ id: "only", text: "Only", children: [] }],
+  children: [
+    { id: "lead", text: "Lead", children: [] },
+    { id: "chain", text: "Chain", children: [{ id: "only", text: "Only", children: [] }] },
+  ],
 };
 
 function api(): MindmapTestApi {
@@ -53,25 +58,29 @@ beforeEach(() => {
 });
 
 describe("MindmapEditor single-node selection", () => {
-  it("starts with the root selected and moves the single selection with arrows", async () => {
+  it("starts with the first top-level node selected and moves the single selection with arrows", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
 
-    // Exactly one node is always selected; the root starts active.
-    await waitFor(() => api().getActiveNodeId() === "root");
+    // Exactly one node is always selected; the first top-level node starts
+    // active in selection mode (the root is the title, not a node).
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
+    await waitFor(() => api().getSelection().editing === false);
 
-    const point = await waitFor(() => api().getNodeClickPoint("a"));
+    const point = await waitFor(() => api().getNodeClickPoint("b"));
     const canvas = document.querySelector<HTMLElement>(
       '[data-testid="mm-canvas"]'
     )!;
-    // Click selects node "a" (selection mode, not editing).
+    // Click selects node "b" (selection mode, not editing).
     await userEvent.click(canvas, {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
-    await waitFor(() => api().getActiveNodeId() === "a");
+    await waitFor(() => api().getActiveNodeId() === "b");
     await waitFor(() => api().getSelection().editing === false);
+    await userEvent.keyboard("{ArrowUp}");
+    await waitFor(() => api().getActiveNodeId() === "a");
 
     // Arrow keys move the single selection, never extending it.
     await userEvent.keyboard("{ArrowDown}");
@@ -98,7 +107,7 @@ describe("MindmapEditor single-node selection", () => {
       />
     );
 
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "lead");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const point = await waitFor(() => api().getNodeClickPoint("only"));

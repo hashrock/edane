@@ -27,10 +27,17 @@ const LONG_URL =
   "a-rather-long-path-segment/".repeat(8) +
   "index.html";
 
+// Every case is a child of one top-level node: top-level nodes carry the tree
+// root styling (min box width 100, dark fill), which would mask the sizing
+// under test; nesting keeps them ordinary nodes on one centred row.
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
   children: [
+    {
+      id: "hub",
+      text: "cases",
+      children: [
     { id: "plain", text: "hello world", children: [] },
     { id: "empty", text: "", children: [] },
     {
@@ -53,6 +60,8 @@ const MODEL: MindMapModel = {
     { id: "bare", type: "link", text: "https://example.com/a", children: [] },
     { id: "long-bare", type: "link", text: LONG_URL, children: [] },
     { id: "big", text: "big and bold", fontSize: 32, bold: true, children: [] },
+      ],
+    },
   ],
 };
 

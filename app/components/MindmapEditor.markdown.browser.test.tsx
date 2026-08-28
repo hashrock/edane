@@ -64,6 +64,9 @@ function canvas(): HTMLElement {
 async function selectNode(id: string) {
   const point = await waitFor(() => api().getNodeClickPoint(id));
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
+  // The first top-level node is already selected on open; clicking it again
+  // would count as the second click and enter edit mode instead.
+  if (api().getActiveNodeId() === id && !api().getSelection().editing) return;
   await userEvent.click(canvas(), {
     position: { x: Math.round(point.x), y: Math.round(point.y) },
   });
@@ -106,7 +109,7 @@ describe("MindmapEditor markdown paste", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getNodeClickPoint("root"));
+    await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     pasteMarkdown("# Title\n- one\n- two");
@@ -121,7 +124,7 @@ describe("MindmapEditor markdown paste", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getNodeClickPoint("root"));
+    await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     pasteMarkdown("# Doc\n- a\n- b");
@@ -143,7 +146,7 @@ describe("MindmapEditor markdown paste", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getNodeClickPoint("root"));
+    await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     pasteMarkdown("# Heading\n- one\n- two");

@@ -16,13 +16,23 @@ import {
 // The task checkbox as it is actually painted on the canvas, and the two ways
 // to flip it (the box itself, ⌘/Ctrl+Shift+D).
 
+// The tasks hang off one top-level node so they are ordinary (non-root-styled)
+// nodes centred on its row — top-level nodes stack downward as separate trees
+// and the first one starts selected, which would put the targets below the
+// test viewport and turn the first click into the edit-entering re-click.
 const MODEL: MindMapModel = {
   id: "root",
   text: "Shopping",
   children: [
-    { id: "open", text: "buy milk", checked: false, children: [] },
-    { id: "done", text: "buy bread", checked: true, children: [] },
-    { id: "plain", text: "just a note", children: [] },
+    {
+      id: "list",
+      text: "groceries",
+      children: [
+        { id: "open", text: "buy milk", checked: false, children: [] },
+        { id: "done", text: "buy bread", checked: true, children: [] },
+        { id: "plain", text: "just a note", children: [] },
+      ],
+    },
   ],
 };
 
@@ -166,7 +176,7 @@ describe("task checkbox (browser e2e)", () => {
   it("leaves the selection where it was when a box is clicked", async () => {
     // The toggle rebuilds the layer under the pointer, so the click that
     // follows the press can land on the bare stage — which reads as "clicked
-    // empty space" and would otherwise drop the selection to the root.
+    // empty space" and would otherwise drop the selection elsewhere.
     await selectNode("plain");
     await clickCheckbox("open");
     await waitFor(() => checkedOf("open") === true);

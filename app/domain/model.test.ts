@@ -23,6 +23,7 @@ import {
   moveNodeUp,
   moveNodeDown,
   moveBranch,
+  placeBranchAt,
   mergeIntoPredecessor,
   mergeSuccessorInto,
   isStoredNodeType,
@@ -69,7 +70,7 @@ describe("detachBranch", () => {
     expect(findNode(next, "a1")).toBeNull();
     expect(findNode(next, "a1a")).toBeNull();
     // siblings untouched
-    expect(getFlatOrder(next)).toEqual(["root", "b"]);
+    expect(getFlatOrder(next)).toEqual(["b"]);
   });
 
   it("returns the removed subtree intact", () => {
@@ -216,7 +217,13 @@ describe("splitNode at root", () => {
       id: "root",
       text: "Root",
       children: [
-        { id: "p", text: "Parent", children: [{ id: "c", text: "Child", children: [] }] },
+        {
+          id: "top",
+          text: "Top",
+          children: [
+            { id: "p", text: "Parent", children: [{ id: "c", text: "Child", children: [] }] },
+          ],
+        },
       ],
     };
     const { model: next, newNodeId } = splitNode(model, "p", 0);
@@ -225,8 +232,19 @@ describe("splitNode at root", () => {
     expect(p.text).toBe("Parent");
     expect(p.children.map((n) => n.id)).toEqual(["c"]);
     // The new node is the empty sibling inserted before it.
-    expect(next.children.map((n) => n.id)).toEqual([newNodeId, "p"]);
+    expect(findNode(next, "top")!.children.map((n) => n.id)).toEqual([newNodeId, "p"]);
     expect(findNode(next, newNodeId)!.text).toBe("");
+  });
+
+  it("splitting a tree root at the start prepends an empty child (no sibling tree)", () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [{ id: "p", text: "Parent", children: [{ id: "c", text: "Child", children: [] }] }],
+    };
+    const { model: next, newNodeId } = splitNode(model, "p", 0);
+    expect(next.children.map((n) => n.id)).toEqual(["p"]);
+    expect(findNode(next, "p")!.children.map((n) => n.id)).toEqual([newNodeId, "c"]);
   });
 });
 
@@ -287,7 +305,7 @@ describe("mergeIntoPredecessor", () => {
     const res = mergeIntoPredecessor(model, "b")!;
     const a = findNode(res.model, "a")!;
     expect(a.collapsed).toBe(false);
-    expect(getFlatOrder(res.model)).toEqual(["root", "a", "a1", "b1"]);
+    expect(getFlatOrder(res.model)).toEqual(["a", "a1", "b1"]);
   });
 
 });
@@ -486,7 +504,7 @@ describe("indentNode edge cases", () => {
     const result = indentNode(model, "b");
     const a = findNode(result, "a")!;
     expect(a.collapsed).toBe(false);
-    expect(getFlatOrder(result)).toEqual(["root", "a", "a1", "b"]);
+    expect(getFlatOrder(result)).toEqual(["a", "a1", "b"]);
   });
 
 });
@@ -740,5 +758,48 @@ describe("task checkbox", () => {
     expect(nextCheckedState(undefined)).toBe(false);
     expect(nextCheckedState(false)).toBe(true);
     expect(nextCheckedState(true)).toBe(false);
+  });
+});
+
+describe("placeBranchAt", () => {
+  const model = (): MindMapModel => ({
+    id: "root",
+    text: "Root",
+    children: [
+      {
+        id: "a",
+        text: "A",
+        children: [{ id: "a1", text: "A1", children: [] }],
+      },
+      { id: "b", text: "B", children: [] },
+    ],
+  });
+
+  it("sets the position of a top-level node in place", () => {
+    const next = placeBranchAt(model(), "b", { x: 500, y: 120 });
+    expect(next.children.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(findNode(next, "b")!.position).toEqual({ x: 500, y: 120 });
+  });
+
+  it("detaches a nested node and makes it a new top-level tree there", () => {
+    const next = placeBranchAt(model(), "a1", { x: 40, y: 800 });
+    expect(next.children.map((c) => c.id)).toEqual(["a", "b", "a1"]);
+    expect(findNode(next, "a")!.children).toEqual([]);
+    expect(findNode(next, "a1")!.position).toEqual({ x: 40, y: 800 });
+  });
+
+  it("is a no-op for the root and unknown nodes", () => {
+    const m = model();
+    expect(placeBranchAt(m, "root", { x: 0, y: 0 })).toBe(m);
+    expect(placeBranchAt(m, "nope", { x: 0, y: 0 })).toBe(m);
+  });
+
+  it("moveBranch drops the position once the tree is nested again", () => {
+    const placed = placeBranchAt(model(), "b", { x: 500, y: 120 });
+    const nested = moveBranch(placed, "b", "a");
+    expect(findNode(nested, "b")!.position).toBeUndefined();
+    // Reordering among top-level trees keeps it.
+    const reordered = moveBranch(placed, "b", "root", 0);
+    expect(findNode(reordered, "b")!.position).toEqual({ x: 500, y: 120 });
   });
 });

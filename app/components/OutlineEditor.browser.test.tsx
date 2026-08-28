@@ -204,18 +204,19 @@ describe("OutlineEditor custom nodes (browser e2e)", () => {
 });
 
 describe("OutlineEditor (browser e2e)", () => {
-  it("renders the root first, then each descendant as an indented row", async () => {
+  it("renders the top-level nodes as rows (the root is the title, not a row)", async () => {
     render(<Harness />);
     await waitFor(() => document.body.textContent?.includes("Alpha"));
     expect(document.body.textContent).toContain("Alpha");
     expect(document.body.textContent).toContain("Bravo");
-    // The root is the first outline row (and also mirrored in the header title).
+    // The root is only the header title; the rows start at its children.
     const rows = document.querySelectorAll("ul > li");
-    expect(rows.length).toBe(3);
-    expect(rows[0].textContent).toContain("Root");
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain("Alpha");
+    expect(document.body.textContent).toContain("Root");
   });
 
-  it("↑ from the first child lands on the root instead of stalling", async () => {
+  it("↑ from the first top-level node stays put (the root is not a row)", async () => {
     render(<Harness />);
     const alpha = await waitFor(() =>
       Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
@@ -228,8 +229,11 @@ describe("OutlineEditor (browser e2e)", () => {
     const ta = await activeTextarea();
     await userEvent.click(ta);
     await userEvent.keyboard("{Home}{ArrowUp}");
-    // The caret crosses into the root rather than hitting a wall.
-    await waitFor(() => engine().state.view.activeNodeId === "root");
+    // Nothing sits above the first top-level node (the root is the title, not
+    // a row), so this is the tree's top edge: the caret stays on "a", still
+    // editing.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(engine().state.view.activeNodeId).toBe("a");
     expect(engine().state.view.editing).toBe(true);
   });
 
@@ -250,7 +254,7 @@ describe("OutlineEditor (browser e2e)", () => {
     expect(findNode(engine().model, "a")?.text).toBe("Alpha!");
   });
 
-  it("Enter splits / adds a sibling and keeps editing", async () => {
+  it("Enter adds a node (a child of the tree root) and keeps editing", async () => {
     render(<Harness />);
     const alpha = await waitFor(() =>
       Array.from(document.querySelectorAll<HTMLElement>("ul > li")).find((li) =>
@@ -263,8 +267,10 @@ describe("OutlineEditor (browser e2e)", () => {
     const ta = await activeTextarea();
     await userEvent.click(ta);
     await userEvent.keyboard("{End}{Enter}");
-    // A new empty sibling of "a" is inserted after it and becomes active.
-    await waitFor(() => engine().model.children.length === 3);
+    // "a" is a tree root, so the new empty node is its child (a sibling would
+    // be a new tree); it becomes active.
+    await waitFor(() => engine().model.children[0].children.length === 1);
+    expect(engine().model.children.length).toBe(2);
     const active = engine().state.view.activeNodeId;
     expect(active).not.toBe("a");
     expect(engine().state.view.editing).toBe(true);

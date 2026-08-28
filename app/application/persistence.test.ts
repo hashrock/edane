@@ -316,6 +316,24 @@ describe("parseContent", () => {
     ]);
   });
 
+  it("keeps a finite tree position and drops malformed ones", () => {
+    const json = JSON.stringify({
+      id: "r",
+      text: "Root",
+      children: [
+        { id: "ok", text: "o", position: { x: 12.5, y: -3 }, children: [] },
+        { id: "bad", text: "b", position: { x: "1", y: 2 }, children: [] },
+        { id: "none", text: "n", position: null, children: [] },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    expect(model.children.map((c) => c.position)).toEqual([
+      { x: 12.5, y: -3 },
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("preserves every declared NodeType through normalization", () => {
     // Guards the round-trip invariant that OPTIONAL_NODE_TYPES protects at
     // the type level: every non-default NodeType must survive normalizeTree

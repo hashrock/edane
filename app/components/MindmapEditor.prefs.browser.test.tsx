@@ -8,7 +8,7 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 
-// DFS order: root, a, a1, b
+// DFS order: a, a1, b (the root is the title, not a node; "a" starts selected)
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -54,8 +54,11 @@ function seedPrefs(overrides: Partial<EditorPreferences>) {
   );
 }
 
+/** Select `id` with a click; the initially selected first top-level node is
+ *  left alone (a click on the selected node is the edit-entering re-click). */
 async function clickNode(id: string) {
   const point = await waitFor(() => api().getNodeClickPoint(id));
+  if (api().getActiveNodeId() === id && !api().getSelection().editing) return;
   const canvas = document.querySelector<HTMLElement>(
     '[data-testid="mm-canvas"]'
   )!;
@@ -68,7 +71,7 @@ async function renderEditor() {
   render(
     <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
 }
 
@@ -135,30 +138,33 @@ describe("preference: selectionMode = false (always edit)", () => {
     seedPrefs({ selectionMode: false });
     await renderEditor();
 
-    await clickNode("a");
-    await waitFor(() => api().getActiveNodeId() === "a");
+    // "b": a fresh click (not the initially selected "a") is what must land
+    // in edit mode.
+    await clickNode("b");
+    await waitFor(() => api().getActiveNodeId() === "b");
     await waitFor(() => api().getSelection().editing === true);
 
     // Escape must not exit editing (there is no selection mode to return to)
     // and the keyboard must stay live.
     await userEvent.keyboard("{Escape}");
     expect(api().getSelection().editing).toBe(true);
-    expect(api().getActiveNodeId()).toBe("a");
+    expect(api().getActiveNodeId()).toBe("b");
   });
 
   it("Cmd/Ctrl+Shift+Backspace deletes the active branch", async () => {
     seedPrefs({ selectionMode: false });
     await renderEditor();
 
-    await clickNode("a");
-    await waitFor(() => api().getActiveNodeId() === "a");
+    await clickNode("b");
+    await waitFor(() => api().getActiveNodeId() === "b");
 
     await userEvent.keyboard("{Control>}{Shift>}{Backspace}{/Shift}{/Control}");
     await waitFor(
-      () => !api().getModel().children.some((n) => n.id === "a")
+      () => !api().getModel().children.some((n) => n.id === "b")
     );
-    // Refocused on the nearest surviving node (the root precedes "a").
-    expect(api().getActiveNodeId()).toBe("root");
+    // Refocused on the nearest surviving node (the flat-order predecessor of
+    // "b" is "a1").
+    expect(api().getActiveNodeId()).toBe("a1");
   });
 });
 

@@ -4,7 +4,11 @@
  */
 
 import type { MindMapModel } from "../domain/model";
-import { generateId, isStoredNodeType } from "../domain/model";
+import {
+  ensureTopLevelNode,
+  generateId,
+  isStoredNodeType,
+} from "../domain/model";
 import { t } from "./i18n";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
@@ -87,6 +91,15 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
+  if (
+    v.position &&
+    typeof v.position === "object" &&
+    Number.isFinite((v.position as { x?: unknown }).x) &&
+    Number.isFinite((v.position as { y?: unknown }).y)
+  ) {
+    const p = v.position as { x: number; y: number };
+    node.position = { x: p.x, y: p.y };
+  }
 
   for (const child of v.children) {
     const normalized = normalizeTree(child, seen);
@@ -95,7 +108,11 @@ export function normalizeTree(
   return node;
 }
 
-/** Parse content string: try JSON first, fall back to legacy text */
+/**
+ * Parse content string: try JSON first, fall back to legacy text. The result
+ * always has at least one top-level node (the root is the title, not a node —
+ * see `topLevelNodes`), so the editor always has something to select.
+ */
 export function parseContent(
   content: string | undefined,
   title: string | undefined
@@ -109,12 +126,12 @@ export function parseContent(
     // Validate the *whole* tree and repair duplicate/malformed ids, rather than
     // trusting a shallow shape check on the root alone.
     const normalized = normalizeTree(parsed, new Set());
-    if (normalized) return normalized;
+    if (normalized) return ensureTopLevelNode(normalized);
   } catch {
     // Not JSON, try legacy format
   }
 
-  return textToModel(title || "Mindmap", content);
+  return ensureTopLevelNode(textToModel(title || "Mindmap", content));
 }
 
 /** Convert MindMapModel to indented plain text */
@@ -140,6 +157,7 @@ export function defaultNoteTitle(now: Date = new Date()): string {
   return `New Note ${y}-${m}-${d}`;
 }
 
+/** Default note: one tree root with two children (the root is the title). */
 export function createDefaultModel(title?: string): MindMapModel {
   return {
     id: generateId(),
@@ -159,20 +177,6 @@ export function createDefaultModel(title?: string): MindMapModel {
             text: t("sampleEnter"),
             children: [],
           },
-          { id: generateId(), text: t("sampleTab"), children: [] },
-        ],
-      },
-      {
-        id: generateId(),
-        text: t("sampleFeatures"),
-        children: [
-          {
-            id: generateId(),
-            text: t("sampleRealtime"),
-            children: [],
-          },
-          { id: generateId(), text: t("sampleJson"), children: [] },
-          { id: generateId(), text: t("sampleSimple"), children: [] },
         ],
       },
     ],

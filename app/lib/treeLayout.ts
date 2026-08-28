@@ -6,6 +6,11 @@ export interface LayoutNode {
   children: string[];
   x: number;
   y: number;
+  /**
+   * Roots only: a user-placed position (box left edge, vertical centre). A
+   * root with one is laid out exactly there; roots without are auto-stacked.
+   */
+  position?: { x: number; y: number };
 }
 
 interface NodeLayout {
@@ -23,6 +28,21 @@ const NODE_MIN_WIDTH = 100;
 const NODE_PADDING = 20;
 const HORIZONTAL_GAP = 120;
 const VERTICAL_GAP = 10;
+// Gap between the trees of a multi-root document (larger than the sibling gap
+// so separate trees read as separate).
+const TREE_GAP = 40;
+
+/**
+ * Tree roots of the flat array: nodes no other node lists as a child. The
+ * document root is not part of the array (it's the title), so a document with
+ * several top-level nodes is a forest, laid out as vertically stacked trees in
+ * array order.
+ */
+export function layoutRoots(nodes: LayoutNode[]): LayoutNode[] {
+  const childIds = new Set<string>();
+  for (const n of nodes) for (const c of n.children) childIds.add(c);
+  return nodes.filter((n) => !childIds.has(n.id));
+}
 
 /** Visual box width (measured text width + horizontal padding), with a floor. */
 function effectiveWidth(node: LayoutNode): number {
@@ -70,9 +90,7 @@ export function calculateNodeSizes(
     return layout.subtreeHeight;
   }
 
-  if (nodes.length > 0) {
-    calculateSubtreeHeight(nodes[0].id);
-  }
+  for (const root of layoutRoots(nodes)) calculateSubtreeHeight(root.id);
 
   return layoutMap;
 }
@@ -84,15 +102,6 @@ export function assignNodePositions(
   startY: number = 300
 ): void {
   if (nodes.length === 0) return;
-
-  const root = nodes[0];
-  const rootLayout = layoutMap.get(root.id);
-  if (!rootLayout) return;
-
-  rootLayout.x = startX;
-  rootLayout.y = startY;
-  root.x = startX;
-  root.y = startY;
 
   function positionChildren(parentId: string) {
     const parentLayout = layoutMap.get(parentId);
@@ -137,7 +146,52 @@ export function assignNodePositions(
     });
   }
 
-  positionChildren(root.id);
+  const roots = layoutRoots(nodes);
+
+  // Placed roots go exactly where the user put them. Their vertical extents
+  // are what the auto-stacked roots must steer clear of.
+  const placedBands: Array<[top: number, bottom: number]> = [];
+  for (const root of roots) {
+    if (!root.position) continue;
+    const rootLayout = layoutMap.get(root.id);
+    if (!rootLayout) continue;
+    rootLayout.x = root.position.x;
+    rootLayout.y = root.position.y;
+    root.x = root.position.x;
+    root.y = root.position.y;
+    const half = rootLayout.subtreeHeight / 2;
+    placedBands.push([root.y - half - TREE_GAP, root.y + half + TREE_GAP]);
+    positionChildren(root.id);
+  }
+
+  // Unplaced roots stack downward in array order: the first sits at
+  // (startX, startY), each further block starts below the previous one plus
+  // TREE_GAP. A block that would overlap a placed tree's vertical band is
+  // pushed below that band (x is ignored: keeping the auto column clear of
+  // every placed tree is simpler to predict than a 2-D packing).
+  let blockTop: number | null = null;
+  for (const root of roots) {
+    if (root.position) continue;
+    const rootLayout = layoutMap.get(root.id);
+    if (!rootLayout) continue;
+    const half = rootLayout.subtreeHeight / 2;
+    let top: number = blockTop === null ? startY - half : blockTop;
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const [bandTop, bandBottom] of placedBands) {
+        if (top < bandBottom && top + half * 2 > bandTop) {
+          top = bandBottom;
+          moved = true;
+        }
+      }
+    }
+    rootLayout.x = startX;
+    rootLayout.y = top + half;
+    root.x = startX;
+    root.y = top + half;
+    blockTop = top + half * 2 + TREE_GAP;
+    positionChildren(root.id);
+  }
 }
 
 export function layoutMindMap(

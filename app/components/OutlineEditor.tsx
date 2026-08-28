@@ -7,7 +7,7 @@ import {
   useLayoutEffect,
 } from "react";
 import { Link, router } from "@inertiajs/react";
-import { findNode, cloneWithNewIds } from "../domain/model";
+import { findNode, cloneWithNewIds, firstNavigableId } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
 import { textToModel } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
@@ -99,9 +99,9 @@ export default function OutlineEditor({
   } = state;
 
   const rows = useMemo(() => outlineRows(model), [model]);
+  // The root is the note title (edited in the header); it is not an outline
+  // row — the rows start at the top-level nodes. See outlineRows().
   const title = model.text;
-  // The root is mirrored in the header title, but it is also a real outline row
-  // (the first one) so the caret can rest on and edit it — see outlineRows().
   const activeNode_ = activeNodeId ? findNode(model, activeNodeId) : null;
   // Custom nodes (image / link) keep their rendered preview while editing and
   // expose the URL in an inline box below it, instead of swapping the whole row
@@ -179,7 +179,8 @@ export default function OutlineEditor({
       if (!text || !text.includes("\n")) return;
       e.preventDefault();
       const cur = stateRef.current;
-      const targetId = cur.view.activeNodeId || cur.document.model.id;
+      const targetId =
+        cur.view.activeNodeId || firstNavigableId(cur.document.model);
       const fresh = textToModel("_", text).children.map(cloneWithNewIds);
       if (fresh.length === 0) return;
       const next = dispatch(

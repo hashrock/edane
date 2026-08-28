@@ -165,7 +165,7 @@ async function canvasEditTarget(target: MindMapModel) {
       initialTitle="Root"
     />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  await waitFor(() => api().getActiveNodeId() === "prev");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
   const canvas = document.querySelector<HTMLElement>(
     '[data-testid="mm-canvas"]'
@@ -269,11 +269,11 @@ function engine(): NoteEditorEngine {
 const outlineActive = () => engine().stateRef.current.view.activeNodeId;
 
 /** Render the outline and click the target row's content to start editing.
- *  Rows are flat-ordered: root(0), prev(1), target(2). */
+ *  Rows are flat-ordered (the root is the title, not a row): prev(0), target(1). */
 async function outlineEditTarget(target: MindMapModel) {
   render(<OutlineHarness content={JSON.stringify(modelWith(target))} />);
   const row = await waitFor(
-    () => document.querySelectorAll<HTMLElement>("ul > li")[2]
+    () => document.querySelectorAll<HTMLElement>("ul > li")[1]
   );
   await userEvent.click(row.querySelector<HTMLElement>(".cursor-text")!);
   await waitFor(
