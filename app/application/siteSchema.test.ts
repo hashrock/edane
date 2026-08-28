@@ -45,6 +45,14 @@ describe("inferSchema", () => {
   it("is empty for a branch without records", () => {
     expect(inferSchema(n("r", "x"))).toEqual([]);
   });
+  it("detects markdown majority", () => {
+    const r = n("r", "Notes", "text", [
+      n("a", "A", "text", [n("a1", "# hi", "markdown")]),
+      n("b", "B", "text", [n("b1", "# yo", "markdown")]),
+      n("c", "C", "text", [n("c1", "plain")]),
+    ]);
+    expect(formatSchema(inferSchema(r))).toBe("body:markdown");
+  });
 });
 
 describe("shapeRecords", () => {
