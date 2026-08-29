@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSuggestMessages, extractTemplate, sampleItems, validateSuggestRequest } from "./siteAi";
 import { defaultTemplate, inferSchema } from "./siteSchema";
-import type { SiteNode } from "./siteTemplate";
+import type { SiteNode } from "./siteNode";
 
 const leaf = (id: string, text: string, type: SiteNode["type"] = "text"): SiteNode => ({
   id, text, type, children: [],

@@ -18,7 +18,7 @@
  * 読む 2 つのサイトも作れる。
  */
 import { STORED_NODE_TYPES, type NodeType } from "../domain/model";
-import type { SiteNode } from "./siteTemplate";
+import type { SiteNode } from "./siteNode";
 
 export interface SchemaField {
   key: string;
