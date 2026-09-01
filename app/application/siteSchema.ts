@@ -119,6 +119,23 @@ export function shapeRecords(root: SiteNode, schema: SiteSchema): { items: SiteI
 }
 
 /**
+ * Non-list field markup by kind, keyed on `NodeType` so a new kind has to say
+ * how it looks in the generated card here — same `satisfies Record<NodeType,
+ * …>` idiom as `FIELD_TYPES` above (and `EDIT_SURFACE` / `STORED_NODE_TYPE_SET`
+ * / `NODE_TYPE_LABEL` elsewhere): adding a member to `NodeType` now refuses to
+ * compile until this table decides its rendering, instead of it silently
+ * falling into the generic `<p>` branch below.
+ */
+const FIELD_RENDERERS = {
+  image: (key: string) =>
+    `      {item.${key} && <img src={item.${key}} class="rounded-lg max-h-48 w-full object-cover" />}`,
+  link: (key: string) =>
+    `      {item.${key} && <a href={item.${key}} class="text-emerald-700 underline break-all">{item.${key}}</a>}`,
+  text: (key: string) => `      {item.${key} && <p class="text-slate-600 text-sm">{item.${key}}</p>}`,
+  markdown: (key: string) => `      {item.${key} && <p class="text-slate-600 text-sm">{item.${key}}</p>}`,
+} as const satisfies Record<NodeType, (key: string) => string>;
+
+/**
  * スキーマから既定テンプレートを生成する。フィールドの種別に応じたタグで
  * 並べるだけの素直なカード一覧。スキーマが空なら title だけのカード。
  */
@@ -127,13 +144,7 @@ export function defaultTemplate(schema: SiteSchema): string {
     if (f.list) {
       return `      {(item.${f.key} ?? []).map((v) => <span class="mr-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{v}</span>)}`;
     }
-    if (f.type === "image") {
-      return `      {item.${f.key} && <img src={item.${f.key}} class="rounded-lg max-h-48 w-full object-cover" />}`;
-    }
-    if (f.type === "link") {
-      return `      {item.${f.key} && <a href={item.${f.key}} class="text-emerald-700 underline break-all">{item.${f.key}}</a>}`;
-    }
-    return `      {item.${f.key} && <p class="text-slate-600 text-sm">{item.${f.key}}</p>}`;
+    return FIELD_RENDERERS[f.type ?? "text"](f.key);
   };
   return `import { items, title } from './data.js';
 
