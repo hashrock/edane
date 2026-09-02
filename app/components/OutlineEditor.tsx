@@ -18,7 +18,11 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
-import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
+import {
+  handleAuxInputKeys,
+  isAuxInputSurface,
+  type EditorLayout,
+} from "../application/editSurface";
 import { DEFAULT_PREFERENCES } from "../application/editorPreferences";
 import {
   DEFAULT_FONT_SIZE,
@@ -108,7 +112,7 @@ export default function OutlineEditor({
   // for a raw-text field. Those use a dedicated inline editor, so the floating
   // caret overlay (which is for plain text rows) is suppressed for them.
   const activeType = activeNode_?.type ?? "text";
-  const activeIsCustom = activeType === "image" || activeType === "link";
+  const activeIsCustom = isAuxInputSurface("outline", activeType);
   const bodyActive = editing && !!activeNodeId && !activeIsCustom;
 
   // --- Shared text-input glue (input ref, IME state, typeText handlers) ---
@@ -397,7 +401,7 @@ export default function OutlineEditor({
               const isActive = node.id === activeNodeId;
               const isEditingThis = isActive && editing;
               const type = node.type ?? "text";
-              const isCustom = type === "image" || type === "link";
+              const isCustom = isAuxInputSurface("outline", type);
               // Image/link nodes keep their preview while editing and expose the
               // URL in an inline box below (instead of raw-text editing).
               const showUrlEditor = isEditingThis && isCustom;
