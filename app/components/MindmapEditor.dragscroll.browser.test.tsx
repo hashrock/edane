@@ -10,7 +10,7 @@ import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
-// DFS order: root, a, a1, b
+// Root is the title (not a canvas node). DFS order: a, a1, b
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -64,7 +64,8 @@ async function setup(model: MindMapModel = MODEL) {
   render(
     <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  // The first top-level node starts selected.
+  await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
   const canvas = document.querySelector<HTMLElement>(
@@ -118,33 +119,36 @@ async function waitForShift(read: () => number, from: number, px: number) {
 describe("MindmapEditor drag edge auto-scroll", () => {
   it("pans the view while the drag is parked against an edge", async () => {
     const { fire, grab } = await setup();
-    const rootX0 = screenX("root");
+    const rootX0 = screenX("a");
     await grab("b");
 
     // Park against the right edge: content slides left to reveal what's there.
     fire("mousemove", CANVAS_W - 40, CANVAS_H / 2);
-    const rootX1 = await waitForShift(() => screenX("root"), rootX0, 60);
+    const rootX1 = await waitForShift(() => screenX("a"), rootX0, 60);
     expect(rootX1).toBeLessThan(rootX0);
 
     // Left edge reverses it.
     fire("mousemove", 40, CANVAS_H / 2);
-    await waitForShift(() => screenX("root"), rootX1, 60);
-    expect(screenX("root")).toBeGreaterThan(rootX1);
+    await waitForShift(() => screenX("a"), rootX1, 60);
+    expect(screenX("a")).toBeGreaterThan(rootX1);
 
-    fire("mouseup", 40, CANVAS_H / 2);
-    // The pan stops with the drag.
-    const settled = screenX("root");
+    // Release over the dragged node itself (a cancel, so the document — and
+    // with it the layout — stays put). The pan stops with the drag.
+    const own = api().getNodeRect("b")!;
+    fire("mousemove", own.x + own.width / 2, own.y + own.height / 2);
+    fire("mouseup", own.x + own.width / 2, own.y + own.height / 2);
+    const settled = screenX("a");
     await sleep(150);
-    expect(screenX("root")).toBe(settled);
+    expect(screenX("a")).toBe(settled);
   });
 
   it("scrolls vertically at the top/bottom edges", async () => {
     const { fire, grab } = await setup();
-    const rootY0 = screenY("root");
+    const rootY0 = screenY("a");
     await grab("b");
 
     fire("mousemove", CANVAS_W / 2, CANVAS_H - 30);
-    const rootY1 = await waitForShift(() => screenY("root"), rootY0, 60);
+    const rootY1 = await waitForShift(() => screenY("a"), rootY0, 60);
     expect(rootY1).toBeLessThan(rootY0);
 
     fire("mouseup", CANVAS_W / 2, CANVAS_H - 30);
@@ -152,12 +156,12 @@ describe("MindmapEditor drag edge auto-scroll", () => {
 
   it("does not scroll while the pointer stays away from the edges", async () => {
     const { fire, grab } = await setup();
-    const rootX0 = screenX("root");
+    const rootX0 = screenX("a");
     await grab("b");
 
     fire("mousemove", CANVAS_W / 2, CANVAS_H / 2);
     await sleep(200);
-    expect(screenX("root")).toBe(rootX0);
+    expect(screenX("a")).toBe(rootX0);
 
     fire("mouseup", CANVAS_W / 2, CANVAS_H / 2);
   });
@@ -166,11 +170,11 @@ describe("MindmapEditor drag edge auto-scroll", () => {
     // The pointer never moves while auto-scrolling, but the world under it
     // does — a drop right after a scroll must land on what is there NOW.
     const { fire, grab } = await setup();
-    const rootX0 = screenX("root");
+    const rootX0 = screenX("a");
     await grab("b");
 
     fire("mousemove", CANVAS_W - 40, CANVAS_H / 2);
-    await waitForShift(() => screenX("root"), rootX0, 60);
+    await waitForShift(() => screenX("a"), rootX0, 60);
     fire("mousemove", CANVAS_W / 2, CANVAS_H / 2); // stop scrolling
 
     // "a" has moved on screen; dropping at its new box must still work.
@@ -189,11 +193,11 @@ describe("MindmapEditor drag edge auto-scroll", () => {
     // auto-scroll must keep refilling it instead of leaving a blank canvas.
     const { fire, grab } = await setup();
     const before = api().getRedrawStats().redrawCount;
-    const rootX0 = screenX("root");
+    const rootX0 = screenX("a");
     await grab("b");
 
     fire("mousemove", 4, CANVAS_H / 2); // deep in the band = fast
-    await waitForShift(() => screenX("root"), rootX0, 400);
+    await waitForShift(() => screenX("a"), rootX0, 400);
     expect(api().getRedrawStats().redrawCount).toBeGreaterThan(before);
 
     fire("mouseup", 4, CANVAS_H / 2);
@@ -232,7 +236,7 @@ describe("MindmapEditor drag cancel with Escape", () => {
 
     // Then a cancelled one.
     await grab("a1");
-    const rectRoot = api().getNodeRect("root")!;
+    const rectRoot = api().getNodeRect("a")!;
     fire(
       "mousemove",
       rectRoot.x + rectRoot.width / 2,
@@ -255,7 +259,7 @@ describe("MindmapEditor drag cancel with Escape", () => {
 
   it("restores the selection the drag took over", async () => {
     const { fire, grab } = await setup();
-    expect(api().getActiveNodeId()).toBe("root");
+    expect(api().getActiveNodeId()).toBe("a");
 
     await grab("b"); // mousedown already moved the selection onto "b"
     expect(api().getActiveNodeId()).toBe("b");
@@ -265,27 +269,27 @@ describe("MindmapEditor drag cancel with Escape", () => {
     await userEvent.keyboard("{Escape}");
     fire("mouseup", rect.x + rect.width / 2, rect.y + rect.height / 2);
 
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     expect(api().getSelection().editing).toBe(false);
   });
 
   it("rewinds the view that auto-scroll moved", async () => {
     const { fire, grab } = await setup();
-    const rootX0 = screenX("root");
-    const rootY0 = screenY("root");
+    const rootX0 = screenX("a");
+    const rootY0 = screenY("a");
     await grab("b");
 
     fire("mousemove", CANVAS_W - 30, CANVAS_H - 30);
-    await waitForShift(() => screenX("root"), rootX0, 80);
+    await waitForShift(() => screenX("a"), rootX0, 80);
 
     await userEvent.keyboard("{Escape}");
     fire("mouseup", CANVAS_W - 30, CANVAS_H - 30);
 
-    await waitFor(() => Math.abs(screenX("root") - rootX0) < 0.5);
-    expect(screenY("root")).toBeCloseTo(rootY0, 1);
+    await waitFor(() => Math.abs(screenX("a") - rootX0) < 0.5);
+    expect(screenY("a")).toBeCloseTo(rootY0, 1);
     // …and it stays put: the cancel also stopped the auto-scroll loop.
     await sleep(150);
-    expect(screenX("root")).toBeCloseTo(rootX0, 1);
+    expect(screenX("a")).toBeCloseTo(rootX0, 1);
   });
 
   it("stops the drag for good — further motion neither previews nor drops", async () => {
@@ -316,7 +320,8 @@ describe("MindmapEditor drag cancel with Escape", () => {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
     await waitFor(() => api().getActiveNodeId() === "a");
-    await userEvent.keyboard("[Space]");
+    // "a" starts selected, so the click above may already have entered edit.
+    if (!api().getSelection().editing) await userEvent.keyboard("[Space]");
     await waitFor(() => api().getSelection().editing === true);
 
     await userEvent.keyboard("{Escape}");

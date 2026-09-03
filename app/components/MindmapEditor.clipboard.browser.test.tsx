@@ -4,7 +4,7 @@ import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
 
-// DFS order: root, a, b
+// Navigation order: a, b (the root is the title, not a node)
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -55,7 +55,7 @@ describe("MindmapEditor clipboard", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getNodeClickPoint("root"));
+    await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const input = hiddenInput();
@@ -70,36 +70,31 @@ describe("MindmapEditor clipboard", () => {
       })
     );
 
+    // "a" (the preselected tree root) takes the pasted nodes as children —
+    // a tree root never gets siblings from a paste (that would be new trees).
     await waitFor(() =>
       api()
         .getModel()
-        .children.some((c) => c.text === "X")
+        .children[0].children.some((c) => c.text === "X")
     );
-    const root = api().getModel();
-    const x = root.children.find((c) => c.text === "X")!;
+    const a = api().getModel().children[0];
+    const x = a.children.find((c) => c.text === "X")!;
     expect(x.children[0]?.text).toBe("Y"); // indentation → child
-    expect(root.children.some((c) => c.text === "Z")).toBe(true);
+    expect(a.children.some((c) => c.text === "Z")).toBe(true);
+    expect(api().getModel().children.map((c) => c.id)).toEqual(["a", "b"]);
   });
 
   it("cuts a branch and pastes it as a child of the selected node", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
-    await waitFor(() => api().getRedrawStats().redrawCount > 0);
-
-    const point = await waitFor(() => api().getNodeClickPoint("a"));
-    const canvas = document.querySelector<HTMLElement>(
-      '[data-testid="mm-canvas"]'
-    )!;
-    // Select node "a" (selection mode, not editing).
-    await userEvent.click(canvas, {
-      position: { x: Math.round(point.x), y: Math.round(point.y) },
-    });
+    // The first top-level node "a" is selected on load (selection mode).
     await waitFor(() => api().getActiveNodeId() === "a");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
     await waitFor(() => api().getSelection().editing === false);
 
-    // Cut the branch → "a" leaves the tree, focus lands on the previous node.
+    // Cut the branch → "a" leaves the tree; it had no predecessor, so focus
+    // lands on the first remaining top-level node "b".
     hiddenInput().dispatchEvent(
       new ClipboardEvent("cut", {
         clipboardData: new DataTransfer(),
@@ -112,9 +107,9 @@ describe("MindmapEditor clipboard", () => {
         .getModel()
         .children.every((c) => c.text !== "Alpha")
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "b");
 
-    // Paste the branch as a child of the (now selected) root.
+    // Paste the branch as a child of the (now selected) "b".
     hiddenInput().dispatchEvent(
       new ClipboardEvent("paste", {
         clipboardData: new DataTransfer(),
@@ -122,14 +117,9 @@ describe("MindmapEditor clipboard", () => {
         cancelable: true,
       })
     );
-    await waitFor(() =>
-      api()
-        .getModel()
-        .children.some((c) => c.text === "Alpha")
-    );
-    const pasted = api()
-      .getModel()
-      .children.find((c) => c.text === "Alpha")!;
+    const bNode = () => api().getModel().children.find((c) => c.id === "b")!;
+    await waitFor(() => bNode().children.some((c) => c.text === "Alpha"));
+    const pasted = bNode().children.find((c) => c.text === "Alpha")!;
     expect(pasted.id).not.toBe("a"); // fresh id on paste
   });
 
@@ -141,21 +131,28 @@ describe("MindmapEditor clipboard", () => {
       text: "Root",
       children: [
         {
-          id: "a",
-          text: "https://example.com",
-          type: "link",
-          linkTitle: "Example",
-          children: [],
+          id: "p",
+          text: "Parent",
+          children: [
+            {
+              id: "a",
+              text: "https://example.com",
+              type: "link",
+              linkTitle: "Example",
+              children: [],
+            },
+          ],
         },
       ],
     };
     render(
       <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    // The first top-level node "p" is selected on load.
+    await waitFor(() => api().getActiveNodeId() === "p");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
-    // Copy root's whole subtree; the JSON payload lands in the custom MIME.
+    // Copy p's whole subtree; the JSON payload lands in the custom MIME.
     const copyDt = new DataTransfer();
     hiddenInput().dispatchEvent(
       new ClipboardEvent("copy", {
@@ -168,11 +165,11 @@ describe("MindmapEditor clipboard", () => {
     expect(json).not.toBe("");
     expect(JSON.parse(json).children[0].type).toBe("link");
 
-    // Paste it back onto the selected root: it pastes as a child branch with
+    // Paste it back onto the selected "p": it pastes as a child branch with
     // fresh ids and the link kind preserved — no Markdown dialog / decompose.
     const pasteDt = new DataTransfer();
     pasteDt.setData("application/x-edane-branch", json);
-    pasteDt.setData("text/plain", "- Root\n  - Example"); // would look like markdown
+    pasteDt.setData("text/plain", "- Parent\n  - Example"); // would look like markdown
     hiddenInput().dispatchEvent(
       new ClipboardEvent("paste", {
         clipboardData: pasteDt,
@@ -184,21 +181,36 @@ describe("MindmapEditor clipboard", () => {
     const pastedRoot = await waitFor(() =>
       api()
         .getModel()
-        .children.find((c) => c.text === "Root")
+        .children.find((c) => c.id === "p")!
+        .children.find((c) => c.text === "Parent")
     );
-    expect(pastedRoot.id).not.toBe("root"); // fresh id
+    expect(pastedRoot.id).not.toBe("p"); // fresh id
     expect(pastedRoot.children[0]?.type).toBe("link"); // kind survived
     expect(pastedRoot.children[0]?.linkTitle).toBe("Example");
   });
 
   it("copies the selected subtree to the system clipboard as Markdown", async () => {
+    const model: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        {
+          id: "a",
+          text: "Alpha",
+          children: [
+            { id: "a1", text: "One", children: [] },
+            { id: "a2", text: "Two", children: [] },
+          ],
+        },
+      ],
+    };
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
-    // Root is selected on load; copy its whole subtree.
+    // The first top-level node is selected on load; copy its whole subtree.
     const dt = new DataTransfer();
     hiddenInput().dispatchEvent(
       new ClipboardEvent("copy", {
@@ -208,7 +220,7 @@ describe("MindmapEditor clipboard", () => {
       })
     );
     expect(dt.getData("text/plain")).toBe(
-      ["- Root", "  - Alpha", "  - Bravo"].join("\n")
+      ["- Alpha", "  - One", "  - Two"].join("\n")
     );
   });
 });

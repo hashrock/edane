@@ -74,8 +74,9 @@ describe("MindmapEditor browser performance", () => {
         />
       );
 
-      // Wait until Konva is ready and the first redraw has completed.
-      const point = await waitFor(() => api().getNodeClickPoint("n0"));
+      // Wait until Konva is ready and the first redraw has completed. n0 is
+      // the document root (the title, not a canvas node); n1 is the first tree.
+      const point = await waitFor(() => api().getNodeClickPoint("n1"));
       await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
       const canvas = document.querySelector<HTMLElement>(

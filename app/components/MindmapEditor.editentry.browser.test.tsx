@@ -13,7 +13,7 @@ import type { MindMapModel } from "../domain/model";
  * the press-and-drag gestures exactly as they were.
  */
 
-// DFS order: root, a, b
+// DFS order: a, b (the root is the title, not a node; "a" starts selected)
 const MODEL: MindMapModel = {
   id: "root",
   text: "Root",
@@ -69,12 +69,16 @@ function afterDblClickWindow() {
   return new Promise((r) => setTimeout(r, 500));
 }
 
-/** Select `id` with a plain click and settle in selection mode. */
+/** Select `id` with a plain click and settle in selection mode. The first
+ *  top-level node is already selected on open, so it is not clicked (that
+ *  click would be the edit-entering re-click). */
 async function selectByClick(id: string) {
   const point = await waitFor(() => api().getNodeClickPoint(id));
-  await userEvent.click(canvasEl(), {
-    position: { x: Math.round(point.x), y: Math.round(point.y) },
-  });
+  if (api().getActiveNodeId() !== id) {
+    await userEvent.click(canvasEl(), {
+      position: { x: Math.round(point.x), y: Math.round(point.y) },
+    });
+  }
   await waitFor(() => api().getActiveNodeId() === id);
   await waitFor(() => api().getSelection().editing === false);
   return point;
@@ -95,7 +99,7 @@ describe("⌘/Ctrl+Enter enters edit mode", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     await selectByClick("a");
@@ -113,18 +117,20 @@ describe("⌘/Ctrl+Enter enters edit mode", () => {
     expect(api().getModel().children.length).toBe(2);
   });
 
-  it("leaves plain Enter as insert-sibling", async () => {
+  it("leaves plain Enter as insert (a new node, not editing the selected one)", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     await selectByClick("a");
     await userEvent.keyboard("{Enter}");
-    // A new empty sibling after "a", focused — not "a" itself in edit mode.
-    await waitFor(() => api().getModel().children.length === 3);
-    const inserted = api().getModel().children[1];
+    // A new empty node is inserted and focused — not "a" itself in edit mode.
+    // "a" is a tree root, so the insert lands as its child (a sibling would be
+    // a new tree, which only the canvas context menu creates).
+    await waitFor(() => api().getModel().children[0].children.length === 1);
+    const inserted = api().getModel().children[0].children[0];
     expect(inserted.text).toBe("");
     expect(api().getActiveNodeId()).toBe(inserted.id);
   });
@@ -135,10 +141,11 @@ describe("re-click on the selected node enters edit mode", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
-    // First click on an unselected node: selection only (unchanged behaviour).
+    // Settle on "a" in selection mode (it starts selected; a click on an
+    // unselected node would likewise only select).
     const point = await selectByClick("a");
     expect(api().getSelection().editing).toBe(false);
 
@@ -166,7 +173,7 @@ describe("re-click on the selected node enters edit mode", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const point = await selectByClick("a");
@@ -185,18 +192,20 @@ describe("re-click on the selected node enters edit mode", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
-    const point = await waitFor(() => api().getNodeClickPoint("a"));
+    // "b": not the initially selected node, so the double-click's first click
+    // is a plain select, as for any unselected node.
+    const point = await waitFor(() => api().getNodeClickPoint("b"));
     await userEvent.dblClick(canvasEl(), {
       position: { x: Math.round(point.x), y: Math.round(point.y) },
     });
 
     await waitFor(() => api().getSelection().editing === true);
     const sel = api().getSelection();
-    expect(sel.activeNodeId).toBe("a");
+    expect(sel.activeNodeId).toBe("b");
     expect(sel.cursorPos).toBe(0);
-    expect(sel.selectionEnd).toBe("Alpha".length);
+    expect(sel.selectionEnd).toBe("Bravo".length);
   });
 });

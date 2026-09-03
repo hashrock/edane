@@ -63,19 +63,21 @@ describe("MindmapEditor undo/redo", () => {
     );
     await activate("a");
 
-    const before = api().getModel().children.length; // 2
-    // Enter at end of "Alpha" adds an empty sibling.
+    // "Alpha" is a tree root, so Enter at its end adds a child (never a
+    // sibling tree).
+    const count = () => api().getModel().children[0].children.length;
+    const before = count(); // 0
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("{Enter}");
-    await waitFor(() => api().getModel().children.length === before + 1);
+    await waitFor(() => count() === before + 1);
 
     // Undo removes it.
     await userEvent.keyboard("{Meta>}z{/Meta}");
-    await waitFor(() => api().getModel().children.length === before);
+    await waitFor(() => count() === before);
 
     // Redo (Cmd+Shift+Z) re-adds it — guards the uppercase-"Z" key regression.
     await userEvent.keyboard("{Meta>}{Shift>}z{/Shift}{/Meta}");
-    await waitFor(() => api().getModel().children.length === before + 1);
+    await waitFor(() => count() === before + 1);
   });
 
   it("undoes and redoes typed text", async () => {
@@ -105,7 +107,7 @@ describe("MindmapEditor undo/redo", () => {
     // node that no longer exists — silently swallowing every subsequent
     // keyboard action until the user undid again. reconcileView now refocuses
     // onto the nearest surviving node in flat order (predecessor preferred),
-    // mirroring deleteNode, instead of jumping all the way to the root.
+    // mirroring deleteNode, instead of jumping to the first top-level node.
     const model: MindMapModel = {
       id: "root",
       text: "Root",
@@ -121,18 +123,12 @@ describe("MindmapEditor undo/redo", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    // "a" (a branch with a child) is selected on load; copy it.
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
     const canvas = document.querySelector<HTMLElement>(
       '[data-testid="mm-canvas"]'
     )!;
-
-    // Select "a" (a branch with a child) and copy it.
-    const pointA = await waitFor(() => api().getNodeClickPoint("a"));
-    await userEvent.click(canvas, {
-      position: { x: Math.round(pointA.x), y: Math.round(pointA.y) },
-    });
-    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getSelection().editing === false);
     document.querySelector("textarea")!.dispatchEvent(
       new ClipboardEvent("copy", {

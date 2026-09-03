@@ -19,6 +19,15 @@ const MODEL: MindMapModel = {
   ],
 };
 
+// Sibling insert / split / merge are nested-node behaviours: a tree root
+// takes Enter's new node as a child instead (trees are created on purpose,
+// via the canvas context menu). So these tests edit nodes under one tree.
+const NESTED: MindMapModel = {
+  id: "root",
+  text: "Root",
+  children: [{ id: "t", text: "Tree", children: MODEL.children }],
+};
+
 function api(): MindmapTestApi {
   const a = window.__mindmapTest;
   if (!a) throw new Error("__mindmapTest not exposed yet");
@@ -80,21 +89,62 @@ beforeEach(() => {
   document.head.appendChild(style);
 });
 
-/** Click a node to select it, then Space to drop into edit mode (caret + input). */
+/** Click a node to select it, then Space to drop into edit mode (caret + input).
+ *  The first top-level node starts selected, so it is not clicked (a click on
+ *  the selected node is the edit-entering re-click). */
 async function edit(nodeId: string) {
   const point = await waitFor(() => api().getNodeClickPoint(nodeId));
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
-  const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
-  await userEvent.click(canvas, {
-    position: { x: Math.round(point.x), y: Math.round(point.y) },
-  });
+  if (api().getActiveNodeId() !== nodeId) {
+    const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
+    await userEvent.click(canvas, {
+      position: { x: Math.round(point.x), y: Math.round(point.y) },
+    });
+  }
   await waitFor(() => api().getActiveNodeId() === nodeId);
   await userEvent.keyboard("[Space]");
   await waitFor(() => api().getSelection().editing === true);
 }
 
 describe("MindmapEditor edit operations (browser e2e)", () => {
+  const tree = () => api().getModel().children[0];
+
   it("Enter at end of a node adds an empty sibling and focuses it", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
+    );
+    await edit("a");
+
+    await userEvent.keyboard("{End}");
+    await userEvent.keyboard("{Enter}");
+
+    // A third child of the tree appears, inserted right after "Alpha".
+    await waitFor(() => tree().children.length === 3);
+    const t = tree();
+    expect(t.children[0].text).toBe("Alpha");
+    expect(t.children[1].text).toBe("");
+    // The freshly added empty sibling becomes active.
+    const activeId = api().getActiveNodeId();
+    expect(activeId).toBe(t.children[1].id);
+  });
+
+  it("Enter mid-text splits the node into two", async () => {
+    render(
+      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
+    );
+    await edit("a");
+
+    // Put the caret after "Al" (pos 2) and split.
+    await userEvent.keyboard("{Home}{ArrowRight}{ArrowRight}");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => tree().children.length === 3);
+    const t = tree();
+    expect(t.children[0].text).toBe("Al");
+    expect(t.children[1].text).toBe("pha");
+  });
+
+  it("Enter on a tree root adds a child, never a sibling tree", async () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
@@ -103,30 +153,11 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("{Enter}");
 
-    // A third top-level child appears, inserted right after "Alpha".
-    await waitFor(() => api().getModel().children.length === 3);
+    await waitFor(() => api().getModel().children[0].children.length === 1);
     const model = api().getModel();
-    expect(model.children[0].text).toBe("Alpha");
-    expect(model.children[1].text).toBe("");
-    // The freshly added empty sibling becomes active.
-    const activeId = api().getActiveNodeId();
-    expect(activeId).toBe(model.children[1].id);
-  });
-
-  it("Enter mid-text splits the node into two", async () => {
-    render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
-    );
-    await edit("a");
-
-    // Put the caret after "Al" (pos 2) and split.
-    await userEvent.keyboard("{Home}{ArrowRight}{ArrowRight}");
-    await userEvent.keyboard("{Enter}");
-
-    await waitFor(() => api().getModel().children.length === 3);
-    const model = api().getModel();
-    expect(model.children[0].text).toBe("Al");
-    expect(model.children[1].text).toBe("pha");
+    expect(model.children.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(model.children[0].children[0].text).toBe("");
+    expect(api().getActiveNodeId()).toBe(model.children[0].children[0].id);
   });
 
   it("Tab indents a node under its previous sibling; Shift+Tab outdents it", async () => {
@@ -171,17 +202,17 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
 
   it("Backspace at the start of an empty node deletes it", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
     );
     await edit("a");
 
     // Add an empty sibling after "Alpha", landing inside it.
     await userEvent.keyboard("{End}{Enter}");
-    await waitFor(() => api().getModel().children.length === 3);
+    await waitFor(() => api().getModel().children[0].children.length === 3);
 
     // Backspace at pos 0 of the empty node removes it and lands on "Alpha".
     await userEvent.keyboard("{Backspace}");
-    await waitFor(() => api().getModel().children.length === 2);
+    await waitFor(() => api().getModel().children[0].children.length === 2);
     expect(api().getActiveNodeId()).toBe("a");
   });
 

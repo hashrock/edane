@@ -71,7 +71,7 @@ async function editNode(nodeId: string) {
   render(
     <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  await waitFor(() => api().getActiveNodeId() === "l");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
   // Click near the box's left edge via getNodeRect: for custom nodes the
   // text-based click point (raw URL width) can fall outside the drawn preview
@@ -81,7 +81,9 @@ async function editNode(nodeId: string) {
   const canvas = document.querySelector<HTMLElement>(
     '[data-testid="mm-canvas"]'
   )!;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // The first top-level node starts selected: no click for it (a click on the
+  // selected node is the edit-entering re-click).
+  for (let attempt = 0; attempt < 4 && api().getActiveNodeId() !== nodeId; attempt++) {
     const rect = await waitFor(() => api().getNodeRect(nodeId));
     await userEvent.click(canvas, {
       position: {
@@ -166,7 +168,7 @@ describe("MindmapEditor URL box editing for custom nodes (browser e2e)", () => {
   });
 
   it("ArrowDown in the URL box moves to the next node instead of trapping", async () => {
-    // Order: root, l, i(image), t. From the image node's URL box, Down → t.
+    // Order: l, i(image), t. From the image node's URL box, Down → t.
     await editNode("i");
     await waitFor(urlInput);
 

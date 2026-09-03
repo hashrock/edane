@@ -67,6 +67,20 @@ export interface MindMapModel {
    * exactly one place: `supportsCheckbox` in application/nodeUtils.ts.
    */
   checked?: boolean;
+  /**
+   * Canvas position of this node's tree, world coordinates of the box's left
+   * edge (x) and vertical centre (y) — the same point the layout assigns.
+   * Only meaningful on a top-level node (see {@link topLevelNodes}): a placed
+   * tree stays where the user dropped it, an unplaced one is auto-stacked
+   * below the others. Ignored (and dropped by `moveBranch`) once the node is
+   * nested under another.
+   */
+  position?: NodePosition;
+}
+
+export interface NodePosition {
+  x: number;
+  y: number;
 }
 
 // --- ID generation ---
@@ -125,8 +139,64 @@ export function visibleChildrenOf(node: MindMapModel): VisibleChildren {
 }
 
 /**
- * DFS order of node IDs (navigation order). Descendants of a collapsed node are
- * skipped so keyboard navigation never lands on a hidden node.
+ * The root is the note itself, not a node: it holds the title (edited in the
+ * header) and its children are the top-level nodes, which the canvas and the
+ * outline present as independent trees ("multi-root"). The root is never
+ * visible, navigable or editable as a node — every traversal that produces a
+ * visible/navigable set ({@link getFlatOrder}, `flattenToNodes`,
+ * `outlineRows`) starts from `topLevelNodes` instead of the root.
+ */
+export function topLevelNodes(model: MindMapModel): MindMapModel[] {
+  return model.children;
+}
+
+/**
+ * Is `nodeId` a top-level node (a tree root)? Tree roots are created only on
+ * purpose (context menu on empty canvas → {@link addRootAt}); every "add a
+ * sibling" path (Enter, split, paste) treats a top-level node the way the old
+ * single root was treated — the new node becomes its child — so a root never
+ * appears as a side effect of ordinary typing.
+ */
+export function isTopLevel(model: MindMapModel, nodeId: string): boolean {
+  return model.children.some((c) => c.id === nodeId);
+}
+
+/** Add a blank tree root placed at a canvas position. */
+export function addRootAt(
+  model: MindMapModel,
+  newNode: MindMapModel,
+  position: NodePosition
+): MindMapModel {
+  const cloned = cloneModel(model);
+  cloned.children.push({ ...newNode, position: { ...position } });
+  return cloned;
+}
+
+/**
+ * Id every "nothing else to focus on" fallback lands on: the first top-level
+ * node. Falls back to the root id only for a childless root (which the editor
+ * never produces — see `ensureTopLevelNode`), so callers never get an id that
+ * doesn't exist.
+ */
+export function firstNavigableId(model: MindMapModel): string {
+  return model.children[0]?.id ?? model.id;
+}
+
+/**
+ * A document must always have at least one top-level node, or there would be
+ * nothing to select and no way to start typing. Returns the model unchanged
+ * when it already has one, otherwise a copy with a blank top-level node.
+ */
+export function ensureTopLevelNode(model: MindMapModel): MindMapModel {
+  if (model.children.length > 0) return model;
+  return { ...model, children: [{ id: generateId(), text: "", children: [] }] };
+}
+
+/**
+ * DFS order of node IDs (navigation order), starting at the top-level nodes —
+ * the root is not part of it (see {@link topLevelNodes}). Descendants of a
+ * collapsed node are skipped so keyboard navigation never lands on a hidden
+ * node.
  */
 export function getFlatOrder(model: MindMapModel): string[] {
   const result: string[] = [];
@@ -136,7 +206,7 @@ export function getFlatOrder(model: MindMapModel): string[] {
     if (vis.kind === "none") return;
     for (const child of vis.children) walk(child);
   }
-  walk(model);
+  for (const top of topLevelNodes(model)) walk(top);
   return result;
 }
 
@@ -170,8 +240,11 @@ export function addSiblingAfter(
   newNode: MindMapModel
 ): MindMapModel {
   const cloned = cloneModel(model);
-  if (cloned.id === afterId) {
-    cloned.children.push(newNode);
+  // The root and the tree roots take the new node as a child instead (see
+  // isTopLevel): siblings of a tree root would be new trees.
+  if (cloned.id === afterId || isTopLevel(cloned, afterId)) {
+    const target = findNode(cloned, afterId)!;
+    target.children.push(newNode);
     return cloned;
   }
   const result = findParentAndIndex(cloned, afterId);
@@ -339,6 +412,31 @@ export function cloneWithNewIds(node: MindMapModel): MindMapModel {
 }
 
 /**
+ * Put a tree at a free canvas position. A top-level node just gets the
+ * position; a nested node is detached from its parent (with its subtree) and
+ * appended as a new top-level tree there — this is how dragging a branch out
+ * into empty space creates a new root. Returns the same reference when the
+ * node is the root or doesn't exist.
+ */
+export function placeBranchAt(
+  model: MindMapModel,
+  nodeId: string,
+  position: NodePosition
+): MindMapModel {
+  if (model.id === nodeId) return model;
+  if (!findNode(model, nodeId)) return model;
+  const cloned = cloneModel(model);
+  const info = findParentAndIndex(cloned, nodeId)!;
+  const node = info.parent.children[info.index];
+  if (info.parent.id !== cloned.id) {
+    info.parent.children.splice(info.index, 1);
+    cloned.children.push(node);
+  }
+  node.position = { x: position.x, y: position.y };
+  return cloned;
+}
+
+/**
  * Indent: make node the last child of its previous sibling. Expands the
  * sibling first if it was collapsed — like addChildToNode/moveBranch's
  * callers, this must never move content into a hidden destination (see
@@ -450,6 +548,8 @@ export function moveBranch(
   const { parent, index: removedIndex } = findParentAndIndex(cloned, nodeId)!;
   const [moved] = parent.children.splice(removedIndex, 1);
   const target = findNode(cloned, newParentId)!;
+  // A tree's free canvas position only applies while it is top-level.
+  if (target.id !== cloned.id) delete moved.position;
   if (index === undefined) {
     target.children.push(moved);
   } else {
@@ -476,7 +576,9 @@ export function moveBranch(
  *     parent can't be collapsed here: a collapsed node hides its own
  *     descendants (including `node`, which is being merged), so `node`
  *     couldn't have been reachable/active in the first place.
- * The root has no predecessor → returns null (caller treats as no-op).
+ * The root is not a node (it's the title), so neither the root itself nor the
+ * first top-level node has a predecessor → returns null (caller treats as
+ * no-op).
  *
  * Returns the new model, the id the caret should land on (the merge target) and
  * the caret offset (the target's text length *before* the merge).
@@ -489,6 +591,7 @@ export function mergeIntoPredecessor(
   const cloned = cloneModel(model);
   const info = findParentAndIndex(cloned, nodeId);
   if (!info) return null;
+  if (info.parent.id === cloned.id && info.index === 0) return null;
   const node = info.parent.children[info.index];
 
   if (info.index > 0) {
@@ -569,9 +672,10 @@ export function splitNode(
     // identity (referenced by image/link/publish URLs) must never migrate to a
     // new id just because a blank line was inserted above it.
     const newNode: MindMapModel = { id: newNodeId, text: "", children: [] };
-    if (cloned.id === nodeId) {
-      // Root has no sibling; fall back to prepending an empty child.
-      cloned.children.unshift(newNode);
+    if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
+      // Root / tree root: no sibling (that would be a new tree); prepend an
+      // empty child instead.
+      node.children.unshift(newNode);
     } else {
       const result = findParentAndIndex(cloned, nodeId);
       if (result) result.parent.children.splice(result.index, 0, newNode);
@@ -584,8 +688,8 @@ export function splitNode(
   // The suffix becomes a following sibling; the node keeps its id and children.
   const newNode: MindMapModel = { id: newNodeId, text: textAfter, children: [] };
 
-  if (cloned.id === nodeId) {
-    cloned.children.unshift(newNode);
+  if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
+    node.children.unshift(newNode);
   } else {
     const result = findParentAndIndex(cloned, nodeId);
     if (result) {

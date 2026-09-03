@@ -73,8 +73,10 @@ describe("flattenToNodes width cap", () => {
   it("caps every flat node", () => {
     const nodes = flattenToNodes(
       model({
-        text: LONG,
-        children: [model({ id: "t", text: LONG })],
+        text: "title",
+        children: [
+          model({ id: "t", text: LONG, children: [model({ id: "u", text: LONG })] }),
+        ],
       })
     );
     expect(nodes.length).toBeGreaterThan(1);

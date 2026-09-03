@@ -13,6 +13,8 @@ import type { MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   findParentAndIndex,
+  firstNavigableId,
+  isTopLevel,
   cloneWithNewIds,
   generateId,
 } from "../domain/model";
@@ -213,8 +215,14 @@ type DragState =
       parentOf: Map<string, string> | null;
       /** Total descendant count (incl. hidden), for the ghost's "+N" badge. */
       descendants: number;
-      /** Current drop resolution (null = would not drop anywhere). */
+      /** Current drop resolution (null = over empty canvas → free placement). */
       drop: DropTarget | null;
+      /**
+       * Ghost box origin (world) at the last preview — where a drop on empty
+       * canvas places the tree. Null while the pointer is over the dragged
+       * subtree itself: releasing there is a cancel, not a placement.
+       */
+      ghostAt: { x: number; y: number } | null;
       /**
        * Everything Escape has to put back (see the cancel handler). The
        * selection is captured *before* mousedown moves it onto the grabbed
@@ -477,12 +485,13 @@ export function MindmapEditorView({
     y: number;
     width: number;
   } | null>(null);
-  // Right-click context menu over a node (null = closed).
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    nodeId: string;
-  } | null>(null);
+  // Right-click context menu (null = closed): over a node, or over empty
+  // canvas (`at` = world position, offers "add a root here").
+  const [contextMenu, setContextMenu] = useState<
+    | { x: number; y: number; nodeId: string; at?: undefined }
+    | { x: number; y: number; nodeId?: undefined; at: { x: number; y: number } }
+    | null
+  >(null);
   // Pending Markdown paste awaiting a strategy choice (null = dialog closed).
   const [mdPaste, setMdPaste] = useState<{
     text: string;
@@ -600,6 +609,32 @@ export function MindmapEditorView({
   const commitMoveRef = useRef(commitMove);
   commitMoveRef.current = commitMove;
 
+  // Commit a drop onto empty canvas: the tree goes to where the ghost was.
+  // `ghostAt` is the box's top-left; the model stores the layout's anchor
+  // (left edge, vertical centre), so convert with the node's box height.
+  const commitPlace = useCallback(
+    (nodeId: string, ghostAt: { x: number; y: number }) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (!node) return;
+      const prevModel = stateRef.current.document.model;
+      const next = dispatch(
+        {
+          type: "placeBranchAt",
+          nodeId,
+          x: ghostAt.x,
+          y: ghostAt.y + nodeBoxHeight(node.height) / 2,
+        },
+        "move-branch"
+      );
+      if (next.document.model === prevModel) return;
+      flashNodes([nodeId]);
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, flashNodes, noteId, saveNote]
+  );
+  const commitPlaceRef = useRef(commitPlace);
+  commitPlaceRef.current = commitPlace;
+
   // Re-render when an image-node's image finishes loading (size becomes known).
   const [imageVersion, setImageVersion] = useState(0);
   useEffect(
@@ -627,7 +662,7 @@ export function MindmapEditorView({
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
-  // Title = root node text
+  // Title = root node text (the root is the header title, not a canvas node)
   const title = model.text;
 
   // --- Cursor blink ---
@@ -759,7 +794,7 @@ export function MindmapEditorView({
       const worldY = (clientY - rect.top - stage.y()) / scale;
       const flat = nodesRef.current;
       for (const n of flat) {
-        const w = nodeBoxWidth(n.width, flat[0]?.id === n.id);
+        const w = nodeBoxWidth(n.width, n.depth === 0);
         const h = nodeBoxHeight(n.height);
         if (
           worldX >= n.x &&
@@ -812,7 +847,7 @@ export function MindmapEditorView({
       const targetId =
         nodeIdAtClientPoint(e.clientX, e.clientY) ??
         st.view.activeNodeId ??
-        st.document.model.id;
+        firstNavigableId(st.document.model);
       // Each image becomes a fresh child of the drop target; upload sequentially
       // so the save-status line and the R2 requests don't stomp each other.
       void (async () => {
@@ -865,7 +900,8 @@ export function MindmapEditorView({
     (clipText: string) => {
       if (!clipText.trim()) return;
       const cur = stateRef.current;
-      const targetId = cur.view.activeNodeId || cur.document.model.id;
+      const targetId =
+        cur.view.activeNodeId || firstNavigableId(cur.document.model);
       const parsed = textToModel("_", clipText);
       const freshChildren = parsed.children.map(cloneWithNewIds);
       if (freshChildren.length === 0) return;
@@ -920,12 +956,10 @@ export function MindmapEditorView({
       const st = stateRef.current;
       if (st.view.editing && hasTextRange(st)) return; // native text cut
       e.preventDefault();
-      // Mirror copy's system-clipboard payload before the branch leaves the tree
-      // (root can't be cut, so skip it — cutBranch would no-op anyway).
-      const node =
-        st.view.activeNodeId && st.view.activeNodeId !== st.document.model.id
-          ? findNode(st.document.model, st.view.activeNodeId)
-          : null;
+      // Mirror copy's system-clipboard payload before the branch leaves the tree.
+      const node = st.view.activeNodeId
+        ? findNode(st.document.model, st.view.activeNodeId)
+        : null;
       if (node) {
         e.clipboardData.setData("text/plain", modelToMarkdown(node));
         e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
@@ -997,7 +1031,8 @@ export function MindmapEditorView({
 
       if (plan === "markdown-dialog") {
         // Offer decompose / markdown node / plain text.
-        const targetId = st.view.activeNodeId || st.document.model.id;
+        const targetId =
+          st.view.activeNodeId || firstNavigableId(st.document.model);
         setMdPaste({ text, targetId });
         return;
       }
@@ -1164,10 +1199,28 @@ export function MindmapEditorView({
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     if (!contextMenu) return [];
+    if (contextMenu.nodeId === undefined) {
+      // Empty canvas: the one deliberate way to create a tree root.
+      if (readOnly) return [];
+      const { at } = contextMenu;
+      return [
+        {
+          label: t("menuAddRoot"),
+          onSelect: () => {
+            const next = dispatch(
+              { type: "addRootAt", x: at.x, y: at.y },
+              "add-root"
+            );
+            if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+            if (noteId) saveNote(next.document.model);
+            focusEditorSoon();
+          },
+        },
+      ];
+    }
     const nodeId = contextMenu.nodeId;
     const node = findNode(modelRef.current, nodeId);
     if (!node) return [];
-    const isRoot = node.id === modelRef.current.id;
     const hasChildren = node.children.length > 0;
     const type = node.type ?? "text";
 
@@ -1218,9 +1271,9 @@ export function MindmapEditorView({
     }
     groups.push(structureGroup);
 
-    // --- Kind conversion (root excluded — it's the note title) ---
+    // --- Kind conversion ---
     const typeGroup: ContextMenuAction[] = [];
-    if (!isRoot && !readOnly) {
+    if (!readOnly) {
       const setType = (nodeType: NodeType) => () => {
         const next = dispatch(
           { type: "setNodeType", nodeId, nodeType },
@@ -1242,7 +1295,7 @@ export function MindmapEditorView({
     // --- Task checkbox ---
     // Offered for the kinds that can show one (supportsCheckbox).
     const taskGroup: ContextMenuAction[] = [];
-    if (!readOnly && !isRoot && supportsCheckbox(type)) {
+    if (!readOnly && supportsCheckbox(type)) {
       if (node.checked === undefined) {
         taskGroup.push({
           label: t("menuAddCheckbox"),
@@ -1299,7 +1352,7 @@ export function MindmapEditorView({
 
     // --- Media: image upload (R2). Replaces the node's content ---
     const mediaGroup: ContextMenuAction[] = [];
-    if (!isRoot && !readOnly) {
+    if (!readOnly) {
       mediaGroup.push({
         label: t("menuUploadImage"),
         onSelect: () => triggerImageUpload(nodeId),
@@ -1328,7 +1381,7 @@ export function MindmapEditorView({
 
     // --- Destructive ---
     const dangerGroup: ContextMenuAction[] = [];
-    if (!isRoot && !readOnly) {
+    if (!readOnly) {
       dangerGroup.push({
         label: t("menuDeleteNode"),
         danger: true,
@@ -1566,7 +1619,7 @@ export function MindmapEditorView({
         const flat = nodesRef.current;
         const target = flat.find((n) => n.id === drop.targetId);
         if (!target) return;
-        const isRoot = flat[0]?.id === target.id;
+        const isRoot = target.depth === 0;
         const w = nodeBoxWidth(target.width, isRoot);
         const h = nodeBoxHeight(target.height);
         if (drop.kind === "child") {
@@ -1633,6 +1686,24 @@ export function MindmapEditorView({
         setZoomPercent(Math.round(stage.scaleX() * 100));
       });
 
+      // Right-click on empty space: offer to add a tree root there. Node
+      // groups handle their own contextmenu and stop the bubble.
+      stage.on("contextmenu", (e: any) => {
+        if (e.target !== stage) return;
+        e.evt.preventDefault();
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+        const scale = stage.scaleX();
+        setContextMenu({
+          x: e.evt.clientX,
+          y: e.evt.clientY,
+          at: {
+            x: (pointer.x - stage.x()) / scale,
+            y: (pointer.y - stage.y()) / scale,
+          },
+        });
+      });
+
       // Click on empty space: keep the node selected, just leave edit mode
       // (exactly one node is always selected). Skip if just finished dragging.
       stage.on("click tap", (e: any) => {
@@ -1663,6 +1734,9 @@ export function MindmapEditorView({
           const byId = new Map(flat.map((n) => [n.id, n]));
           const parentOf = new Map<string, string>();
           for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
+          // Top-level nodes belong to the invisible document root.
+          const root = modelRef.current;
+          for (const c of root.children) parentOf.set(c.id, root.id);
           const excluded = new Set<string>();
           (function collect(id: string) {
             excluded.add(id);
@@ -1677,12 +1751,31 @@ export function MindmapEditorView({
           drag.nodeId,
           drag.excluded,
           drag.parentOf,
+          {
+            id: modelRef.current.id,
+            children: modelRef.current.children.map((c) => c.id),
+          },
           worldX,
           worldY
         );
-        ghost?.position({ x: worldX - drag.grabDX, y: worldY - drag.grabDY });
+        const ghostAt = { x: worldX - drag.grabDX, y: worldY - drag.grabDY };
+        ghost?.position(ghostAt);
+        const overOwnSubtree = nodesRef.current.some(
+          (n) =>
+            drag.excluded!.has(n.id) &&
+            worldX >= n.x &&
+            worldX <= n.x + nodeBoxWidth(n.width, n.depth === 0) &&
+            Math.abs(worldY - n.y) <= nodeBoxHeight(n.height) / 2
+        );
+        // Only a tree root can be dropped on empty canvas (free placement);
+        // a nested branch there would become a new tree, which is reserved
+        // for the explicit "add root" menu — so for it that's a no-drop.
+        drag.ghostAt =
+          overOwnSubtree || !isTopLevel(modelRef.current, drag.nodeId)
+            ? null
+            : ghostAt;
         updateDropMarker(drag.drop);
-        const cursor = drag.drop ? "grabbing" : "no-drop";
+        const cursor = drag.drop || drag.ghostAt ? "grabbing" : "no-drop";
         const el = stage.container();
         if (el.style.cursor !== cursor) el.style.cursor = cursor;
         dragLayer.batchDraw();
@@ -1829,6 +1922,8 @@ export function MindmapEditorView({
             clearMovePreview();
             if (drag.moved && drag.drop) {
               commitMoveRef.current(drag.nodeId, drag.drop);
+            } else if (drag.moved && drag.ghostAt) {
+              commitPlaceRef.current(drag.nodeId, drag.ghostAt);
             }
           }
           // Re-click on the already-selected node: enter edit mode now that the
@@ -2003,7 +2098,7 @@ export function MindmapEditorView({
     if (flat.length === 0) return false;
     const activeId = stateRef.current.view.activeNodeId;
     const target = flat.find((n) => n.id === activeId) ?? flat[0];
-    const rect = nodeRect(target, flat[0]?.id === target.id);
+    const rect = nodeRect(target, target.depth === 0);
     const { offsetX, offsetY } = centerOffset(rectCenter(rect), stage.scaleX(), {
       width,
       height,
@@ -2073,7 +2168,7 @@ export function MindmapEditorView({
     const activeNode = nodes.find((n) => n.id === activeNodeId);
     if (!activeNode) return;
 
-    const rect = nodeRect(activeNode, nodes[0]?.id === activeNode.id);
+    const rect = nodeRect(activeNode, activeNode.depth === 0);
     const { offsetX, offsetY, changed } = ensureVisibleOffset(
       rect,
       { scale: stage.scaleX(), offsetX: stage.x(), offsetY: stage.y() },
@@ -2131,7 +2226,7 @@ export function MindmapEditorView({
       return;
     }
     const scale = stage.scaleX();
-    const isRoot = nodes[0]?.id === node.id;
+    const isRoot = node.depth === 0;
     const w = nodeBoxWidth(node.width, isRoot);
     const h = nodeBoxHeight(node.height);
     setUrlBoxPos({
@@ -2196,7 +2291,7 @@ export function MindmapEditorView({
 
     const visible = new Array<boolean>(nodes.length);
     nodes.forEach((node, index) => {
-      visible[index] = nodeVisible(node, index === 0);
+      visible[index] = nodeVisible(node, node.depth === 0);
     });
 
     // Pre-calculate per-node line data + widths (cached, see top of file), but
@@ -2299,7 +2394,9 @@ export function MindmapEditorView({
     // Draw nodes
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      const isRoot = index === 0;
+      // Top-level nodes are the roots of their trees (the document root is
+      // the title and isn't drawn), so each gets the root styling.
+      const isRoot = node.depth === 0;
       // isEditing = caret/text-input active; isSelected = node highlighted but
       // not being edited (single click). A selected node renders like any other
       // (link title, stored format) with just an accent outline.
@@ -2682,9 +2779,9 @@ export function MindmapEditorView({
         // Arm a drag (it only becomes "real" once the pointer moves past
         // DRAG_THRESHOLD; below that it stays a plain click). Dragging the node
         // being edited extends a text selection; dragging any other node picks
-        // the branch up to move it. The root anchors the tree and can't move,
-        // so it keeps the text-selection drag.
-        if (editingThis || isRoot) {
+        // the branch up to move it (top-level trees included — they reorder
+        // among themselves or nest under another tree).
+        if (editingThis) {
           dragStateRef.current = {
             mode: "text",
             nodeId: node.id,
@@ -2706,6 +2803,7 @@ export function MindmapEditorView({
             parentOf: null,
             descendants: countDescendants(modelRef.current, node.id),
             drop: null,
+            ghostAt: null,
             // `cur` is the state from *before* the select/activate dispatch
             // above, which is what Escape must put back (see the cancel
             // handler). The transform is still untouched at mousedown.
@@ -2765,7 +2863,7 @@ export function MindmapEditorView({
       // childCount counts direct children even while collapsed (when the flat
       // `children` array is empty), so it's the true leaf test for both states.
       if (node.childCount === 0) return; // leaves have nothing to toggle
-      const isRoot = index === 0;
+      const isRoot = node.depth === 0;
       const parentWidth = textWidths.get(node.id) ?? node.width;
       const rectW = nodeBoxWidth(parentWidth, isRoot);
       const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
@@ -2906,7 +3004,7 @@ export function MindmapEditorView({
     if (editing && !activeCustom) {
       if (!activeNode) return;
 
-      const isRoot = nodes.indexOf(activeNode) === 0;
+      const isRoot = activeNode.depth === 0;
       const data = lineDataRef.current.get(activeNodeId);
       const lineHeight = data ? data.lineHeight : LINE_HEIGHT;
       const blockHeight = (data ? data.lines.length : 1) * lineHeight;
@@ -2998,7 +3096,7 @@ export function MindmapEditorView({
     for (const id of highlightIds) {
       const node = nodes.find((n) => n.id === id);
       if (!node) continue;
-      const isRoot = nodes.indexOf(node) === 0;
+      const isRoot = node.depth === 0;
       const rectWidth = nodeBoxWidth(node.width, isRoot);
       const rectHeight = node.height;
       const w = rectWidth + 12;
@@ -3092,7 +3190,7 @@ export function MindmapEditorView({
       return;
     }
 
-    const isRoot = flat[0]?.id === node.id;
+    const isRoot = node.depth === 0;
     const rectW = nodeBoxWidth(node.width, isRoot);
     const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
     const cy = node.y;
@@ -3202,7 +3300,7 @@ export function MindmapEditorView({
         if (!node || !stage) return null;
         if (node.childCount === 0) return null;
         const scale = stage.scaleX();
-        const isRoot = flat[0]?.id === id;
+        const isRoot = node.depth === 0;
         const rectW = nodeBoxWidth(node.width, isRoot);
         const worldX = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
         const worldY = node.y;
@@ -3226,7 +3324,7 @@ export function MindmapEditorView({
         const stage = konvaStageRef.current;
         if (!node || !stage) return null;
         const scale = stage.scaleX();
-        const w = nodeBoxWidth(node.width, flat[0]?.id === id);
+        const w = nodeBoxWidth(node.width, node.depth === 0);
         const h = nodeBoxHeight(node.height);
         return {
           x: node.x * scale + stage.x(),
@@ -3240,7 +3338,7 @@ export function MindmapEditorView({
         const node = flat.find((n) => n.id === id);
         const layer = layerRef.current;
         if (!node || !layer) return null;
-        const width = nodeBoxWidth(node.width, flat[0]?.id === id);
+        const width = nodeBoxWidth(node.width, node.depth === 0);
         const height = nodeBoxHeight(node.height);
         const box = { x: node.x, y: node.y - height / 2, width, height };
         // Konva positions every shape in world coordinates (node.x/node.y are

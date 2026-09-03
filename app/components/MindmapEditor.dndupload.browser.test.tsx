@@ -65,7 +65,7 @@ describe("MindmapEditor drag & drop image upload", () => {
     render(
       <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
     );
-    await waitFor(() => api().getActiveNodeId() === "root");
+    await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 
     const file = new File([new Uint8Array([1, 2, 3])], "pic.png", {
@@ -75,7 +75,7 @@ describe("MindmapEditor drag & drop image upload", () => {
     dt.items.add(file);
 
     // Drop in the far corner so it misses every node → falls back to the active
-    // node (root), attaching the image as root's child.
+    // node ("a", selected on load), attaching the image as a's child.
     dropContainer().dispatchEvent(
       new DragEvent("drop", {
         dataTransfer: dt,
@@ -89,6 +89,7 @@ describe("MindmapEditor drag & drop image upload", () => {
     const imageNode = await waitFor(() =>
       api()
         .getModel()
+        .children.find((c) => c.id === "a")!
         .children.find((c) => c.type === "image")
     );
     expect(imageNode.text).toBe(UPLOADED_URL);

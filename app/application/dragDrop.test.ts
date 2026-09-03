@@ -15,6 +15,7 @@ import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
  */
 function node(
   id: string,
+  depth: number,
   x: number,
   y: number,
   children: string[]
@@ -29,23 +30,28 @@ function node(
     width: 60,
     height: 20,
     contentMaxWidth: NODE_MAX_CONTENT_WIDTH,
+    depth,
     collapsed: false,
     childCount: children.length,
   };
 }
 
+/** The invisible document root: "root" is its only top-level node. */
+const DOC_ROOT = { id: "doc", children: ["root"] };
+
 function sampleNodes(): MindMapNode[] {
   return [
-    node("root", 100, 300, ["a", "b"]),
-    node("a", 300, 250, ["a1"]),
-    node("a1", 500, 250, []),
-    node("b", 300, 350, []),
+    node("root", 0, 100, 300, ["a", "b"]),
+    node("a", 1, 300, 250, ["a1"]),
+    node("a1", 2, 500, 250, []),
+    node("b", 1, 300, 350, []),
   ];
 }
 
 function parentMap(nodes: MindMapNode[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const n of nodes) for (const c of n.children) m.set(c, n.id);
+  for (const c of DOC_ROOT.children) m.set(c, DOC_ROOT.id);
   return m;
 }
 
@@ -62,6 +68,7 @@ function resolve(
     draggedId,
     new Set(excluded),
     parentMap(nodes),
+    DOC_ROOT,
     worldX,
     worldY
   );
@@ -110,10 +117,15 @@ describe("resolveDropTarget", () => {
     });
   });
 
-  it("treats the root as child-only (no sibling zones)", () => {
-    // A top-edge hit on the root still resolves as a child drop.
+  it("treats a tree root as child-only (no sibling zones → no accidental new tree)", () => {
+    // A top-edge hit on the tree root still resolves as a child drop.
     const topEdge = resolve("a1", 100 + W / 2, 300 - H / 2 + 2);
     expect(topEdge).toEqual({ kind: "child", parentId: "root", targetId: "root" });
+    expect(resolve("a1", 100 + W / 2, 300)).toEqual({
+      kind: "child",
+      parentId: "root",
+      targetId: "root",
+    });
   });
 
   it("ignores excluded nodes (dragged subtree)", () => {

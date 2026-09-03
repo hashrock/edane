@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
-import { userEvent } from "vitest/browser";
+import { userEvent, page } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
 import { useNoteEditor } from "./useNoteEditor";
@@ -58,7 +58,11 @@ function findNode(node: MindMapModel, id: string): MindMapModel | null {
   return null;
 }
 
-beforeEach(() => {
+// The default 414px-wide test viewport can't reach clicks on the right of the
+// canvas: the first tree is centred on open, so its toggle / second tree sit
+// beyond x=414. Widen it like NoteEditor.browser.test.tsx does.
+beforeEach(async () => {
+  await page.viewport(1280, 800);
   const style = document.createElement("style");
   style.textContent = `
     [data-testid="mm-canvas"] {
@@ -76,7 +80,7 @@ async function setupCanvas() {
       readOnly
     />
   );
-  await waitFor(() => api().getActiveNodeId() === "root");
+  await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
   const canvas = document.querySelector<HTMLElement>(
     '[data-testid="mm-canvas"]'

@@ -68,6 +68,8 @@ const ACTIONS = {
   moveNodeUp: { type: "moveNodeUp" },
   moveNodeDown: { type: "moveNodeDown" },
   moveBranch: { type: "moveBranch", nodeId: "a1", newParentId: "b" },
+  placeBranchAt: { type: "placeBranchAt", nodeId: "a1", x: 400, y: 500 },
+  addRootAt: { type: "addRootAt", x: 400, y: 500 },
   moveUp: { type: "moveUp" },
   moveDown: { type: "moveDown" },
   moveToParent: { type: "moveToParent" },

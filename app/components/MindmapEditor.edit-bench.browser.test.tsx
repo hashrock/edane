@@ -99,18 +99,12 @@ describe("MindmapEditor large-tree edit benchmark", () => {
         />
       );
 
-      // Wait until Konva is ready and the first redraw has completed.
-      const point = await waitFor(() => api().getNodeClickPoint("n0"));
+      // Wait until Konva is ready and the first redraw has completed. n0 is
+      // the document root (the title, not a canvas node); n1 is the first tree
+      // and is already selected on load, so Space drops straight into edit mode.
+      await waitFor(() => api().getNodeClickPoint("n1"));
       await waitFor(() => api().getRedrawStats().redrawCount > 0);
-
-      const canvas = document.querySelector<HTMLElement>(
-        '[data-testid="mm-canvas"]'
-      )!;
-      // Click the root, then Space to drop into edit mode.
-      await userEvent.click(canvas, {
-        position: { x: Math.round(point.x), y: Math.round(point.y) },
-      });
-      await waitFor(() => api().getActiveNodeId() === "n0");
+      await waitFor(() => api().getActiveNodeId() === "n1");
       await userEvent.keyboard("[Space]");
       await waitFor(() => api().getSelection().editing === true);
       await flush();
