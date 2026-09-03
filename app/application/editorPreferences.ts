@@ -10,6 +10,7 @@
  */
 
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
+import { isKeyOf } from "../domain/isKeyOf";
 
 export interface EditorPreferences {
   /**
@@ -69,7 +70,7 @@ const TAB_BEHAVIOR_SET = {
 } as const satisfies Record<EditorPreferences["tabBehavior"], true>;
 
 function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"] {
-  return typeof value === "string" && value in TAB_BEHAVIOR_SET;
+  return isKeyOf(TAB_BEHAVIOR_SET, value);
 }
 
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `enterBehavior`. */
@@ -81,7 +82,7 @@ const ENTER_BEHAVIOR_SET = {
 function isEnterBehavior(
   value: unknown
 ): value is EditorPreferences["enterBehavior"] {
-  return typeof value === "string" && value in ENTER_BEHAVIOR_SET;
+  return isKeyOf(ENTER_BEHAVIOR_SET, value);
 }
 
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `arrowBehavior`. */
@@ -93,7 +94,7 @@ const ARROW_BEHAVIOR_SET = {
 function isArrowBehavior(
   value: unknown
 ): value is EditorPreferences["arrowBehavior"] {
-  return typeof value === "string" && value in ARROW_BEHAVIOR_SET;
+  return isKeyOf(ARROW_BEHAVIOR_SET, value);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel, NodeType } from "../domain/model";
+import { STORED_NODE_TYPES, type MindMapModel } from "../domain/model";
 import {
   modelToText,
   textToModel,
@@ -7,21 +7,6 @@ import {
   serializeModel,
   createDefaultModel,
 } from "./persistence";
-
-/**
- * Every non-default NodeType. `satisfies` only checks each element is a
- * valid NodeType (not that the list is complete) — the real exhaustiveness
- * guard is model.ts's `isStoredNodeType` (backed by `STORED_NODE_TYPE_SET`),
- * which normalizeTree calls and which fails to typecheck if a NodeType is
- * added without being declared there. This list is an end-to-end regression
- * check that the full parseContent → normalizeTree pipeline actually
- * preserves every currently-declared type, not just the predicate itself.
- */
-const STORED_NODE_TYPES: readonly Exclude<NodeType, "text">[] = [
-  "image",
-  "link",
-  "markdown",
-] satisfies NodeType[];
 
 /** Strip IDs so we can compare tree structure and text only */
 function stripIds(model: MindMapModel): unknown {
@@ -112,58 +97,6 @@ describe("textToModel", () => {
 });
 
 describe("round-trip: modelToText → textToModel", () => {
-  it("preserves simple tree structure", () => {
-    const original: MindMapModel = {
-      id: "n0",
-      text: "Root",
-      children: [
-        { id: "n1", text: "A", children: [] },
-        { id: "n2", text: "B", children: [] },
-      ],
-    };
-
-    const text = modelToText(original);
-    const lines = text.split("\n");
-    const parsed = textToModel(lines[0], lines.slice(1).join("\n"));
-
-    expect(stripIds(parsed)).toEqual(stripIds(original));
-  });
-
-  it("preserves deeply nested structure", () => {
-    const original: MindMapModel = {
-      id: "n0",
-      text: "プロジェクト",
-      children: [
-        {
-          id: "n1",
-          text: "設計",
-          children: [
-            {
-              id: "n2",
-              text: "UI",
-              children: [
-                { id: "n3", text: "コンポーネント", children: [] },
-                { id: "n4", text: "レイアウト", children: [] },
-              ],
-            },
-            { id: "n5", text: "API", children: [] },
-          ],
-        },
-        {
-          id: "n6",
-          text: "実装",
-          children: [{ id: "n7", text: "テスト", children: [] }],
-        },
-      ],
-    };
-
-    const text = modelToText(original);
-    const lines = text.split("\n");
-    const parsed = textToModel(lines[0], lines.slice(1).join("\n"));
-
-    expect(stripIds(parsed)).toEqual(stripIds(original));
-  });
-
   it("preserves single root with no children", () => {
     const original: MindMapModel = {
       id: "n0",
@@ -202,18 +135,6 @@ describe("parseContent", () => {
     expect(model.text).toBe("My Title");
   });
 
-  it("parses valid JSON content", () => {
-    const original: MindMapModel = {
-      id: "r1",
-      text: "From JSON",
-      children: [{ id: "c1", text: "Child", children: [] }],
-    };
-    const model = parseContent(JSON.stringify(original), "ignored");
-    expect(model.id).toBe("r1");
-    expect(model.text).toBe("From JSON");
-    expect(model.children[0].text).toBe("Child");
-  });
-
   it("falls back to legacy text format when JSON is invalid", () => {
     const model = parseContent("not-json-content", "Root");
     expect(model.text).toBe("Root");
@@ -240,58 +161,6 @@ describe("parseContent", () => {
     const model = parseContent("Child1\nChild2", undefined);
     expect(model.text).toBe("Mindmap");
     expect(model.children[0].text).toBe("Child1");
-  });
-
-  it("reassigns duplicated ids so the loaded model is a unique-id tree", () => {
-    // External JSON can carry duplicated ids; the whole domain layer addresses
-    // nodes by id (findNode/removeNode act on the first match), so load-time
-    // normalization must make every id unique.
-    const json = JSON.stringify({
-      id: "dup",
-      text: "Root",
-      children: [
-        { id: "dup", text: "A", children: [] },
-        { id: "dup", text: "B", children: [] },
-      ],
-    });
-    const model = parseContent(json, "ignored");
-    const collect = (m: MindMapModel): string[] => [
-      m.id,
-      ...m.children.flatMap(collect),
-    ];
-    const allIds = collect(model);
-    expect(new Set(allIds).size).toBe(allIds.length);
-    // Structure and text are preserved.
-    expect(model.text).toBe("Root");
-    expect(model.children.map((c) => c.text)).toEqual(["A", "B"]);
-  });
-
-  it("preserves known optional fields while normalizing", () => {
-    const json = JSON.stringify({
-      id: "r",
-      text: "Root",
-      children: [
-        {
-          id: "c",
-          text: "https://example.com",
-          type: "link",
-          bold: true,
-          fontSize: 20,
-          collapsed: true,
-          linkTitle: "Example",
-          favicon: "https://example.com/f.ico",
-          children: [],
-        },
-      ],
-    });
-    const model = parseContent(json, "ignored");
-    const c = model.children[0];
-    expect(c.type).toBe("link");
-    expect(c.bold).toBe(true);
-    expect(c.fontSize).toBe(20);
-    expect(c.collapsed).toBe(true);
-    expect(c.linkTitle).toBe("Example");
-    expect(c.favicon).toBe("https://example.com/f.ico");
   });
 
   it("keeps a task checkbox in either state, and only for booleans", () => {

@@ -58,15 +58,26 @@ export async function decrypt(
   return new TextDecoder().decode(plaintext);
 }
 
-/** Check if a string looks like encrypted content (valid base64, starts with IV) */
+const GCM_TAG_LENGTH = 16;
+// Canonical base64 as bytesToBase64 emits it: no whitespace, no exotic
+// alphabet, padded to a multiple of 4.
+const STRICT_BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * Does a stored string look like our ciphertext (base64 of iv + ciphertext +
+ * tag, so at least IV_LENGTH + GCM_TAG_LENGTH bytes even for an empty
+ * plaintext)? The check is strict on purpose: `atob` alone ignores ASCII
+ * whitespace, so a legacy plaintext note such as "hello world of mindmaps"
+ * would decode to enough bytes to pass — and then fail to decrypt, losing the
+ * note. Requiring canonical base64 makes any text with whitespace or
+ * punctuation fail fast; only a single unbroken run of ≥ 40 base64 characters
+ * can still be mistaken, which no real note consists of.
+ */
 export function isEncrypted(content: string): boolean {
-  try {
-    const decoded = atob(content);
-    // Encrypted content will be at least IV_LENGTH bytes + some ciphertext
-    return decoded.length > IV_LENGTH;
-  } catch {
-    return false;
-  }
+  if (content.length % 4 !== 0 || !STRICT_BASE64.test(content)) return false;
+  // Canonical base64 decodes to 3 bytes per 4 chars (minus padding).
+  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+  return (content.length / 4) * 3 - padding >= IV_LENGTH + GCM_TAG_LENGTH;
 }
 
 /**

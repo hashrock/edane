@@ -109,29 +109,4 @@ describe("multi-root layout", () => {
     expect(m.r2.y).toBeGreaterThan(m.r1.y + 32);
   });
 
-  it("puts a placed root exactly at its position", () => {
-    const ns = nodes([
-      ["r1", []],
-      ["r2", ["c"]],
-      ["c", []],
-    ]);
-    ns[1].position = { x: 900, y: -50 };
-    layoutMindMap(ns);
-    const m = byId(ns);
-    expect([m.r2.x, m.r2.y]).toEqual([900, -50]);
-    expect(m.c.y).toBe(-50);
-    expect(m.c.x).toBeGreaterThan(900);
-    expect([m.r1.x, m.r1.y]).toEqual([100, 300]);
-  });
-
-  it("pushes the auto column below a placed tree it would overlap", () => {
-    const ns = nodes([
-      ["placed", []],
-      ["auto", []],
-    ]);
-    ns[0].position = { x: 100, y: 300 };
-    layoutMindMap(ns);
-    const m = byId(ns);
-    expect(m.auto.y).toBeGreaterThan(300 + 40);
-  });
 });

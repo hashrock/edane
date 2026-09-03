@@ -13,10 +13,17 @@
  *   - "selection" : only when a node is selected (not editing its text).
  *   - "editing"   : only while editing a node's text (caret in the textarea).
  *
- * `run` returns "handled" (the runner calls preventDefault and stops) or "pass"
- * (the event is left to the browser's native textarea handling). Bindings are
- * matched in array order, so a more specific binding (e.g. Alt+Arrow reorder)
- * must precede the plainer one it would otherwise shadow.
+ * `run` is a PURE function of the key context: it returns a {@link KeyOutcome}
+ * — "handled" (the caller prevents the default and stops) or "pass" (the
+ * event is left to the browser's native textarea handling) plus the list of
+ * {@link KeyEffect}s the key asks for. Nothing in this module dispatches,
+ * saves or opens anything; the component's interpreter
+ * (`applyKeyEffects` in components/) carries the effects out in order. That
+ * split is what lets the keyboard invariants be checked headlessly:
+ * editorKeymap.property.test.ts feeds the dispatch effects straight into
+ * editorReducer. Bindings are matched in array order, so a more specific
+ * binding (e.g. Alt+Arrow reorder) must precede the plainer one it would
+ * otherwise shadow.
  *
  * The table is parameterized by EditorPreferences: Tab and ←/→ in selection
  * mode have two user-selectable behaviours, and turning selection mode off
@@ -25,30 +32,70 @@
  * shortcut-help overlay truthful — it only ever lists bindings that can fire.
  */
 
-import type { EditorAction, EditorState, UndoType } from "./editorReducer";
+import type {
+  EditorAction,
+  EditorState,
+  UndoType,
+} from "./editorReducer";
 import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
-import { findNode, nextCheckedState } from "../domain/model";
+import { findNode, hasStructuralSuccessor, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
 import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
+import { verticalMove as measuredVerticalMove } from "../lib/textGeometry";
 
 export type KeyMode = "selection" | "editing";
 export type KeyResult = "handled" | "pass";
 
+/**
+ * What a key asks the editor to do. A binding returns a list of these instead
+ * of calling anything, so the keymap stays pure; the component interprets
+ * them in order (see `applyKeyEffects`).
+ *
+ * `save` persists the model as it stands after the preceding dispatches —
+ * but only if one of them actually changed the state (a no-op reorder or a
+ * read-only view must not trigger a write). That rule lives in the
+ * interpreter, so bindings never need to look at a dispatch's result.
+ */
+export type KeyEffect =
+  | { kind: "dispatch"; action: EditorAction; undoType?: UndoType }
+  | { kind: "save" }
+  /** Highlight nodes: the given ids, or whichever node is active afterwards. */
+  | { kind: "flash"; ids: string[] | "active" }
+  | { kind: "openPalette" }
+  | { kind: "openHelp" }
+  | { kind: "undo" }
+  | { kind: "redo" };
+
+export interface KeyOutcome {
+  result: KeyResult;
+  effects: KeyEffect[];
+}
+
+/** No binding wants the key: leave it to the browser. */
+export const PASS: KeyOutcome = { result: "pass", effects: [] };
+
 /** The key facts the keymap needs; React's synthetic KeyboardEvent and a
- *  native KeyboardEvent both satisfy it (mirrors AuxKeyEvent in editSurface.ts). */
+ *  native KeyboardEvent both satisfy it (mirrors AuxKeyEvent in editSurface.ts).
+ *  Deliberately no `preventDefault`: the keymap decides, the caller acts. */
 export interface KeymapKeyEvent {
   key: string;
   metaKey: boolean;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
-  preventDefault: () => void;
 }
+
+/**
+ * Line-wise caret move inside a multi-line node; null = past the edge. A
+ * pure function of the text, but the production one measures glyphs (see
+ * lib/textGeometry), so tests inject a plain line-splitting stand-in.
+ */
+export type VerticalMove = (text: string, pos: number, dir: -1 | 1) => number | null;
 
 export interface KeyContext {
   e: KeymapKeyEvent;
@@ -58,19 +105,6 @@ export interface KeyContext {
   /** Caret start / end read from the live textarea. */
   pos: number;
   selEnd: number;
-}
-
-/** Component-provided callbacks the bindings dispatch into. */
-export interface KeymapDeps {
-  dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
-  /** Persist the model (no-op when the note is unsaved). */
-  saveNote: (model: MindMapModel) => void;
-  openPalette: () => void;
-  openHelp: () => void;
-  undo: () => void;
-  redo: () => void;
-  /** Line-wise caret move inside a multi-line node; null = past the edge. */
-  verticalMove: (text: string, pos: number, dir: -1 | 1) => number | null;
 }
 
 export interface KeyBinding {
@@ -85,16 +119,46 @@ export interface KeyBinding {
   keys: string;
   when: "global" | "selection" | "editing" | "both";
   match: (e: KeymapKeyEvent) => boolean;
-  run: (ctx: KeyContext) => KeyResult;
+  run: (ctx: KeyContext) => KeyOutcome;
 }
+
+// --- Effect constructors (keep the bindings below readable) ---
+const handled = (...effects: KeyEffect[]): KeyOutcome => ({
+  result: "handled",
+  effects,
+});
+const dispatch = (action: EditorAction, undoType?: UndoType): KeyEffect => ({
+  kind: "dispatch",
+  action,
+  undoType,
+});
+const SAVE: KeyEffect = { kind: "save" };
+/** Fold / unfold a node and persist the fold state. */
+const fold = (nodeId: string): KeyEffect[] => [
+  dispatch({ type: "toggleCollapse", nodeId }, "collapse"),
+  SAVE,
+];
+const deleteBranch = (nodeId: string): KeyEffect =>
+  dispatch({ type: "deleteNode", nodeId }, "delete");
+/**
+ * Insert an empty child and hand it straight into edit mode (Tab under
+ * "insert-child"). addChild always changes the state for an existing node
+ * (the active node is one), so the follow-ups are unconditional: save, then
+ * edit the child, matching Enter's insert-sibling behaviour.
+ */
+const insertChild = (nodeId: string): KeyEffect[] => [
+  dispatch({ type: "addChild", nodeId }, "add-child"),
+  SAVE,
+  dispatch({ type: "startEditing" }),
+];
 
 // Treat Cmd (mac) and Ctrl (win/linux) as the same "primary" modifier.
 const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
 
 export function buildKeymap(
-  deps: KeymapDeps,
   prefs: EditorPreferences = DEFAULT_PREFERENCES,
-  layout: EditorLayout = "canvas"
+  layout: EditorLayout = "canvas",
+  verticalMove: VerticalMove = measuredVerticalMove
 ): KeyBinding[] {
   // An empty node must not spawn another empty child — otherwise Tab-spam on a
   // fresh (blank) node stacks up empties. The live text is editingText while
@@ -106,6 +170,48 @@ export function buildKeymap(
       : ctx.node?.text ?? "";
     return text.trim() === "";
   };
+
+  // Tab is the same in both modes, driven by the one `tabBehavior` preference:
+  // "indent" makes Tab/Shift+Tab indent/outdent, "insert-child" makes Tab
+  // insert a child (handed straight into edit mode, pairing with Enter's
+  // split) while Shift+Tab still outdents. One factory, two scopes, so Tab
+  // does the same thing whether or not the caret is in the textarea.
+  const tabBindings = (when: "selection" | "editing", prefix: string): KeyBinding[] =>
+    prefs.tabBehavior === "insert-child"
+      ? [
+          {
+            id: `${prefix}-insert-child`,
+            label: "kmInsertChild",
+            keys: "Tab",
+            when,
+            match: (e) => e.key === "Tab" && !e.shiftKey,
+            run: (ctx) => {
+              const n = ctx.node;
+              if (!n) return handled();
+              // Don't stack an empty child under an already-empty node.
+              if (activeIsBlank(ctx)) return handled();
+              return handled(...insertChild(n.id));
+            },
+          },
+          {
+            id: `${prefix}-outdent`,
+            label: "kmOutdent",
+            keys: "Shift + Tab",
+            when,
+            match: (e) => e.key === "Tab" && e.shiftKey,
+            run: () => handled(dispatch({ type: "tab", shift: true }, "indent")),
+          },
+        ]
+      : [
+          {
+            id: `${prefix}-indent`,
+            label: "kmIndentOutdent",
+            keys: "Tab / Shift + Tab",
+            when,
+            match: (e) => e.key === "Tab",
+            run: (ctx) => handled(dispatch({ type: "tab", shift: ctx.e.shiftKey }, "indent")),
+          },
+        ];
 
   // ---- Selection mode ----
   // No Escape binding here: the editor keeps exactly one node selected at all
@@ -138,10 +244,7 @@ export function buildKeymap(
       keys: enterEdits ? "⌘/Ctrl + Enter" : "Enter",
       when: "selection",
       match: (e) => e.key === "Enter" && (enterEdits ? mod(e) : !mod(e)),
-      run: () => {
-        deps.dispatch({ type: "insertSiblingAfter" }, "insert-sibling");
-        return "handled";
-      },
+      run: () => handled(dispatch({ type: "insertSiblingAfter" }, "insert-sibling")),
     },
     {
       id: "sel-edit",
@@ -155,8 +258,7 @@ export function buildKeymap(
       run: () => {
         // No cursor args → the reducer's default: whole text selected, exactly
         // like Space, so a follow-up keystroke replaces the text either way.
-        deps.dispatch({ type: "startEditing" });
-        return "handled";
+        return handled(dispatch({ type: "startEditing" }));
       },
     },
     {
@@ -166,10 +268,9 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.key === "ArrowUp" && !e.altKey,
       run: () => {
-        deps.dispatch({
+        return handled(dispatch({
           type: siblingArrows ? "moveUpSiblingFirst" : "moveUp",
-        });
-        return "handled";
+        }));
       },
     },
     {
@@ -179,10 +280,9 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
       run: () => {
-        deps.dispatch({
+        return handled(dispatch({
           type: siblingArrows ? "moveDownSiblingFirst" : "moveDown",
-        });
-        return "handled";
+        }));
       },
     },
     prefs.arrowBehavior === "navigate"
@@ -194,21 +294,13 @@ export function buildKeymap(
           match: (e) => e.key === "ArrowRight" && !e.altKey,
           run: (ctx) => {
             const n = ctx.node;
-            if (!n || n.children.length === 0) return "handled";
+            if (!n || n.children.length === 0) return handled();
             // Expand a folded branch first so focus never lands on a node the
-            // fold is hiding.
-            if (n.collapsed) {
-              const next = deps.dispatch(
-                { type: "toggleCollapse", nodeId: n.id },
-                "collapse"
-              );
-              if (next !== ctx.state) deps.saveNote(next.document.model);
-            }
-            // Land on the child the user last visited in this branch (the
-            // first one until they've been inside), so ← then → is a
-            // round-trip rather than a jump back to the top of the branch.
-            deps.dispatch({ type: "moveToChild" });
-            return "handled";
+            // fold is hiding; then land on the child the user last visited in
+            // this branch (the first one until they've been inside), so ←
+            // then → is a round-trip rather than a jump back to the top.
+            const expand = n.collapsed ? fold(n.id) : [];
+            return handled(...expand, dispatch({ type: "moveToChild" }));
           },
         }
       : {
@@ -219,20 +311,13 @@ export function buildKeymap(
           match: (e) => e.key === "ArrowRight" && !e.altKey,
           run: (ctx) => {
             const n = ctx.node;
-            if (n && n.children.length > 0) {
-              if (n.collapsed) {
-                const next = deps.dispatch(
-                  { type: "toggleCollapse", nodeId: n.id },
-                  "collapse"
-                );
-                if (next !== ctx.state) deps.saveNote(next.document.model);
-              } else {
-                // Already expanded: descend, resuming at the last-visited
-                // child (see the navigate branch above).
-                deps.dispatch({ type: "moveToChild" });
-              }
+            if (!n || n.children.length === 0) return handled();
+            if (n.collapsed) {
+              return handled(...fold(n.id));
             }
-            return "handled";
+            // Already expanded: descend, resuming at the last-visited child
+            // (see the navigate branch above).
+            return handled(dispatch({ type: "moveToChild" }));
           },
         },
     prefs.arrowBehavior === "navigate"
@@ -242,10 +327,7 @@ export function buildKeymap(
           keys: "←",
           when: "selection",
           match: (e) => e.key === "ArrowLeft" && !e.altKey,
-          run: () => {
-            deps.dispatch({ type: "moveToParent" });
-            return "handled";
-          },
+          run: () => handled(dispatch({ type: "moveToParent" })),
         }
       : {
           id: "sel-left",
@@ -256,68 +338,12 @@ export function buildKeymap(
           run: (ctx) => {
             const n = ctx.node;
             if (n && n.children.length > 0 && !n.collapsed) {
-              const next = deps.dispatch(
-                { type: "toggleCollapse", nodeId: n.id },
-                "collapse"
-              );
-              if (next !== ctx.state) deps.saveNote(next.document.model);
-            } else {
-              deps.dispatch({ type: "moveToParent" });
+              return handled(...fold(n.id));
             }
-            return "handled";
+            return handled(dispatch({ type: "moveToParent" }));
           },
         },
-    ...(prefs.tabBehavior === "insert-child"
-      ? ([
-          {
-            id: "sel-insert-child",
-            label: "kmInsertChild",
-            keys: "Tab",
-            when: "selection",
-            match: (e) => e.key === "Tab" && !e.shiftKey,
-            run: (ctx) => {
-              const n = ctx.node;
-              if (!n) return "handled";
-              // Don't stack an empty child under an already-empty node.
-              if (activeIsBlank(ctx)) return "handled";
-              const next = deps.dispatch(
-                { type: "addChild", nodeId: n.id },
-                "add-child"
-              );
-              if (next !== ctx.state) {
-                deps.saveNote(next.document.model);
-                // Hand the empty child straight into edit mode, matching
-                // Enter's insert-sibling behaviour.
-                deps.dispatch({ type: "startEditing" });
-              }
-              return "handled";
-            },
-          },
-          {
-            id: "sel-outdent",
-            label: "kmOutdent",
-            keys: "Shift + Tab",
-            when: "selection",
-            match: (e) => e.key === "Tab" && e.shiftKey,
-            run: () => {
-              deps.dispatch({ type: "tab", shift: true }, "indent");
-              return "handled";
-            },
-          },
-        ] satisfies KeyBinding[])
-      : ([
-          {
-            id: "sel-indent",
-            label: "kmIndentOutdent",
-            keys: "Tab / Shift + Tab",
-            when: "selection",
-            match: (e) => e.key === "Tab",
-            run: (ctx) => {
-              deps.dispatch({ type: "tab", shift: ctx.e.shiftKey }, "indent");
-              return "handled";
-            },
-          },
-        ] satisfies KeyBinding[])),
+    ...tabBindings("selection", "sel"),
     {
       // The horizontal twin of Alt+↑↓: those reorder among siblings, these move
       // the node across levels. Selection mode ONLY, unlike the reorder pair:
@@ -329,10 +355,7 @@ export function buildKeymap(
       keys: "Alt + →",
       when: "selection",
       match: (e) => e.altKey && e.key === "ArrowRight",
-      run: () => {
-        deps.dispatch({ type: "tab", shift: false }, "indent");
-        return "handled";
-      },
+      run: () => handled(dispatch({ type: "tab", shift: false }, "indent")),
     },
     {
       id: "outdent-left",
@@ -340,10 +363,7 @@ export function buildKeymap(
       keys: "Alt + ←",
       when: "selection",
       match: (e) => e.altKey && e.key === "ArrowLeft",
-      run: () => {
-        deps.dispatch({ type: "tab", shift: true }, "indent");
-        return "handled";
-      },
+      run: () => handled(dispatch({ type: "tab", shift: true }, "indent")),
     },
     {
       id: "sel-delete",
@@ -352,9 +372,8 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.key === "Backspace" || e.key === "Delete",
       run: (ctx) => {
-        if (!ctx.node) return "handled";
-        deps.dispatch({ type: "deleteNode", nodeId: ctx.node.id }, "delete");
-        return "handled";
+        if (!ctx.node) return handled();
+        return handled(deleteBranch(ctx.node.id));
       },
     },
     {
@@ -363,10 +382,7 @@ export function buildKeymap(
       keys: "?",
       when: "selection",
       match: (e) => e.key === "?",
-      run: () => {
-        deps.openHelp();
-        return "handled";
-      },
+      run: () => handled({ kind: "openHelp" }),
     },
   ];
 
@@ -382,71 +398,13 @@ export function buildKeymap(
       when: "both",
       match: (e) => mod(e) && e.shiftKey && e.key === "Backspace",
       run: (ctx) => {
-        if (!ctx.node) return "handled";
-        deps.dispatch({ type: "deleteNode", nodeId: ctx.node.id }, "delete");
-        return "handled";
+        if (!ctx.node) return handled();
+        return handled(deleteBranch(ctx.node.id));
       },
     },
   ];
 
-  // Tab while editing mirrors the selection-mode Tab behaviour, driven by the
-  // same `tabBehavior` preference: "indent" makes Tab/Shift+Tab indent/outdent,
-  // "insert-child" makes Tab insert a child (handed straight into edit mode,
-  // pairing with Enter's split) while Shift+Tab still outdents. Keeping the two
-  // modes in sync means Tab does the same thing whether or not the caret is in
-  // the textarea.
-  const editIndentBindings: KeyBinding[] =
-    prefs.tabBehavior === "insert-child"
-      ? [
-          {
-            id: "edit-insert-child",
-            label: "kmInsertChild",
-            keys: "Tab",
-            when: "editing",
-            match: (e) => e.key === "Tab" && !e.shiftKey,
-            run: (ctx) => {
-              const n = ctx.node;
-              if (!n) return "handled";
-              // Don't stack an empty child under an already-empty node (the
-              // live editingText is what counts while editing).
-              if (activeIsBlank(ctx)) return "handled";
-              const next = deps.dispatch(
-                { type: "addChild", nodeId: n.id },
-                "add-child"
-              );
-              if (next !== ctx.state) {
-                deps.saveNote(next.document.model);
-                // Move edit focus to the empty child, matching Enter's split.
-                deps.dispatch({ type: "startEditing" });
-              }
-              return "handled";
-            },
-          },
-          {
-            id: "edit-outdent",
-            label: "kmOutdent",
-            keys: "Shift + Tab",
-            when: "editing",
-            match: (e) => e.key === "Tab" && e.shiftKey,
-            run: () => {
-              deps.dispatch({ type: "tab", shift: true }, "indent");
-              return "handled";
-            },
-          },
-        ]
-      : [
-          {
-            id: "edit-indent",
-            label: "kmIndentOutdent",
-            keys: "Tab / Shift + Tab",
-            when: "editing",
-            match: (e) => e.key === "Tab",
-            run: (ctx) => {
-              deps.dispatch({ type: "tab", shift: ctx.e.shiftKey }, "indent");
-              return "handled";
-            },
-          },
-        ];
+  const editIndentBindings = tabBindings("editing", "edit");
 
   // Escape returns from editing to selection mode; with selection mode
   // disabled there is nowhere to return to, so the binding is dropped and
@@ -457,10 +415,7 @@ export function buildKeymap(
     keys: "Esc",
     when: "editing",
     match: (e) => e.key === "Escape",
-    run: () => {
-      deps.dispatch({ type: "exitEditing" });
-      return "handled";
-    },
+    run: () => handled(dispatch({ type: "exitEditing" })),
   };
 
   return [
@@ -471,10 +426,7 @@ export function buildKeymap(
       keys: "⌘/Ctrl + K",
       when: "global",
       match: (e) => mod(e) && e.key.toLowerCase() === "k",
-      run: () => {
-        deps.openPalette();
-        return "handled";
-      },
+      run: () => handled({ kind: "openPalette" }),
     },
     {
       id: "undo",
@@ -482,10 +434,7 @@ export function buildKeymap(
       keys: "⌘/Ctrl + Z",
       when: "global",
       match: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "z",
-      run: () => {
-        deps.undo();
-        return "handled";
-      },
+      run: () => handled({ kind: "undo" }),
     },
     {
       id: "redo",
@@ -493,10 +442,7 @@ export function buildKeymap(
       keys: "⌘/Ctrl + Shift + Z",
       when: "global",
       match: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "z",
-      run: () => {
-        deps.redo();
-        return "handled";
-      },
+      run: () => handled({ kind: "redo" }),
     },
     {
       // Windows-style redo alias; hidden from help to avoid a duplicate row.
@@ -505,10 +451,7 @@ export function buildKeymap(
       keys: "⌘/Ctrl + Y",
       when: "global",
       match: (e) => mod(e) && e.key.toLowerCase() === "y",
-      run: () => {
-        deps.redo();
-        return "handled";
-      },
+      run: () => handled({ kind: "redo" }),
     },
     {
       // Chorded twin of selection mode's "?": while editing (and in always-edit
@@ -519,10 +462,7 @@ export function buildKeymap(
       keys: "⌘/Ctrl + /",
       when: "global",
       match: (e) => mod(e) && e.key === "/",
-      run: () => {
-        deps.openHelp();
-        return "handled";
-      },
+      run: () => handled({ kind: "openHelp" }),
     },
 
     // ---- Cross-mode (need an active node; must precede plain-arrow bindings) ----
@@ -533,9 +473,7 @@ export function buildKeymap(
       when: "both",
       match: (e) => e.altKey && e.key === "ArrowUp",
       run: (ctx) => {
-        const next = deps.dispatch({ type: "moveNodeUp" }, "reorder");
-        if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
+        return handled(dispatch({ type: "moveNodeUp" }, "reorder"), SAVE);
       },
     },
     {
@@ -545,9 +483,7 @@ export function buildKeymap(
       when: "both",
       match: (e) => e.altKey && e.key === "ArrowDown",
       run: (ctx) => {
-        const next = deps.dispatch({ type: "moveNodeDown" }, "reorder");
-        if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
+        return handled(dispatch({ type: "moveNodeDown" }, "reorder"), SAVE);
       },
     },
     {
@@ -559,13 +495,8 @@ export function buildKeymap(
       run: (ctx) => {
         const n = ctx.node;
         // Bold only applies to text nodes (matches the context menu).
-        if (!n || (n.type ?? "text") !== "text") return "handled";
-        const next = deps.dispatch(
-          { type: "setNodeStyle", nodeId: n.id, bold: !n.bold },
-          "style"
-        );
-        if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
+        if (!n || (n.type ?? "text") !== "text") return handled();
+        return handled(dispatch({ type: "setNodeStyle", nodeId: n.id, bold: !n.bold }, "style"), SAVE);
       },
     },
 
@@ -581,13 +512,8 @@ export function buildKeymap(
       match: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "d",
       run: (ctx) => {
         const n = ctx.node;
-        if (!n || !supportsCheckbox(n.type ?? "text")) return "handled";
-        const next = deps.dispatch(
-          { type: "setChecked", nodeId: n.id, checked: nextCheckedState(n.checked) },
-          "check"
-        );
-        if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
+        if (!n || !supportsCheckbox(n.type ?? "text")) return handled();
+        return handled(dispatch({ type: "setChecked", nodeId: n.id, checked: nextCheckedState(n.checked) }, "check"), SAVE);
       },
     },
 
@@ -602,13 +528,8 @@ export function buildKeymap(
       match: (e) => mod(e) && e.key === ".",
       run: (ctx) => {
         const n = ctx.node;
-        if (!n || n.children.length === 0) return "handled";
-        const next = deps.dispatch(
-          { type: "toggleCollapse", nodeId: n.id },
-          "collapse"
-        );
-        if (next !== ctx.state) deps.saveNote(next.document.model);
-        return "handled";
+        if (!n || n.children.length === 0) return handled();
+        return handled(...fold(n.id));
       },
     },
 
@@ -623,7 +544,7 @@ export function buildKeymap(
       keys: "Shift + Enter",
       when: "editing",
       match: (e) => e.key === "Enter" && e.shiftKey,
-      run: () => "pass", // native textarea inserts the "\n"
+      run: () => PASS, // native textarea inserts the "\n"
     },
     {
       id: "edit-enter",
@@ -632,8 +553,7 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "Enter",
       run: (ctx) => {
-        deps.dispatch({ type: "enter", pos: ctx.pos }, "enter");
-        return "handled";
+        return handled(dispatch({ type: "enter", pos: ctx.pos }, "enter"));
       },
     },
     ...editIndentBindings,
@@ -647,10 +567,9 @@ export function buildKeymap(
         // Only the caret-at-very-start case merges with the previous node;
         // otherwise let the textarea delete a character.
         if (ctx.pos === 0 && ctx.pos === ctx.selEnd) {
-          deps.dispatch({ type: "backspaceAtStart" }, "backspace");
-          return "handled";
+          return handled(dispatch({ type: "backspaceAtStart" }, "backspace"));
         }
-        return "pass";
+        return PASS;
       },
     },
     {
@@ -661,10 +580,13 @@ export function buildKeymap(
       match: (e) => e.key === "Delete",
       run: (ctx) => {
         // With a text range selected, defer to native delete.
-        if (ctx.pos !== ctx.selEnd) return "pass";
-        const next = deps.dispatch({ type: "deleteAtEnd", pos: ctx.pos }, "delete");
-        // No model change (not at end) → let the textarea delete forward.
-        return next !== ctx.state ? "handled" : "pass";
+        if (ctx.pos !== ctx.selEnd) return PASS;
+        // Only a caret at the end with a structural successor merges;
+        // otherwise let the textarea delete forward.
+        const n = ctx.node;
+        if (!n || ctx.pos < n.text.length) return PASS;
+        if (!hasStructuralSuccessor(ctx.state.document.model, n.id)) return PASS;
+        return handled(dispatch({ type: "deleteAtEnd", pos: ctx.pos }, "delete"));
       },
     },
     {
@@ -676,17 +598,11 @@ export function buildKeymap(
       run: (ctx) => {
         // Move between lines inside a multi-line node; cross to the previous
         // node only from the first line.
-        const newPos = deps.verticalMove(ctx.state.view.editingText, ctx.pos, -1);
-        if (newPos !== null) {
-          deps.dispatch({
-            type: "setSelection",
-            cursorPos: newPos,
-            selectionEnd: newPos,
-          });
-        } else {
-          deps.dispatch({ type: "moveUp" });
-        }
-        return "handled";
+        const newPos = verticalMove(ctx.state.view.editingText, ctx.pos, -1);
+        if (newPos === null) return handled(dispatch({ type: "moveUp" }));
+        return handled(
+          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos })
+        );
       },
     },
     {
@@ -696,17 +612,11 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "ArrowDown" && !e.altKey,
       run: (ctx) => {
-        const newPos = deps.verticalMove(ctx.state.view.editingText, ctx.pos, 1);
-        if (newPos !== null) {
-          deps.dispatch({
-            type: "setSelection",
-            cursorPos: newPos,
-            selectionEnd: newPos,
-          });
-        } else {
-          deps.dispatch({ type: "moveDown" });
-        }
-        return "handled";
+        const newPos = verticalMove(ctx.state.view.editingText, ctx.pos, 1);
+        if (newPos === null) return handled(dispatch({ type: "moveDown" }));
+        return handled(
+          dispatch({ type: "setSelection", cursorPos: newPos, selectionEnd: newPos })
+        );
       },
     },
     {
@@ -716,8 +626,7 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "ArrowLeft" && mod(e) && e.shiftKey,
       run: (ctx) => {
-        deps.dispatch({ type: "cmdShiftLeft", pos: ctx.pos, selEnd: ctx.selEnd });
-        return "handled";
+        return handled(dispatch({ type: "cmdShiftLeft", pos: ctx.pos, selEnd: ctx.selEnd }));
       },
     },
     {
@@ -727,8 +636,7 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "ArrowLeft" && mod(e),
       run: (ctx) => {
-        deps.dispatch({ type: "cmdLeft", pos: ctx.pos });
-        return "handled";
+        return handled(dispatch({ type: "cmdLeft", pos: ctx.pos }));
       },
     },
     {
@@ -737,7 +645,7 @@ export function buildKeymap(
       keys: "Shift + ←",
       when: "editing",
       match: (e) => e.key === "ArrowLeft" && e.shiftKey,
-      run: () => "pass", // native selection extension
+      run: () => PASS, // native selection extension
     },
     {
       id: "edit-left",
@@ -747,10 +655,9 @@ export function buildKeymap(
       match: (e) => e.key === "ArrowLeft" && !e.altKey,
       run: (ctx) => {
         if (ctx.pos === 0 && ctx.pos === ctx.selEnd) {
-          deps.dispatch({ type: "arrowLeftEdge" });
-          return "handled";
+          return handled(dispatch({ type: "arrowLeftEdge" }));
         }
-        return "pass";
+        return PASS;
       },
     },
     {
@@ -760,8 +667,7 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "ArrowRight" && mod(e) && e.shiftKey,
       run: (ctx) => {
-        deps.dispatch({ type: "cmdShiftRight", pos: ctx.pos, selEnd: ctx.selEnd });
-        return "handled";
+        return handled(dispatch({ type: "cmdShiftRight", pos: ctx.pos, selEnd: ctx.selEnd }));
       },
     },
     {
@@ -771,8 +677,7 @@ export function buildKeymap(
       when: "editing",
       match: (e) => e.key === "ArrowRight" && mod(e),
       run: (ctx) => {
-        deps.dispatch({ type: "cmdRight", pos: ctx.pos });
-        return "handled";
+        return handled(dispatch({ type: "cmdRight", pos: ctx.pos }));
       },
     },
     {
@@ -781,7 +686,7 @@ export function buildKeymap(
       keys: "Shift + →",
       when: "editing",
       match: (e) => e.key === "ArrowRight" && e.shiftKey,
-      run: () => "pass", // native selection extension
+      run: () => PASS, // native selection extension
     },
     {
       id: "edit-right",
@@ -792,10 +697,9 @@ export function buildKeymap(
       run: (ctx) => {
         const n = ctx.node;
         if (n && ctx.pos >= n.text.length && ctx.pos === ctx.selEnd) {
-          deps.dispatch({ type: "arrowRightEdge" });
-          return "handled";
+          return handled(dispatch({ type: "arrowRightEdge" }));
         }
-        return "pass";
+        return PASS;
       },
     },
     ...(prefs.selectionMode ? [editEscape] : []),
@@ -803,16 +707,16 @@ export function buildKeymap(
 }
 
 /**
- * Dispatch a key event against the keymap. Finds the first binding whose scope
- * matches the current mode and whose `match` accepts the event, runs it, and
- * calls preventDefault for "handled" results. No match → the event is left to
- * native handling.
+ * Resolve a key event against the keymap: the first binding whose scope
+ * matches the current mode and whose `match` accepts the event decides. Pure
+ * — returns what should happen; the caller prevents the default for
+ * "handled" and interprets the effects. No match → {@link PASS}.
  */
 export function runKeymap(
   bindings: KeyBinding[],
   ctx: KeyContext,
   prefs: EditorPreferences = DEFAULT_PREFERENCES
-): void {
+): KeyOutcome {
   // With selection mode disabled the editor never leaves edit mode, but
   // view.editing can still momentarily be false (initial load, canvas paste
   // landing, markdown-panel handoff). Force the editing scope so keys never
@@ -828,10 +732,9 @@ export function runKeymap(
       if (b.when !== "both" && b.when !== mode) continue;
       if (!b.match(ctx.e)) continue;
     }
-    const result = b.run(ctx);
-    if (result === "handled") ctx.e.preventDefault();
-    return;
+    return b.run(ctx);
   }
+  return PASS;
 }
 
 // Resolve the active node without re-reading refs in the component.

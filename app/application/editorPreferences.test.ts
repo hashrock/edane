@@ -1,21 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { EditorPreferences } from "./editorPreferences";
-import type { KeyValueStorage } from "./browserStorage";
+import { memoryStorage } from "./browserStorage";
 import {
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
   loadPreferences,
   savePreferences,
 } from "./editorPreferences";
-
-function memoryStorage(): KeyValueStorage {
-  const store = new Map<string, string>();
-  return {
-    getItem: (k) => store.get(k) ?? null,
-    setItem: (k, v) => void store.set(k, v),
-    removeItem: (k) => void store.delete(k),
-  };
-}
 
 describe("loadPreferences", () => {
   it("returns the defaults when nothing is stored", () => {
@@ -100,5 +91,19 @@ describe("loadPreferences", () => {
       );
       expect(loadPreferences(storage).arrowBehavior).toBe(arrowBehavior);
     }
+  });
+});
+
+describe("loadPreferences against prototype names", () => {
+  // `"toString" in SET` is true via Object.prototype, which let a hand-edited
+  // entry smuggle "toString" in as a behaviour value (found by the property
+  // test). Membership must be own-property only.
+  it("falls back to the default for inherited property names", () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      PREFERENCES_KEY,
+      JSON.stringify({ tabBehavior: "toString", enterBehavior: "constructor", arrowBehavior: "__proto__" })
+    );
+    expect(loadPreferences(storage)).toEqual(DEFAULT_PREFERENCES);
   });
 });

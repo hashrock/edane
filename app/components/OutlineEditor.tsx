@@ -7,9 +7,9 @@ import {
   useLayoutEffect,
 } from "react";
 import { Link, router } from "@inertiajs/react";
-import { findNode, cloneWithNewIds, firstNavigableId } from "../domain/model";
+import { findNode } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
-import { textToModel } from "../application/persistence";
+import { pasteCommand } from "../application/editorCommands";
 import { outlineRows, verticalMoveInText } from "../application/outline";
 import { supportsCheckbox } from "../application/nodeUtils";
 import {
@@ -18,6 +18,7 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
+import { applyKeyEffects, type KeyEffectDeps } from "./applyKeyEffects";
 import {
   handleAuxInputKeys,
   isAuxInputSurface,
@@ -138,25 +139,23 @@ export default function OutlineEditor({
   } | null>(null);
 
   // --- Keymap (shared with the canvas view) ---
+  // The mobile layout has no settings dialog, so it runs on the defaults;
+  // "outline" keeps ↑/↓ walking the flat order drawn as one column (the
+  // canvas moves between siblings instead).
   const keymap = useMemo<KeyBinding[]>(
-    () =>
-      buildKeymap(
-        {
-          dispatch,
-          saveNote: (m) => saveNote(m),
-          // No command palette / help overlay on the mobile layout.
-          openPalette: () => {},
-          openHelp: () => {},
-          undo,
-          redo,
-          verticalMove: verticalMoveInText,
-        },
-        // The mobile layout has no settings dialog, so it runs on the defaults;
-        // "outline" keeps ↑/↓ walking the flat order drawn as one column (the
-        // canvas moves between siblings instead).
-        DEFAULT_PREFERENCES,
-        "outline"
-      ),
+    () => buildKeymap(DEFAULT_PREFERENCES, "outline", verticalMoveInText),
+    []
+  );
+  const keyDeps = useMemo<KeyEffectDeps>(
+    () => ({
+      dispatch,
+      saveNote: (m) => saveNote(m),
+      // No command palette / help overlay on the mobile layout.
+      openPalette: () => {},
+      openHelp: () => {},
+      undo,
+      redo,
+    }),
     [dispatch, saveNote, undo, redo]
   );
 
@@ -164,15 +163,17 @@ export default function OutlineEditor({
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isComposing) return;
       const st = stateRef.current;
-      runKeymap(keymap, {
+      const outcome = runKeymap(keymap, {
         e,
         state: st,
         node: activeNode(st),
         pos: inputRef.current?.selectionStart || 0,
         selEnd: inputRef.current?.selectionEnd || 0,
       });
+      if (outcome.result === "handled") e.preventDefault();
+      applyKeyEffects(outcome.effects, st, keyDeps);
     },
-    [isComposing, keymap, stateRef]
+    [isComposing, keymap, keyDeps, stateRef]
   );
 
   // Paste of multi-line (indented) text becomes fresh nodes; single-line text
@@ -182,18 +183,13 @@ export default function OutlineEditor({
       const text = e.clipboardData.getData("text");
       if (!text || !text.includes("\n")) return;
       e.preventDefault();
-      const cur = stateRef.current;
-      const targetId =
-        cur.view.activeNodeId || firstNavigableId(cur.document.model);
-      const fresh = textToModel("_", text).children.map(cloneWithNewIds);
-      if (fresh.length === 0) return;
-      const next = dispatch(
-        { type: "insertNodes", targetId, nodes: fresh },
-        "paste"
-      );
-      if (noteId) saveNote(next.document.model);
+      const st = stateRef.current;
+      // Same effects as the canvas (application/editorCommands.ts): insert,
+      // then leave edit mode so the next keystroke is its own undo entry.
+      const effects = pasteCommand(st, { kind: "text", text });
+      if (effects) applyKeyEffects(effects, st, keyDeps);
     },
-    [dispatch, noteId, saveNote, stateRef]
+    [keyDeps, stateRef]
   );
 
   // --- Row activation ---

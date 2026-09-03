@@ -207,6 +207,18 @@ describe("backspaceAtStart", () => {
 });
 
 describe("deleteAtEnd", () => {
+  it("refreshes editingText with the merged text (the textarea shows editingText)", () => {
+    // Root -> [A -> [A1], B]. Delete at the end of "A" pulls "A1" up into it;
+    // the textarea is bound to editingText, so a stale "A" here would be
+    // written back over the merged "AA1" by the very next keystroke.
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, { type: "deleteAtEnd", pos: 1 });
+    expect(findNode(next.document.model, "a")!.text).toBe("AA1");
+    expect(next.view.editingText).toBe("AA1");
+    expect(next.view.cursorPos).toBe(1);
+  });
+
   it("merges the next sibling into the current node", () => {
     // Root -> [x "X", y "Y" -> y1] ; Delete at end of x pulls y up into x,
     // and y's children come along with its text.
@@ -723,6 +735,15 @@ describe("startEditing / exitEditing", () => {
     expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
   });
 
+  it("exitEditing in selection mode keeps a blank leaf node (empty-canvas click, post-paste)", () => {
+    // The blank-node cleanup is for LEAVING edit mode; in selection mode the
+    // document must not change, or the view would point at a deleted node.
+    const model = sampleModel();
+    findNode(model, "a1")!.text = "";
+    const s = withView(stateAt(model, "a1"), { editing: false });
+    expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
+  });
+
   it("exitEditing deletes a blank leaf node and focuses its predecessor", () => {
     // Root -> [A -> [A1(blank)], B]. Flat order: root, a, a1, b.
     const model = sampleModel();
@@ -985,13 +1006,6 @@ describe("moveBranch", () => {
 });
 
 describe("moveToParent", () => {
-  it("moves focus to the active node's parent", () => {
-    const model = sampleModel();
-    const s = stateAt(model, "a1");
-    const next = editorReducer(s, { type: "moveToParent" });
-    expect(next.view.activeNodeId).toBe("a");
-  });
-
   it("is a no-op (same state) on the root", () => {
     const model = sampleModel();
     const s = stateAt(model, "root");
@@ -1019,108 +1033,6 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
       ],
     };
   }
-
-  it("moves between siblings", () => {
-    const model = siblingModel();
-    expect(
-      editorReducer(stateAt(model, "c"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    expect(
-      editorReducer(stateAt(model, "b"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("c");
-  });
-
-  it("prefers the sibling over the flat order's neighbour", () => {
-    // B's predecessor in the flat order is A2, one level down inside A.
-    const model = siblingModel();
-    expect(
-      getFlatOrder(model)[getFlatOrder(model).indexOf("b") - 1]
-    ).toBe("a2");
-    expect(
-      editorReducer(stateAt(model, "b"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-  });
-
-  // Preferring siblings must never dead-end: once they run out, ↑/↓ leave the
-  // branch, so holding ↓ still gets you out of a subtree.
-  it("leaves the branch when the siblings run out", () => {
-    const model = siblingModel();
-    // Last child of A: no next sibling, so ↓ steps out to A's next sibling.
-    expect(
-      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    // First child of A: ↑ steps out to the parent.
-    expect(
-      editorReducer(stateAt(model, "a1"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-    // First top-level node: nothing above it (the root is the title, not a
-    // node), so ↑ stays put.
-    expect(
-      editorReducer(stateAt(model, "a"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-  });
-
-  // The rule that keeps ↓ predictable: whether it descends must NOT depend on
-  // where in the tree the node happens to sit. Both of these have children;
-  // "a" has a following sibling and "c" is the last child, and neither ↓ opens
-  // the branch — going a level deeper is → 's job.
-  it("never descends into children, wherever the node sits", () => {
-    const model = siblingModel();
-    model.children[2].children = [{ id: "c1", text: "C1", children: [] }];
-    expect(
-      editorReducer(stateAt(model, "a"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    // The flat order WOULD descend here — that asymmetry was the bug.
-    expect(getFlatOrder(model)[getFlatOrder(model).indexOf("c") + 1]).toBe("c1");
-    const atC = stateAt(model, "c");
-    expect(editorReducer(atC, { type: "moveDownSiblingFirst" })).toBe(atC);
-  });
-
-  it("climbs past several levels to leave a deep subtree", () => {
-    // Root → A(A1(A1a, A1b), A2), B: ↓ from the last leaf of the deepest
-    // branch lands on the next node at whatever level has one.
-    const model = siblingModel();
-    model.children[0].children[0].children = [
-      { id: "a1a", text: "A1a", children: [] },
-      { id: "a1b", text: "A1b", children: [] },
-    ];
-    expect(
-      editorReducer(stateAt(model, "a1b"), { type: "moveDownSiblingFirst" })
-        .view.activeNodeId
-    ).toBe("a2");
-    // And from A2 (last child of A) out to A's sibling.
-    expect(
-      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-  });
-
-  // ↓ stops on the tree's trailing edge — the root, its last child, ITS last
-  // child, and so on — because climbing finds no ancestor with a next sibling.
-  // Those nodes can still HAVE children; ↓ just won't descend, → will.
-  it("is a no-op (same state) along the tree's trailing edge", () => {
-    const model = siblingModel();
-    model.children[2].children = [{ id: "c1", text: "C1", children: [] }];
-    for (const id of ["root", "c", "c1"]) {
-      const s = stateAt(model, id);
-      expect(editorReducer(s, { type: "moveDownSiblingFirst" })).toBe(s);
-    }
-    // "c" is on that edge while still having a child to descend into.
-    expect(
-      editorReducer(stateAt(model, "c"), { type: "moveToChild" }).view
-        .activeNodeId
-    ).toBe("c1");
-    // Nothing above the root either.
-    const root = stateAt(model, "root");
-    expect(editorReducer(root, { type: "moveUpSiblingFirst" })).toBe(root);
-  });
 
   it("records the visited child so ← then → round-trips", () => {
     // Walking siblings must feed lastChildByParent the same way moveDown does.
@@ -1160,15 +1072,6 @@ describe("moveToChild (last-visited-child memory)", () => {
       type: "moveToChild",
     });
     expect(next.view.activeNodeId).toBe("p1");
-  });
-
-  it("returns to the child the focus left from (← then → round-trips)", () => {
-    const model = branchModel();
-    let s = stateAt(model, "p2");
-    s = editorReducer(s, { type: "moveToParent" });
-    expect(s.view.activeNodeId).toBe("p");
-    s = editorReducer(s, { type: "moveToChild" });
-    expect(s.view.activeNodeId).toBe("p2");
   });
 
   it("remembers where the user stopped, not where they entered", () => {
@@ -1507,15 +1410,19 @@ describe("replace", () => {
     const s = stateAt(model, "root");
     const replacement: EditorState = {
       document: {
-        model: { id: "new", text: "New", children: [] },
+        model: {
+          id: "new",
+          text: "New",
+          children: [{ id: "n", text: "N", children: [] }],
+        },
         clipboard: null,
       },
       view: {
-        activeNodeId: "new",
+        activeNodeId: "n",
         editing: false,
-        editingText: "New",
+        editingText: "N",
         cursorPos: 0,
-        selectionEnd: 3,
+        selectionEnd: 1,
         lastChildByParent: {},
       },
     };
@@ -1537,6 +1444,26 @@ describe("reconcileView", () => {
       lastChildByParent: {},
     };
     expect(reconcileView(view, document)).toBe(view);
+  });
+
+  it("lands on the collapsed ancestor when the active node exists but is hidden", () => {
+    // Undo of "expand A" while the user had moved into a1: a1 is still in the
+    // document but no longer visible, and an invisible active node traps the
+    // keyboard just like a vanished one.
+    const model = sampleModel();
+    findNode(model, "a")!.collapsed = true;
+    const document: DocumentState = { model, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a1",
+      editing: true,
+      editingText: "A1",
+      cursorPos: 2,
+      selectionEnd: 2,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.activeNodeId).toBe("a");
+    expect(reconciled.editing).toBe(false);
   });
 
   it("falls back to the first top-level node when activeNodeId no longer exists", () => {

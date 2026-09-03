@@ -2,6 +2,7 @@
  * Domain layer: pure tree model and operations.
  * No framework or rendering dependencies.
  */
+import { isKeyOf } from "./isKeyOf";
 
 /**
  * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
@@ -29,7 +30,7 @@ const STORED_NODE_TYPE_SET = {
 } as const satisfies Record<StoredNodeType, true>;
 
 export function isStoredNodeType(value: unknown): value is StoredNodeType {
-  return typeof value === "string" && value in STORED_NODE_TYPE_SET;
+  return isKeyOf(STORED_NODE_TYPE_SET, value);
 }
 
 /**
@@ -39,6 +40,9 @@ export function isStoredNodeType(value: unknown): value is StoredNodeType {
  * automatically when a `NodeType` member is added, renamed, or removed.
  */
 export const STORED_NODE_TYPES = Object.keys(STORED_NODE_TYPE_SET) as StoredNodeType[];
+
+/** Every `NodeType`, the default first. */
+export const NODE_TYPES: NodeType[] = ["text", ...STORED_NODE_TYPES];
 
 /** Tree node model (stored as JSON) */
 export interface MindMapModel {
@@ -84,6 +88,12 @@ export interface NodePosition {
 }
 
 // --- ID generation ---
+
+/**
+ * Supplier of fresh node ids. Production code uses {@link generateId}; tests
+ * pass a deterministic one so outputs can be compared exactly.
+ */
+export type IdSource = () => string;
 
 export function generateId(): string {
   return crypto.randomUUID();
@@ -187,9 +197,12 @@ export function firstNavigableId(model: MindMapModel): string {
  * nothing to select and no way to start typing. Returns the model unchanged
  * when it already has one, otherwise a copy with a blank top-level node.
  */
-export function ensureTopLevelNode(model: MindMapModel): MindMapModel {
+export function ensureTopLevelNode(
+  model: MindMapModel,
+  nextId: IdSource = generateId
+): MindMapModel {
   if (model.children.length > 0) return model;
-  return { ...model, children: [{ id: generateId(), text: "", children: [] }] };
+  return { ...model, children: [{ id: nextId(), text: "", children: [] }] };
 }
 
 /**
@@ -234,6 +247,36 @@ export function updateNodeText(
   return cloned;
 }
 
+/**
+ * Attach `node` under `parent` at `index` (default: last), IN PLACE on an
+ * already-cloned tree. The one place the two rules of nesting live:
+ *  - the destination is expanded (unless it is the invisible root): content
+ *    must never be created or moved into a hidden slot, or the focus would
+ *    land on a node nobody can see (see visibleChildrenOf);
+ *  - the node's canvas `position` (which only a top-level tree has) is
+ *    dropped, so a stale one can't resurface when it is later dedented back
+ *    to the top level.
+ * Every path that nests a node — creation, split, indent, paste, drag & drop
+ * — goes through this, so a new path can't forget either rule.
+ */
+export function nestUnder(
+  parent: MindMapModel,
+  node: MindMapModel,
+  index: number = parent.children.length,
+  rootId?: string
+): void {
+  if (parent.id !== rootId) {
+    parent.collapsed = false;
+    delete node.position;
+  }
+  parent.children.splice(index, 0, node);
+}
+
+/** All ids of a subtree, the node itself first (DFS, collapse ignored). */
+export function subtreeIds(node: MindMapModel): string[] {
+  return [node.id, ...node.children.flatMap(subtreeIds)];
+}
+
 export function addSiblingAfter(
   model: MindMapModel,
   afterId: string,
@@ -243,13 +286,12 @@ export function addSiblingAfter(
   // The root and the tree roots take the new node as a child instead (see
   // isTopLevel): siblings of a tree root would be new trees.
   if (cloned.id === afterId || isTopLevel(cloned, afterId)) {
-    const target = findNode(cloned, afterId)!;
-    target.children.push(newNode);
+    nestUnder(findNode(cloned, afterId)!, { ...newNode }, undefined, cloned.id);
     return cloned;
   }
   const result = findParentAndIndex(cloned, afterId);
   if (!result) return cloned;
-  result.parent.children.splice(result.index + 1, 0, newNode);
+  nestUnder(result.parent, { ...newNode }, result.index + 1, cloned.id);
   return cloned;
 }
 
@@ -363,7 +405,9 @@ export function addChildToNode(
   const cloned = cloneModel(model);
   const parent = findNode(cloned, parentId);
   if (!parent) return cloned;
-  parent.children.push(newNode);
+  // Under the root it becomes a tree (keeps its position); anywhere else it
+  // is nested (see nestUnder).
+  nestUnder(parent, { ...newNode }, undefined, cloned.id);
   return cloned;
 }
 
@@ -403,11 +447,15 @@ export function detachBranch(
  * formatting are preserved. Used when pasting a branch so the copy never shares
  * ids with the source.
  */
-export function cloneWithNewIds(node: MindMapModel): MindMapModel {
+export function cloneWithNewIds(
+  node: MindMapModel,
+  nextId: IdSource = generateId
+): MindMapModel {
+  const id = nextId(); // parent-first, DFS
   return {
     ...cloneModel(node),
-    id: generateId(),
-    children: node.children.map(cloneWithNewIds),
+    id,
+    children: node.children.map((c) => cloneWithNewIds(c, nextId)),
   };
 }
 
@@ -455,8 +503,7 @@ export function indentNode(
   const node = result.parent.children[result.index];
   const prevSibling = result.parent.children[result.index - 1];
   result.parent.children.splice(result.index, 1);
-  prevSibling.collapsed = false;
-  prevSibling.children.push(node);
+  nestUnder(prevSibling, node);
   return cloned;
 }
 
@@ -548,15 +595,13 @@ export function moveBranch(
   const { parent, index: removedIndex } = findParentAndIndex(cloned, nodeId)!;
   const [moved] = parent.children.splice(removedIndex, 1);
   const target = findNode(cloned, newParentId)!;
-  // A tree's free canvas position only applies while it is top-level.
-  if (target.id !== cloned.id) delete moved.position;
   if (index === undefined) {
-    target.children.push(moved);
+    nestUnder(target, moved, undefined, cloned.id);
   } else {
     // Same-parent move: the removal shifted later slots down by one.
     const shift = parent.id === newParentId && removedIndex < index ? 1 : 0;
     const at = Math.max(0, Math.min(index - shift, target.children.length));
-    target.children.splice(at, 0, moved);
+    nestUnder(target, moved, at, cloned.id);
   }
   return cloned;
 }
@@ -627,7 +672,7 @@ export function mergeSuccessorInto(
   nodeId: string
 ): MindMapModel {
   const node = findNode(model, nodeId);
-  if (!node) return model;
+  if (!node || !hasStructuralSuccessor(model, nodeId)) return model;
 
   if (!node.collapsed && node.children.length > 0) {
     const cloned = cloneModel(model);
@@ -653,13 +698,27 @@ export function mergeSuccessorInto(
   return model;
 }
 
+/**
+ * Does Delete at the end of this node have something to pull up — a first
+ * visible child or a next sibling (see {@link mergeSuccessorInto})? Cheap
+ * (no clone), so the keymap can ask before deciding to handle the key.
+ */
+export function hasStructuralSuccessor(model: MindMapModel, nodeId: string): boolean {
+  const node = findNode(model, nodeId);
+  if (!node) return false;
+  if (!node.collapsed && node.children.length > 0) return true;
+  const info = findParentAndIndex(model, nodeId);
+  return !!info && info.index < info.parent.children.length - 1;
+}
+
 /** Split a node at cursor position */
 export function splitNode(
   model: MindMapModel,
   nodeId: string,
-  atPos: number
+  atPos: number,
+  nextId: IdSource = generateId
 ): { model: MindMapModel; newNodeId: string } {
-  const newNodeId = generateId();
+  const newNodeId = nextId();
   const cloned = cloneModel(model);
   const node = findNode(cloned, nodeId);
   // Fall back to root id (always exists) so the postcondition holds:
@@ -675,7 +734,7 @@ export function splitNode(
     if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
       // Root / tree root: no sibling (that would be a new tree); prepend an
       // empty child instead.
-      node.children.unshift(newNode);
+      nestUnder(node, newNode, 0, cloned.id);
     } else {
       const result = findParentAndIndex(cloned, nodeId);
       if (result) result.parent.children.splice(result.index, 0, newNode);
@@ -689,7 +748,7 @@ export function splitNode(
   const newNode: MindMapModel = { id: newNodeId, text: textAfter, children: [] };
 
   if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
-    node.children.unshift(newNode);
+    nestUnder(node, newNode, 0, cloned.id);
   } else {
     const result = findParentAndIndex(cloned, nodeId);
     if (result) {

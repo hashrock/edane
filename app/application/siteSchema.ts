@@ -18,6 +18,7 @@
  * 読む 2 つのサイトも作れる。
  */
 import { STORED_NODE_TYPES, type NodeType } from "../domain/model";
+import { isKeyOf } from "../domain/isKeyOf";
 import type { SiteNode } from "./siteNode";
 
 export interface SchemaField {
@@ -51,7 +52,7 @@ export function parseSchema(text: string): { ok: true; schema: SiteSchema } | { 
       return { ok: false, error: `"${key}" は予約されています` };
     }
     if (seen.has(key)) return { ok: false, error: `キーが重複: "${key}"` };
-    if (type && !(type in FIELD_TYPES)) {
+    if (type && !isKeyOf(FIELD_TYPES, type)) {
       return { ok: false, error: `不明な種別: "${type}"（text / image / link / markdown）` };
     }
     seen.add(key);

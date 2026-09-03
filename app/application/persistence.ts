@@ -8,13 +8,18 @@ import {
   ensureTopLevelNode,
   generateId,
   isStoredNodeType,
+  type IdSource,
 } from "../domain/model";
 import { t } from "./i18n";
 
 /** Convert indented plain text (legacy format) to MindMapModel */
-export function textToModel(title: string, content: string): MindMapModel {
+export function textToModel(
+  title: string,
+  content: string,
+  nextId: IdSource = generateId
+): MindMapModel {
   const root: MindMapModel = {
-    id: generateId(),
+    id: nextId(),
     text: title,
     children: [],
   };
@@ -31,7 +36,7 @@ export function textToModel(title: string, content: string): MindMapModel {
     const depth = line.search(/\S/);
     const text = line.trim();
     const newNode: MindMapModel = {
-      id: generateId(),
+      id: nextId(),
       text,
       children: [],
     };
@@ -71,14 +76,15 @@ export function textToModel(title: string, content: string): MindMapModel {
  */
 export function normalizeTree(
   value: unknown,
-  seen: Set<string>
+  seen: Set<string>,
+  nextId: IdSource = generateId
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   if (typeof v.text !== "string" || !Array.isArray(v.children)) return null;
 
   let id = typeof v.id === "string" ? v.id : "";
-  if (id === "" || seen.has(id)) id = generateId();
+  if (id === "" || seen.has(id)) id = nextId();
   seen.add(id);
 
   const node: MindMapModel = { id, text: v.text, children: [] };
@@ -102,7 +108,7 @@ export function normalizeTree(
   }
 
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen);
+    const normalized = normalizeTree(child, seen, nextId);
     if (normalized) node.children.push(normalized);
   }
   return node;
@@ -115,23 +121,27 @@ export function normalizeTree(
  */
 export function parseContent(
   content: string | undefined,
-  title: string | undefined
+  title: string | undefined,
+  nextId: IdSource = generateId
 ): MindMapModel {
   if (!content) {
-    return createDefaultModel(title);
+    return createDefaultModel(title, nextId);
   }
 
   try {
     const parsed = JSON.parse(content);
     // Validate the *whole* tree and repair duplicate/malformed ids, rather than
     // trusting a shallow shape check on the root alone.
-    const normalized = normalizeTree(parsed, new Set());
-    if (normalized) return ensureTopLevelNode(normalized);
+    const normalized = normalizeTree(parsed, new Set(), nextId);
+    if (normalized) return ensureTopLevelNode(normalized, nextId);
   } catch {
     // Not JSON, try legacy format
   }
 
-  return ensureTopLevelNode(textToModel(title || "Mindmap", content));
+  return ensureTopLevelNode(
+    textToModel(title || "Mindmap", content, nextId),
+    nextId
+  );
 }
 
 /** Convert MindMapModel to indented plain text */
@@ -158,22 +168,25 @@ export function defaultNoteTitle(now: Date = new Date()): string {
 }
 
 /** Default note: one tree root with two children (the root is the title). */
-export function createDefaultModel(title?: string): MindMapModel {
+export function createDefaultModel(
+  title?: string,
+  nextId: IdSource = generateId
+): MindMapModel {
   return {
-    id: generateId(),
+    id: nextId(),
     text: title || defaultNoteTitle(),
     children: [
       {
-        id: generateId(),
+        id: nextId(),
         text: t("sampleUsage"),
         children: [
           {
-            id: generateId(),
+            id: nextId(),
             text: t("sampleClickToEdit"),
             children: [],
           },
           {
-            id: generateId(),
+            id: nextId(),
             text: t("sampleEnter"),
             children: [],
           },

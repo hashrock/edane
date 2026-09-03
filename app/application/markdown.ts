@@ -11,7 +11,7 @@
  */
 
 import type { MindMapModel, NodeType } from "../domain/model";
-import { generateId } from "../domain/model";
+import { generateId, type IdSource } from "../domain/model";
 import { assertNever } from "../lib/assertNever";
 import { t } from "./i18n";
 
@@ -67,8 +67,11 @@ function stripInline(s: string): string {
  *  - fenced code blocks — collapsed into a single verbatim node.
  * Blank lines, horizontal rules and code fences themselves are dropped.
  */
-export function markdownToModel(md: string): MindMapModel {
-  const root: MindMapModel = { id: generateId(), text: "", children: [] };
+export function markdownToModel(
+  md: string,
+  nextId: IdSource = generateId
+): MindMapModel {
+  const root: MindMapModel = { id: nextId(), text: "", children: [] };
   const stack: { node: MindMapModel; depth: number }[] = [
     { node: root, depth: -1 },
   ];
@@ -78,7 +81,7 @@ export function markdownToModel(md: string): MindMapModel {
   let contentDepth = 0;
 
   const push = (depth: number, text: string, checked?: boolean) => {
-    const node: MindMapModel = { id: generateId(), text, children: [] };
+    const node: MindMapModel = { id: nextId(), text, children: [] };
     if (checked !== undefined) node.checked = checked;
     while (stack.length > 1 && stack[stack.length - 1].depth >= depth) {
       stack.pop();
