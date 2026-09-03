@@ -83,6 +83,41 @@ function bucketOf(file: string): string {
   return LAYER_DIRS.has(first) ? first : "root";
 }
 
+// Every shape an import specifier can take: named (`from "..."`), dynamic
+// (`import("...")`), and side-effect-only (`import "..."`, no `from` — e.g.
+// a CSS or polyfill import pulled in only for its effects). A specifier
+// missed here is invisible to both checks below — the same kind of blind
+// spot the UI-framework check documents for bare specifiers, but at the
+// extraction step instead of the resolution step. Shared by both checks so
+// a new shape only needs one edit.
+const IMPORT_SPEC_PATTERNS = [
+  /from\s+["']([^"']+)["']/g,
+  /import\(\s*["']([^"']+)["']\s*\)/g,
+  /^\s*import\s+["']([^"']+)["']/gm,
+];
+
+function importSpecs(content: string): string[] {
+  return IMPORT_SPEC_PATTERNS.flatMap((re) => [...content.matchAll(re)].map((m) => m[1]));
+}
+
+describe("importSpecs", () => {
+  it("extracts from-imports, dynamic imports, and side-effect-only imports alike", () => {
+    const content = [
+      `import { a } from "./a";`,
+      `import type { B } from "./b";`,
+      `export { c } from "./c";`,
+      `const d = await import("./d");`,
+      `import "./e";`,
+    ].join("\n");
+
+    expect(importSpecs(content)).toEqual(["./a", "./b", "./c", "./d", "./e"]);
+  });
+
+  it("does not double-count a named import as a side-effect import", () => {
+    expect(importSpecs(`import { a } from "./a";`)).toEqual(["./a"]);
+  });
+});
+
 describe("dependency direction", () => {
   it("only imports across the domain -> lib -> application -> components -> pages layering", () => {
     const violations: string[] = [];
@@ -93,10 +128,7 @@ describe("dependency direction", () => {
       if (!rule) continue; // composition-root files may import anything
 
       const content = readFileSync(file, "utf-8");
-      const specs = [
-        ...content.matchAll(/from\s+["'](\.[^"']+)["']/g),
-        ...content.matchAll(/import\(\s*["'](\.[^"']+)["']\s*\)/g),
-      ].map((m) => m[1]);
+      const specs = importSpecs(content).filter((s) => s.startsWith("."));
 
       for (const spec of specs) {
         const target = resolveImport(file, spec);
@@ -122,10 +154,7 @@ describe("dependency direction", () => {
       if (!NO_UI_FRAMEWORK_LAYERS.has(fromBucket)) continue;
 
       const content = readFileSync(file, "utf-8");
-      const specs = [
-        ...content.matchAll(/from\s+["']([^"']+)["']/g),
-        ...content.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g),
-      ].map((m) => m[1]);
+      const specs = importSpecs(content);
 
       for (const spec of specs) {
         if (spec.startsWith(".")) continue; // resolved & checked above
