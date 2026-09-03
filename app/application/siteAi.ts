@@ -3,7 +3,7 @@
  * ためのプロンプト組み立てと応答の後処理。モデル呼び出し自体はサーバー
  * （server.ts の /api/sites/:pubId/suggest）にあり、ここは純粋関数だけ。
  */
-import type { SiteNode } from "./siteTemplate";
+import type { SiteNode } from "./siteNode";
 import { defaultTemplate, formatSchema, parseSchema, inferSchema, shapeRecords, type SiteSchema, type SiteItem } from "./siteSchema";
 
 export const SITE_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";

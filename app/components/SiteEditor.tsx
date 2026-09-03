@@ -5,8 +5,8 @@ import {
   siteDataModule,
   siteUrl,
   type SiteBuild,
-  type SiteNode,
 } from "../application/siteTemplate";
+import type { SiteNode } from "../application/siteNode";
 import { parseSchema, inferSchema, formatSchema, shapeRecords, defaultTemplate } from "../application/siteSchema";
 import { effectiveSchema } from "../application/siteAi";
 import { t } from "../application/i18n";

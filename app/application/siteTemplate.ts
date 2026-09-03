@@ -9,29 +9,8 @@
  * を持ち込むのも重すぎるので、SSG と同じく**ビルド済み HTML を保存して配信**する。
  * ここには Worker とサーバーの両方が共有する、DOM 非依存の部分だけを置く。
  */
-import type { MindMapModel, NodeType } from "../domain/model";
 import { shapeRecords, type SiteSchema } from "./siteSchema";
-
-/**
- * テンプレートに渡すデータ。エディタ内部の MindMapModel をそのまま晒さず、
- * 「枝の形＋順序＋type」だけの薄い形にする（モデルを変えてもテンプレートが壊れない）。
- */
-export interface SiteNode {
-  id: string;
-  /** ノード種別。`text` 以外は `text` の中身が URL / Markdown 本文になる。 */
-  type: NodeType;
-  text: string;
-  children: SiteNode[];
-}
-
-export function toSiteNode(node: MindMapModel): SiteNode {
-  return {
-    id: node.id,
-    type: node.type ?? "text",
-    text: node.text,
-    children: node.children.map(toSiteNode),
-  };
-}
+import type { SiteNode } from "./siteNode";
 
 /** テンプレートが `import { data } from './data.js'` で読む仮想ファイル。 */
 export const SITE_DATA_FILE = "data.js";

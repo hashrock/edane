@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseSchema, formatSchema, inferSchema, shapeRecords, defaultTemplate } from "./siteSchema";
-import type { SiteNode } from "./siteTemplate";
+import type { SiteNode } from "./siteNode";
 
 const n = (id: string, text: string, type: SiteNode["type"] = "text", children: SiteNode[] = []): SiteNode => ({
   id, text, type, children,

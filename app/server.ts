@@ -25,7 +25,8 @@ import {
   publishedNodeJson,
   nodePathTexts,
 } from "./application/nodePublication";
-import { toSiteNode, renderSiteResponse, validateSiteSave } from "./application/siteTemplate";
+import { renderSiteResponse, validateSiteSave } from "./application/siteTemplate";
+import { toSiteNode } from "./application/siteNode";
 import { defaultTemplate } from "./application/siteSchema";
 import {
   SITE_AI_MODEL,
