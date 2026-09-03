@@ -84,6 +84,19 @@ export const EDIT_SURFACE = {
   },
 } as const satisfies Record<EditorLayout, Record<NodeType, EditSurface>>;
 
+/**
+ * Whether `type` edits itself through a dedicated aux-input (e.g. image/link's
+ * URL box) rather than the shared textarea or a modal panel, for the given
+ * layout. The sole reader of EDIT_SURFACE for this yes/no question, so a call
+ * site that only needs "does this node type edit in its own input" stays tied
+ * to the same table the keyboard-escape invariant is defined against, instead
+ * of re-listing the node types by hand and silently drifting from EDIT_SURFACE
+ * when a type's surface changes.
+ */
+export function isAuxInputSurface(layout: EditorLayout, type: NodeType): boolean {
+  return EDIT_SURFACE[layout][type].kind === "aux-input";
+}
+
 /** The key facts handleAuxInputKeys needs; both React's synthetic event and a
  *  native KeyboardEvent satisfy it. */
 export interface AuxKeyEvent {

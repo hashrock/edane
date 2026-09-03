@@ -106,7 +106,11 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
-import { handleAuxInputKeys, type EditorLayout } from "../application/editSurface";
+import {
+  handleAuxInputKeys,
+  isAuxInputSurface,
+  type EditorLayout,
+} from "../application/editSurface";
 import {
   loadPreferences,
   savePreferences,
@@ -434,7 +438,7 @@ export function MindmapEditorView({
   // view — instead of swapping the canvas node to raw-text editing.
   const activeModelNode = activeNodeId ? findNode(model, activeNodeId) : null;
   const activeIsCustom =
-    activeModelNode?.type === "image" || activeModelNode?.type === "link";
+    !!activeModelNode && isAuxInputSurface("canvas", activeModelNode.type ?? "text");
   const urlEditing = editing && !!activeNodeId && activeIsCustom;
 
   // --- UI-only state (not part of the editing document) ---
@@ -716,7 +720,7 @@ export function MindmapEditorView({
       const t = v.activeNodeId
         ? findNode(modelRef.current, v.activeNodeId)?.type
         : undefined;
-      if (v.editing && (t === "image" || t === "link")) {
+      if (v.editing && t !== undefined && isAuxInputSurface("canvas", t)) {
         urlInputRef.current?.focus();
       } else if (!mdPanelEditingRef.current) {
         // The markdown panel's textarea keeps the keyboard; pulling focus to
@@ -2412,7 +2416,7 @@ export function MindmapEditorView({
       // URL is edited in the visible box below the node — so only TEXT nodes
       // swap to raw-text (live buffer) editing on the canvas. Markdown edits as
       // raw multi-line text in place, so it is NOT a custom (URL-box) node.
-      const isCustom = node.type === "image" || node.type === "link";
+      const isCustom = isAuxInputSurface("canvas", node.type);
       const isTextEditing = isEditing && !isCustom;
       const asImage = node.type === "image";
       const asLink = node.type === "link";
@@ -3000,7 +3004,7 @@ export function MindmapEditorView({
     // image/link node keeps its caret in the visible URL box instead.
     const activeNode = nodes.find((n) => n.id === activeNodeId);
     const activeCustom =
-      activeNode?.type === "image" || activeNode?.type === "link";
+      !!activeNode && isAuxInputSurface("canvas", activeNode.type);
     if (editing && !activeCustom) {
       if (!activeNode) return;
 
