@@ -35,9 +35,12 @@
   - `keymap-textarea`: 共有textarea（keymap経由）。`app/application/editorKeymap.ts` の edit-up / edit-down / edit-left / edit-right が不変条件を保証する。追加作業なし。
   - `aux-input`: ノード専用のinput（URL欄など）。**onKeyDown で必ず `handleAuxInputKeys(e, dispatch)` を最初に呼ぶこと。** Enter/Escape=編集終了、修飾なし↑↓=ノード移動、修飾なし←→=端でノード移動（それ以外はネイティブのカーソル移動）を一括処理する。自前で Enter/Escape だけ処理するのは禁止（閉じ込めバグの典型パターン）。
   - `modal-panel`: サイドパネル編集（canvasのmarkdown）。パネルは開いてもキーボードを奪わず、エディタは選択モードに戻る。パネル内のEscapeで閉じる。テキストフィールドがキーボードを持たないので、← / → の不変条件はこの面だけ対象外（選択モードのバインドが効く）。
+- keymap は純粋（`buildKeymap(prefs, layout, verticalMove)` → `runKeymap` が `KeyEffect[]` を返すだけ）。副作用は `app/components/applyKeyEffects.ts` が実行する。複数手順の操作（貼り付け）は `app/application/editorCommands.ts` が同じ `KeyEffect[]`（dispatch 列 + flash + save）として返し、同じ `applyKeyEffects` が実行する。コンポーネントに dispatch の列を直書きしないこと（列がテストから見えなくなる）。
+- 不変条件の node での総当たりは `app/application/editorKeymap.property.test.ts`（任意の木 × キャレット位置 × 方向 × layout × arrowBehavior）。
 - 実挙動の検証は `app/components/keyboardEscape.browser.test.tsx`。NodeType × レイアウト × 方向を総当たりし、編集中に規定回数以内の矢印キーで隣ノードへ到達することをフォーカス位置に依存せず検証する。**`NodeType` を追加するとフィクスチャの `TARGETS` もコンパイルエラーになるので、必ずフィクスチャを追加する。** 実行: `pnpm vitest run --project browser app/components/keyboardEscape.browser.test.tsx`
 
 ### テスト
 
 - 単体・ロジック: `pnpm test`（node project）
+- プロパティベース（fast-check）: `*.property.test.ts`。`MindMapModel` の生成器は `app/domain/model.arb.ts`（ID一意・トップレベル≥1・`position` はトップレベルのみ、を構成で保証）。ドメイン操作の契約・reducer のフォーカス不変条件・シリアライズ往復・レイアウトの非重複はここで総当たりする。
 - ブラウザe2e: `pnpm test:e2e`（chromium; `*.browser.test.tsx`）

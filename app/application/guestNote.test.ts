@@ -1,15 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { KeyValueStorage } from "./browserStorage";
+import { memoryStorage } from "./browserStorage";
 import { PENDING_NOTE_KEY, stashPendingNote, takePendingNote } from "./guestNote";
-
-function memoryStorage(): KeyValueStorage {
-  const store = new Map<string, string>();
-  return {
-    getItem: (k) => store.get(k) ?? null,
-    setItem: (k, v) => void store.set(k, v),
-    removeItem: (k) => void store.delete(k),
-  };
-}
 
 describe("stashPendingNote / takePendingNote", () => {
   it("round-trips a stashed note", () => {

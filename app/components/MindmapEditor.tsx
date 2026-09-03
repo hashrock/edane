@@ -12,14 +12,13 @@ import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
-  findParentAndIndex,
   firstNavigableId,
   isTopLevel,
-  cloneWithNewIds,
-  generateId,
+  subtreeIds,
 } from "../domain/model";
-import { markdownToModel, modelToMarkdown } from "../application/markdown";
+import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
+import { pasteCommand, type PasteSource } from "../application/editorCommands";
 import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
@@ -91,7 +90,6 @@ import PublicityDropdown from "./PublicityDropdown";
 import {
   serializeModel,
   modelToText,
-  textToModel,
 } from "../application/persistence";
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
@@ -106,6 +104,7 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
+import { applyKeyEffects, type KeyEffectDeps } from "./applyKeyEffects";
 import {
   handleAuxInputKeys,
   isAuxInputSurface,
@@ -243,13 +242,7 @@ type MoveDragState = Extract<DragState, { mode: "move" }>;
 /** Number of descendants (incl. hidden ones) of a node in the model. */
 function countDescendants(model: MindMapModel, nodeId: string): number {
   const node = findNode(model, nodeId);
-  if (!node) return 0;
-  let count = -1;
-  (function walk(n: MindMapModel) {
-    count++;
-    for (const child of n.children) walk(child);
-  })(node);
-  return count;
+  return node ? subtreeIds(node).length - 1 : 0;
 }
 
 /** One shape a node painted, as {@link MindmapTestApi.getNodeRender} reports it. */
@@ -899,35 +892,21 @@ export function MindmapEditorView({
   }, []);
 
   // --- Clipboard ---
+  // Every node paste is the same effect list (insert → leave edit mode →
+  // flash → save); see application/editorCommands.ts for why it is a value.
+  const runPaste = useCallback(
+    (source: PasteSource, targetId?: string) => {
+      const st = stateRef.current;
+      const effects = pasteCommand(st, source, { targetId });
+      if (effects) applyKeyEffects(effects, st, { dispatch, saveNote, flashNodes });
+    },
+    [dispatch, saveNote, flashNodes]
+  );
+
   // Insert indented plain text as fresh nodes after the active node.
   const pasteTextAsNodes = useCallback(
-    (clipText: string) => {
-      if (!clipText.trim()) return;
-      const cur = stateRef.current;
-      const targetId =
-        cur.view.activeNodeId || firstNavigableId(cur.document.model);
-      const parsed = textToModel("_", clipText);
-      const freshChildren = parsed.children.map(cloneWithNewIds);
-      if (freshChildren.length === 0) return;
-      const next = dispatch(
-        { type: "insertNodes", targetId, nodes: freshChildren },
-        "paste"
-      );
-      // Land in selection mode on the pasted subtree rather than leaving the
-      // caret inside a pasted node: if the paste happened while editing, edit
-      // mode would otherwise persist (focusView keeps it), and the next
-      // keystroke would become a separate "text" undo entry — making the paste
-      // feel like it needs two Ctrl+Z to undo. View-only, so no undo entry.
-      dispatch({ type: "exitEditing" });
-      // Flash every inserted node so the paste destination is obvious.
-      const collectIds = (n: MindMapModel): string[] => [
-        n.id,
-        ...n.children.flatMap(collectIds),
-      ];
-      flashNodes(freshChildren.flatMap(collectIds));
-      if (noteId) saveNote(next.document.model);
-    },
-    [dispatch, noteId, saveNote, flashNodes]
+    (clipText: string) => runPaste({ kind: "text", text: clipText }),
+    [runPaste]
   );
 
   // Copy/cut/paste operate on whole branches via the internal clipboard while a
@@ -1020,16 +999,10 @@ export function MindmapEditorView({
       if (plan === "branch-json" || plan === "branch-clipboard") {
         // `node` present = the clipboard's own subtree; absent = the internal
         // branch clipboard (see the reducer's pasteBranch).
-        const next = dispatch(
-          {
-            type: "pasteBranch",
-            node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
-          },
-          "paste-branch"
-        );
-        flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
-        if (noteId && next.document.model !== st.document.model)
-          saveNote(next.document.model);
+        runPaste({
+          kind: "branch",
+          node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+        });
         return;
       }
 
@@ -1047,7 +1020,7 @@ export function MindmapEditorView({
       }
       return assertNever(plan);
     },
-    [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
+    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage]
   );
 
   // Resolve the Markdown paste dialog with one of the three strategies.
@@ -1057,35 +1030,12 @@ export function MindmapEditorView({
       if (!pending) return;
       const { text, targetId } = pending;
       setMdPaste(null);
-      const collectIds = (n: MindMapModel): string[] => [
-        n.id,
-        ...n.children.flatMap(collectIds),
-      ];
-      const insert = (children: MindMapModel[]) => {
-        const fresh = children.map(cloneWithNewIds);
-        if (fresh.length === 0) return;
-        const next = dispatch(
-          { type: "insertNodes", targetId, nodes: fresh },
-          "paste"
-        );
-        // Land in selection mode so a follow-up keystroke doesn't become a
-        // separate undo step (see pasteTextAsNodes). View-only, no undo entry.
-        dispatch({ type: "exitEditing" });
-        flashNodes(fresh.flatMap(collectIds));
-        if (noteId) saveNote(next.document.model);
-      };
-      if (mode === "decompose") {
-        insert(markdownToModel(text).children);
-      } else if (mode === "node") {
-        insert([
-          { id: generateId(), text: text.trim(), type: "markdown", children: [] },
-        ]);
-      } else {
-        insert(textToModel("_", text).children);
-      }
+      // The target was captured when the dialog opened: the paste must land
+      // where the user pasted, not wherever the selection is by now.
+      runPaste({ kind: "markdown", text, mode }, targetId);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
-    [mdPaste, dispatch, flashNodes, noteId, saveNote]
+    [mdPaste, runPaste]
   );
 
   // --- Link preview: fetch <title> + favicon for a link node's URL ---
@@ -1424,21 +1374,20 @@ export function MindmapEditorView({
   // shortcuts, so bindings stay auditable and the help overlay is generated
   // from the same source.
   const keymap = useMemo<KeyBinding[]>(
-    () =>
-      buildKeymap(
-        {
-          dispatch,
-          saveNote: (m) => saveNote(m),
-          openPalette: () => setCmdPaletteOpen(true),
-          openHelp: () => setHelpOpen(true),
-          undo,
-          redo,
-          verticalMove,
-        },
-        prefs,
-        "canvas"
-      ),
-    [dispatch, saveNote, undo, redo, prefs]
+    () => buildKeymap(prefs, "canvas", verticalMove),
+    [prefs]
+  );
+  // The keymap only describes what a key wants; this carries it out.
+  const keyDeps = useMemo<KeyEffectDeps>(
+    () => ({
+      dispatch,
+      saveNote: (m) => saveNote(m),
+      openPalette: () => setCmdPaletteOpen(true),
+      openHelp: () => setHelpOpen(true),
+      undo,
+      redo,
+    }),
+    [dispatch, saveNote, undo, redo]
   );
 
   const handleKeyDown = useCallback(
@@ -1449,7 +1398,7 @@ export function MindmapEditorView({
       // ignore the rest.
       if (helpOpen || settingsOpen) return;
       const state = stateRef.current;
-      runKeymap(
+      const outcome = runKeymap(
         keymap,
         {
           e,
@@ -1460,8 +1409,10 @@ export function MindmapEditorView({
         },
         prefs
       );
+      if (outcome.result === "handled") e.preventDefault();
+      applyKeyEffects(outcome.effects, state, keyDeps);
     },
-    [isComposing, keymap, helpOpen, settingsOpen, prefs]
+    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs]
   );
 
   // --- Guest mode: hand the current document off to be saved to an account ---

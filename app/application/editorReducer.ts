@@ -22,7 +22,7 @@
  * selectionEnd. There is no multi-node selection.
  */
 
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { IdSource, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   findParentAndIndex,
@@ -34,6 +34,7 @@ import {
   isTopLevel,
   generateId,
   cloneModel,
+  nestUnder,
   addSiblingAfter,
   detachBranch,
   cloneWithNewIds,
@@ -254,8 +255,12 @@ interface DocumentResult {
 function documentReducer(
   document: DocumentState,
   action: EditorAction,
-  activeNodeId: string | null
+  // The view facts a document edit may depend on (which node, and whether it
+  // is being edited) — one context rather than a positional flag per fact.
+  view: Pick<ViewState, "activeNodeId" | "editing">,
+  nextId: IdSource
 ): DocumentResult {
+  const { activeNodeId, editing } = view;
   switch (action.type) {
     case "enter": {
       if (!activeNodeId) return { document };
@@ -265,7 +270,7 @@ function documentReducer(
 
 
       if (action.pos >= currentNode.text.length) {
-        const newId = generateId();
+        const newId = nextId();
         const newNode: MindMapModel = { id: newId, text: "", children: [] };
         return {
           document: {
@@ -280,7 +285,7 @@ function documentReducer(
         // At the start: insert an empty line *above* and keep the caret on this
         // node (its id, text and children are untouched — splitting a line must
         // never move a node's content onto a fresh id, see splitNode).
-        const result = splitNode(model, activeNodeId, 0);
+        const result = splitNode(model, activeNodeId, 0, nextId);
         return {
           document: { ...document, model: result.model },
           focusId: activeNodeId,
@@ -291,7 +296,7 @@ function documentReducer(
 
       // Mid-text split: the prefix stays on this node (keeps its id + children),
       // the suffix becomes a following sibling; the caret lands at its start.
-      const result = splitNode(model, activeNodeId, action.pos);
+      const result = splitNode(model, activeNodeId, action.pos, nextId);
       return {
         document: { ...document, model: result.model },
         focusId: result.newNodeId,
@@ -331,15 +336,9 @@ function documentReducer(
       // moveBranch returns the same reference when the move is impossible or a
       // no-op; keep the document identity so undo/save are skipped.
       if (moved === document.model) return { document };
-      // Expand a collapsed drop target so the moved node stays visible.
-      const parent = findNode(moved, action.newParentId);
-      const newModel = parent?.collapsed
-        ? toggleCollapse(moved, action.newParentId, false)
-        : moved;
-      return {
-        document: { ...document, model: newModel },
-        focusId: action.nodeId,
-      };
+      // moveBranch expanded the drop target (see nestUnder), so the moved
+      // node is visible to take the focus.
+      return { document: { ...document, model: moved }, focusId: action.nodeId };
     }
 
     case "placeBranchAt": {
@@ -386,7 +385,14 @@ function documentReducer(
       // node's own subtree/siblings → no-op (identity preserved).
       const newModel = mergeSuccessorInto(model, activeNodeId);
       if (newModel === model) return { document };
-      return { document: { ...document, model: newModel } };
+      // Hand the (now longer) node back through the generic focus path so the
+      // view's editingText follows the merge; the caret stays at the join.
+      return {
+        document: { ...document, model: newModel },
+        focusId: activeNodeId,
+        focusCursorPos: action.pos,
+        focusSelectionEnd: action.pos,
+      };
     }
 
     case "typeText": {
@@ -432,10 +438,10 @@ function documentReducer(
       if (!activeNodeId || !source) return { document };
       const target = findNode(model, activeNodeId);
       if (!target) return { document };
-      const fresh = cloneWithNewIds(source);
-      // Expand the target so the pasted child is visible, then append it.
-      let newModel = toggleCollapse(model, activeNodeId, false);
-      newModel = addChildToNode(newModel, activeNodeId, fresh);
+      const fresh = cloneWithNewIds(source, nextId);
+      // addChildToNode expands the target (see nestUnder), so the pasted
+      // child is visible.
+      const newModel = addChildToNode(model, activeNodeId, fresh);
       // Keep the clipboard so the branch can be pasted again.
       return {
         document: { model: newModel, clipboard },
@@ -444,7 +450,7 @@ function documentReducer(
     }
 
     case "addRootAt": {
-      const newNode: MindMapModel = { id: generateId(), text: "", children: [] };
+      const newNode: MindMapModel = { id: nextId(), text: "", children: [] };
       return {
         document: {
           ...document,
@@ -463,12 +469,15 @@ function documentReducer(
       const parentInfo = isTopLevel(newModel, targetId)
         ? null // a tree root takes them as children, not as new trees
         : findParentAndIndex(newModel, targetId);
+      // Either way the nodes are nested (see nestUnder: visible, no position).
       if (parentInfo) {
-        parentInfo.parent.children.splice(parentInfo.index + 1, 0, ...nodes);
+        nodes.forEach((n, i) =>
+          nestUnder(parentInfo.parent, { ...n }, parentInfo.index + 1 + i, newModel.id)
+        );
       } else {
         const root = findNode(newModel, targetId);
         if (!root) return { document };
-        root.children.push(...nodes);
+        for (const n of nodes) nestUnder(root, { ...n }, undefined, newModel.id);
       }
       const last = nodes[nodes.length - 1];
       return {
@@ -491,7 +500,7 @@ function documentReducer(
 
     case "insertSiblingAfter": {
       if (!activeNodeId) return { document };
-      const newNode: MindMapModel = { id: generateId(), text: "", children: [] };
+      const newNode: MindMapModel = { id: nextId(), text: "", children: [] };
       return {
         document: {
           ...document,
@@ -506,11 +515,10 @@ function documentReducer(
     case "addChild": {
       const parent = findNode(document.model, action.nodeId);
       if (!parent) return { document };
-      const newId = generateId();
+      const newId = nextId();
       const newNode: MindMapModel = { id: newId, text: "", children: [] };
-      // Expand first so the new child is visible, then append it.
-      let newModel = toggleCollapse(document.model, action.nodeId, false);
-      newModel = addChildToNode(newModel, action.nodeId, newNode);
+      // addChildToNode expands the parent (see nestUnder), so the child is visible.
+      const newModel = addChildToNode(document.model, action.nodeId, newNode);
       return { document: { ...document, model: newModel }, focusId: newId };
     }
 
@@ -634,6 +642,10 @@ function documentReducer(
       // node that still has children (its subtree would vanish with it); those
       // just exit to selection with no model change.
       if (!activeNodeId) return { document };
+      // In selection mode there is no edit mode to leave (empty-canvas click,
+      // post-paste): nothing may be deleted, or the view would keep pointing
+      // at a node the document no longer has.
+      if (!editing) return { document };
       const node = findNode(document.model, activeNodeId);
       const onlyTopLevel =
         document.model.children.length === 1 &&
@@ -736,6 +748,7 @@ function viewReducer(
     // landing node) via documentReducer's focusId.
     case "enter":
     case "backspaceAtStart":
+    case "deleteAtEnd":
     case "cutBranch":
     case "pasteBranch":
     case "toggleCollapse":
@@ -768,13 +781,6 @@ function viewReducer(
     case "setChecked":
     case "copyBranch":
       return view;
-
-    case "deleteAtEnd": {
-      // Mirrors documentReducer's own merge guard: no model change means no
-      // merge happened, so the caret doesn't move.
-      if (nextDocument.model === prevDocument.model) return view;
-      return { ...view, cursorPos: action.pos, selectionEnd: action.pos };
-    }
 
     case "moveUp":
     case "arrowLeftEdge": {
@@ -1065,7 +1071,9 @@ function viewReducer(
  * needed after undo/redo, which restores only the document (see
  * UndoManager). If the active node no longer exists in the restored
  * document (it was created/removed by the undone/redone edit), the active
- * id would dangle and silently no-op every subsequent keyboard action.
+ * id would dangle and silently no-op every subsequent keyboard action. A
+ * node that still exists but is hidden (the undone edit was the expand that
+ * revealed it) is just as unusable: the view lands on the collapsed ancestor.
  *
  * `prevDocument` is the document the stale view *was* derived from (i.e. the
  * pre-undo/redo document). When given, we locate the vanished node in its
@@ -1079,10 +1087,17 @@ export function reconcileView(
   document: DocumentState,
   prevDocument?: DocumentState
 ): ViewState {
-  if (view.activeNodeId && findNode(document.model, view.activeNodeId)) {
+  const visible = new Set(getFlatOrder(document.model));
+  if (view.activeNodeId && visible.has(view.activeNodeId)) {
     return view;
   }
-  const landId = findNearestSurvivor(view.activeNodeId, document, prevDocument);
+  // Existing but hidden — the document swap (undo of an expand, say) folded
+  // an ancestor over the active node. Land on the ancestor that hides it,
+  // as toggleCollapse does. Otherwise the node is gone: nearest survivor.
+  const landId =
+    view.activeNodeId && findNode(document.model, view.activeNodeId)
+      ? nearestVisibleAncestor(document.model, view.activeNodeId, visible)
+      : findNearestSurvivor(view.activeNodeId, document, prevDocument);
   return focusView(
     { ...view, editing: false },
     document.model,
@@ -1090,6 +1105,17 @@ export function reconcileView(
     0,
     0
   );
+}
+
+function nearestVisibleAncestor(
+  model: MindMapModel,
+  nodeId: string,
+  visible: Set<string>
+): string {
+  for (let info = findParentAndIndex(model, nodeId); info; info = findParentAndIndex(model, info.parent.id)) {
+    if (visible.has(info.parent.id)) return info.parent.id;
+  }
+  return firstNavigableId(model);
 }
 
 /**
@@ -1123,7 +1149,8 @@ function findNearestSurvivor(
 
 export function editorReducer(
   state: EditorState,
-  action: EditorAction
+  action: EditorAction,
+  nextId: IdSource = generateId
 ): EditorState {
   if (action.type === "replace") {
     // Undo/redo (and any wholesale document swap) route through `replace`.
@@ -1143,13 +1170,14 @@ export function editorReducer(
   const docResult = documentReducer(
     state.document,
     action,
-    state.view.activeNodeId
+    state.view,
+    nextId
   );
   // The document must always keep a top-level node (the root is the title,
   // not a node — with no children there'd be nothing to select). Deleting or
   // cutting the last one replaces it with a blank node that takes the focus.
   if (docResult.document.model.children.length === 0) {
-    const model = ensureTopLevelNode(docResult.document.model);
+    const model = ensureTopLevelNode(docResult.document.model, nextId);
     docResult.document = { ...docResult.document, model };
     docResult.focusId = firstNavigableId(model);
   }

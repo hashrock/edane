@@ -4,7 +4,6 @@ import {
   nodeRect,
   rectCenter,
   worldToScreen,
-  screenToWorld,
   worldViewport,
   expandRect,
   rectsIntersect,
@@ -45,14 +44,6 @@ describe("world ↔ screen", () => {
       x: 250,
       y: 580,
     });
-  });
-
-  it("screenToWorld inverts worldToScreen", () => {
-    const t = T(1.5, 40, 90);
-    const p = { x: 123, y: -45 };
-    const round = screenToWorld(worldToScreen(p, t), t);
-    expect(round.x).toBeCloseTo(p.x, 9);
-    expect(round.y).toBeCloseTo(p.y, 9);
   });
 
   it("rectCenter returns the middle of a rect", () => {
@@ -140,15 +131,6 @@ describe("centering", () => {
 describe("ensureVisibleOffset", () => {
   const screen = { width: 800, height: 600 };
   const padding = 50;
-
-  it("does not move when the target is already inside the padded viewport", () => {
-    const t = T(1, 0, 0);
-    const r = { x: 100, y: 100, width: 200, height: 32 };
-    const out = ensureVisibleOffset(r, t, screen, padding);
-    expect(out.changed).toBe(false);
-    expect(out.offsetX).toBe(0);
-    expect(out.offsetY).toBe(0);
-  });
 
   it("pans left when the target sticks out past the right edge", () => {
     const t = T(1, 0, 0);

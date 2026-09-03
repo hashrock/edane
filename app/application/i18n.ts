@@ -12,6 +12,7 @@
  */
 
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
+import { isKeyOf } from "../domain/isKeyOf";
 import {
   MESSAGES_JA,
   MESSAGES_EN,
@@ -37,7 +38,7 @@ const LOCALE_SET = {
 } as const satisfies Record<Locale, true>;
 
 export function isLocale(value: unknown): value is Locale {
-  return typeof value === "string" && value in LOCALE_SET;
+  return isKeyOf(LOCALE_SET, value);
 }
 
 const CATALOGS: Record<Locale, Record<MessageKey, string>> = {

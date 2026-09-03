@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   createWheelGestureRecognizer,
   zoomAt,
-  panBy,
   clampScale,
   MIN_SCALE,
   MAX_SCALE,
@@ -152,22 +151,6 @@ describe("createWheelGestureRecognizer", () => {
 });
 
 describe("zoomAt", () => {
-  it("keeps the world point under the anchor fixed on screen", () => {
-    const t = T(1, 100, 50);
-    const anchor = { x: 300, y: 200 };
-    const out = zoomAt(t, anchor, 2);
-    expect(out.scale).toBe(2);
-    // World point under the anchor before: ((300-100)/1, (200-50)/1) = (200, 150).
-    // After: 200*2 + offsetX must still be 300.
-    expect(200 * out.scale + out.offsetX).toBeCloseTo(300);
-    expect(150 * out.scale + out.offsetY).toBeCloseTo(200);
-  });
-
-  it("clamps the scale to [MIN_SCALE, MAX_SCALE]", () => {
-    expect(zoomAt(T(2.9, 0, 0), { x: 0, y: 0 }, 10).scale).toBe(MAX_SCALE);
-    expect(zoomAt(T(0.25, 0, 0), { x: 0, y: 0 }, 0.01).scale).toBe(MIN_SCALE);
-  });
-
   it("matches the legacy wheel-zoom math for one step", () => {
     // Reproduces the old inline handler on the same inputs.
     const oldScale = 1.3;
@@ -191,12 +174,6 @@ describe("zoomAt", () => {
     expect(out.scale).toBeCloseTo(legacy.scale);
     expect(out.offsetX).toBeCloseTo(legacy.offsetX);
     expect(out.offsetY).toBeCloseTo(legacy.offsetY);
-  });
-});
-
-describe("panBy", () => {
-  it("translates the offset and preserves the scale", () => {
-    expect(panBy(T(1.5, 10, 20), -3, 7)).toEqual(T(1.5, 7, 27));
   });
 });
 

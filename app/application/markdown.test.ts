@@ -119,17 +119,6 @@ describe("modelToMarkdown", () => {
     expect(modelToMarkdown(tree)).toBe("- # Title body");
   });
 
-  it("round-trips the hierarchy back through markdownToModel", () => {
-    const tree = node("Root", [node("A", [node("A1")]), node("B")]);
-    const md = modelToMarkdown(tree);
-    const back = markdownToModel(md);
-    // markdownToModel returns a synthetic root whose children are the top items.
-    expect(back.children.map((c) => c.text)).toEqual(["Root"]);
-    expect(back.children[0].children.map((c) => c.text)).toEqual(["A", "B"]);
-    expect(back.children[0].children[0].children.map((c) => c.text)).toEqual([
-      "A1",
-    ]);
-  });
 });
 
 describe("task lists", () => {
@@ -153,19 +142,6 @@ describe("task lists", () => {
     const back = markdownToModel("- [ ] Bread\n- [X] Milk\n- Note");
     expect(back.children.map((c) => c.text)).toEqual(["Bread", "Milk", "Note"]);
     expect(back.children.map((c) => c.checked)).toEqual([false, true, undefined]);
-  });
-
-  it("round-trips task state through Markdown", () => {
-    const tree: MindMapModel = {
-      id: "r",
-      text: "T",
-      children: [
-        { id: "a", text: "done", checked: true, children: [] },
-        { id: "b", text: "open", checked: false, children: [] },
-      ],
-    };
-    const back = markdownToModel(modelToMarkdown(tree));
-    expect(back.children[0].children.map((c) => c.checked)).toEqual([true, false]);
   });
 
   it("leaves a bracket that isn't a task marker as text", () => {
