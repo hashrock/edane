@@ -8,18 +8,21 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { memoryStorage } from "./browserStorage";
 import {
+  ARROW_BEHAVIORS,
   DEFAULT_PREFERENCES,
+  ENTER_BEHAVIORS,
   loadPreferences,
   PREFERENCES_KEY,
   savePreferences,
+  TAB_BEHAVIORS,
   type EditorPreferences,
 } from "./editorPreferences";
 
 const VALID = {
   selectionMode: [true, false],
-  tabBehavior: ["indent", "insert-child"],
-  enterBehavior: ["insert-sibling", "edit"],
-  arrowBehavior: ["collapse", "navigate"],
+  tabBehavior: TAB_BEHAVIORS,
+  enterBehavior: ENTER_BEHAVIORS,
+  arrowBehavior: ARROW_BEHAVIORS,
 } as const satisfies Record<keyof EditorPreferences, readonly unknown[]>;
 
 const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({

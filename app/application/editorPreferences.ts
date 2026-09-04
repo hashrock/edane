@@ -73,6 +73,16 @@ function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"
   return isKeyOf(TAB_BEHAVIOR_SET, value);
 }
 
+/**
+ * Every `tabBehavior` member, derived from {@link TAB_BEHAVIOR_SET} so
+ * callers that need to enumerate them (rather than just test membership via
+ * {@link isTabBehavior}) stay in sync automatically when a member is added,
+ * renamed, or removed (same trick as `NODE_TYPES` in domain/model.ts).
+ */
+export const TAB_BEHAVIORS = Object.keys(
+  TAB_BEHAVIOR_SET
+) as EditorPreferences["tabBehavior"][];
+
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `enterBehavior`. */
 const ENTER_BEHAVIOR_SET = {
   "insert-sibling": true,
@@ -85,6 +95,11 @@ function isEnterBehavior(
   return isKeyOf(ENTER_BEHAVIOR_SET, value);
 }
 
+/** Every `enterBehavior` member, derived like {@link TAB_BEHAVIORS}. */
+export const ENTER_BEHAVIORS = Object.keys(
+  ENTER_BEHAVIOR_SET
+) as EditorPreferences["enterBehavior"][];
+
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `arrowBehavior`. */
 const ARROW_BEHAVIOR_SET = {
   collapse: true,
@@ -96,6 +111,11 @@ function isArrowBehavior(
 ): value is EditorPreferences["arrowBehavior"] {
   return isKeyOf(ARROW_BEHAVIOR_SET, value);
 }
+
+/** Every `arrowBehavior` member, derived like {@link TAB_BEHAVIORS}. */
+export const ARROW_BEHAVIORS = Object.keys(
+  ARROW_BEHAVIOR_SET
+) as EditorPreferences["arrowBehavior"][];
 
 /**
  * Read preferences from storage. Unknown fields are dropped and invalid
