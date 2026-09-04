@@ -13,7 +13,12 @@ import {
 } from "../domain/model";
 import type { EditorState } from "./editorReducer";
 import { buildKeymap, type KeyBinding } from "./editorKeymap";
-import type { EditorPreferences } from "./editorPreferences";
+import {
+  ARROW_BEHAVIORS,
+  ENTER_BEHAVIORS,
+  TAB_BEHAVIORS,
+  type EditorPreferences,
+} from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
 
 /**
@@ -88,14 +93,11 @@ export function onTrailingEdge(model: MindMapModel, nodeId: string): boolean {
 }
 
 export const layoutArb = fc.constantFrom<EditorLayout>("canvas", "outline");
-export const arrowBehaviorArb = fc.constantFrom<EditorPreferences["arrowBehavior"]>(
-  "navigate",
-  "collapse"
-);
+export const arrowBehaviorArb = fc.constantFrom(...ARROW_BEHAVIORS);
 export const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   selectionMode: fc.boolean(),
-  tabBehavior: fc.constantFrom("indent", "insert-child"),
-  enterBehavior: fc.constantFrom("insert-sibling", "edit"),
+  tabBehavior: fc.constantFrom(...TAB_BEHAVIORS),
+  enterBehavior: fc.constantFrom(...ENTER_BEHAVIORS),
   arrowBehavior: arrowBehaviorArb,
 });
 

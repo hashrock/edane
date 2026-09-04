@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { EditorPreferences } from "./editorPreferences";
 import { memoryStorage } from "./browserStorage";
 import {
+  ARROW_BEHAVIORS,
   DEFAULT_PREFERENCES,
+  ENTER_BEHAVIORS,
   PREFERENCES_KEY,
+  TAB_BEHAVIORS,
   loadPreferences,
   savePreferences,
 } from "./editorPreferences";
@@ -55,36 +57,26 @@ describe("loadPreferences", () => {
   });
 
   it("accepts every declared tabBehavior/enterBehavior/arrowBehavior literal", () => {
-    // Spelled out so this test fails to typecheck (not just at runtime) if a
-    // member is ever renamed without updating the list below.
-    const tabBehaviors: EditorPreferences["tabBehavior"][] = [
-      "indent",
-      "insert-child",
-    ];
-    const enterBehaviors: EditorPreferences["enterBehavior"][] = [
-      "insert-sibling",
-      "edit",
-    ];
-    const arrowBehaviors: EditorPreferences["arrowBehavior"][] = [
-      "collapse",
-      "navigate",
-    ];
+    // Drawn from the exported *_BEHAVIORS arrays (derived from the same
+    // exhaustive sets isTabBehavior/isEnterBehavior/isArrowBehavior use), so
+    // this test automatically covers a newly added member instead of quietly
+    // keeping only the old ones.
     const storage = memoryStorage();
-    for (const tabBehavior of tabBehaviors) {
+    for (const tabBehavior of TAB_BEHAVIORS) {
       storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, tabBehavior })
       );
       expect(loadPreferences(storage).tabBehavior).toBe(tabBehavior);
     }
-    for (const enterBehavior of enterBehaviors) {
+    for (const enterBehavior of ENTER_BEHAVIORS) {
       storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, enterBehavior })
       );
       expect(loadPreferences(storage).enterBehavior).toBe(enterBehavior);
     }
-    for (const arrowBehavior of arrowBehaviors) {
+    for (const arrowBehavior of ARROW_BEHAVIORS) {
       storage.setItem(
         PREFERENCES_KEY,
         JSON.stringify({ ...DEFAULT_PREFERENCES, arrowBehavior })
