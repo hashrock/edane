@@ -107,7 +107,11 @@ export function renderSiteResponse(
     `<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<meta http-equiv="Content-Security-Policy" content="${scriptPolicy(nonce)}">` +
     `<title>${escapeHtml(title)}</title>` +
-    `<style>${build.css.replace(/<\/style/gi, "<\\/style")}</style></head>` +
+    // `\/` is a CSS escape for `/`, so the author's CSS keeps its meaning while
+    // the HTML parser no longer sees an end tag. The match is spliced back in as
+    // written: a blanket `"<\\/style"` would lowercase `</STYLE` inside a string
+    // or a `content:` value.
+    `<style>${build.css.replace(/<\/style/gi, (m) => "<\\" + m.slice(1))}</style></head>` +
     `<body>${build.html}` +
     `<script nonce="${nonce}">${SITE_SEARCH_SCRIPT}</script></body></html>`;
   return {

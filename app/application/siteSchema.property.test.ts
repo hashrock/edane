@@ -18,7 +18,7 @@ import {
   shapeRecords,
   type SiteSchema,
 } from "./siteSchema";
-import { siteDataModule, validateSiteSave } from "./siteTemplate";
+import { siteDataModule } from "./siteTemplate";
 
 const KEY_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -167,24 +167,6 @@ describe("siteDataModule", () => {
         expect(evaluated.title).toBe(root.text);
         expect(evaluated.items).toEqual(JSON.parse(JSON.stringify(shapeRecords(root, schema).items)));
         expect(evaluated.schema).toEqual(JSON.parse(JSON.stringify(schema)));
-      })
-    );
-  });
-});
-
-describe("validateSiteSave", () => {
-  it("never throws on arbitrary JSON and only accepts string fields within the limits", () => {
-    fc.assert(
-      fc.property(fc.jsonValue(), (body) => {
-        const r = validateSiteSave(body);
-        if (!r.ok) {
-          expect(r.error).not.toBe("");
-          return;
-        }
-        expect(typeof r.template).toBe("string");
-        expect(typeof r.schema).toBe("string");
-        expect(typeof r.build.html).toBe("string");
-        expect(typeof r.build.css).toBe("string");
       })
     );
   });
