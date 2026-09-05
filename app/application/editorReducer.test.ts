@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapModel } from "../domain/model";
-import { getFlatOrder, findNode } from "../domain/model";
+import { getFlatOrder, findNode, updateNodeText } from "../domain/model";
 import {
   editorReducer,
   reconcileView,
@@ -263,6 +263,38 @@ describe("deleteAtEnd", () => {
     const model = sampleModel();
     const s = stateAt(model, "a1");
     expect(editorReducer(s, { type: "deleteAtEnd", pos: 2 })).toBe(s);
+  });
+
+  it("keeps the caret inside the merged text when undo left a stale buffer", () => {
+    // Click into a node -> ⌘Z -> Delete at the end of the line, using only
+    // actions the components dispatch. Undo restores just the document
+    // (useNoteEditor's restoreDocument hands `replace` the current view
+    // verbatim) and reconcileView keeps a view whose node still exists, so
+    // editingText — the textarea's value — stays longer than the restored
+    // text. The caret the textarea then reports clears deleteAtEnd's "at the
+    // end?" guard while pointing past the merged text.
+    const before = updateNodeText(sampleModel(), "a", "AB");
+    // Click into "AB" (selected elsewhere until now) with the caret at its end.
+    let s = editorReducer(stateAt(before, "b"), {
+      type: "activateNode",
+      nodeId: "a",
+      cursorPos: 2,
+      selectionEnd: 2,
+      editing: true,
+    });
+    // ⌘Z: the document goes back to "A", the view rides along unchanged.
+    s = editorReducer(s, {
+      type: "replace",
+      state: { document: { model: sampleModel(), clipboard: null }, view: s.view },
+    });
+    expect(s.view.editingText).toBe("AB"); // stale: the model says "A"
+    // Delete at the end of what the textarea shows.
+    const next = editorReducer(s, { type: "deleteAtEnd", pos: 2 });
+    expect(findNode(next.document.model, "a")!.text).toBe("AA1");
+    expect(next.view.editingText).toBe("AA1");
+    // The caret lands on the join (the pre-merge length), never past the text.
+    expect(next.view.cursorPos).toBe(1);
+    expect(next.view.selectionEnd).toBe(1);
   });
 });
 

@@ -387,11 +387,18 @@ function documentReducer(
       if (newModel === model) return { document };
       // Hand the (now longer) node back through the generic focus path so the
       // view's editingText follows the merge; the caret stays at the join.
+      // The join is the PRE-merge length, not `action.pos`: focusCursorPos is a
+      // model position (as in backspaceAtStart), while `action.pos` comes from
+      // the textarea, whose value can outrun the model — undo swaps the
+      // document through `replace` and carries the view over as-is (see
+      // reconcileView), and a stale caret clears the guard above while pointing
+      // past the merged text.
+      const joinPos = currentNode.text.length;
       return {
         document: { ...document, model: newModel },
         focusId: activeNodeId,
-        focusCursorPos: action.pos,
-        focusSelectionEnd: action.pos,
+        focusCursorPos: joinPos,
+        focusSelectionEnd: joinPos,
       };
     }
 

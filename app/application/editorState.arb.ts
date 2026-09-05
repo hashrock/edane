@@ -236,7 +236,13 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
   const textOf = (nodeId: string | null) =>
     nodeId ? (findNode(model, nodeId)?.text ?? "") : "";
   // Caret positions come from the textarea, whose value is the live
-  // editingText while editing (it may run ahead of the model mid-IME).
+  // editingText while editing (it may run ahead of the model mid-IME, or
+  // after `replace` swaps the document under a view that keeps editing).
+  // Sequences that pair the mid-IME divergence with a keymap action are not
+  // reachable in the app — both editors' onKeyDown returns while isComposing —
+  // but they are kept: they cost nothing to generate and modelling the
+  // textarea faithfully is what exposes the `replace` variant, which IS
+  // reachable (see deleteAtEnd's join comment in editorReducer.ts).
   const activeText = state.view.editing
     ? state.view.editingText
     : textOf(state.view.activeNodeId);
