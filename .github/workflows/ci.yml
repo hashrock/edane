@@ -1,7 +1,11 @@
 name: CI
 
-# Manually triggered from the Actions tab (or via the GitHub API / gh CLI).
+# Every pull request and every push to main, so the suite is a real gate;
+# still runnable by hand from the Actions tab (or the GitHub API / gh CLI).
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
