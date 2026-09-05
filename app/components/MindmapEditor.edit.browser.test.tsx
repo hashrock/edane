@@ -9,6 +9,9 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 
+/** The host platform's select-all: ⌘A on macOS, Ctrl+A everywhere else. */
+const SELECT_ALL = /Mac/i.test(navigator.userAgent) ? "{Meta>}a{/Meta}" : "{Control>}a{/Control}";
+
 // Fixed-id tree so each test can target known nodes.
 const MODEL: MindMapModel = {
   id: "root",
@@ -193,8 +196,10 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
     );
     await edit("a");
 
-    // Select all, then type to replace.
-    await userEvent.keyboard("{Meta>}a{/Meta}");
+    // Select all, then type to replace. Select-all is the *browser's* native
+    // textarea binding, not one of our keymap's `meta || ctrl` shortcuts, so it
+    // has to be pressed the way the host platform binds it (CI runs Linux).
+    await userEvent.keyboard(SELECT_ALL);
     await userEvent.keyboard("Renamed");
     await waitFor(() => findNode(api().getModel(), "a")?.text === "Renamed");
     expect(findNode(api().getModel(), "a")!.text).toBe("Renamed");
