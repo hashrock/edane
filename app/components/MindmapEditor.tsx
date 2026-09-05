@@ -2440,10 +2440,14 @@ export function MindmapEditorView({
                 : "#ffffff",
         // Editing gets the emerald accent so "I'm typing here" reads distinctly
         // from a mere selection (black); everything else keeps its resting edge.
+        // Root's fill is near-black, so its selection stroke goes white instead
+        // of the usual black to stay visible against it.
         stroke: isEditing
           ? "#10b981"
           : isSelected
-            ? "#000000"
+            ? isRoot
+              ? "#ffffff"
+              : "#000000"
             : isRoot
               ? "#0f172a"
               : asMarkdown
