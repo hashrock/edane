@@ -42,5 +42,5 @@
 ### テスト
 
 - 単体・ロジック: `pnpm test`（node project）
-- プロパティベース（fast-check）: `*.property.test.ts`。`MindMapModel` の生成器は `app/domain/model.arb.ts`（ID一意・トップレベル≥1・`position` はトップレベルのみ、を構成で保証）。ドメイン操作の契約・reducer のフォーカス不変条件・シリアライズ往復・レイアウトの非重複はここで総当たりする。
+- プロパティベース（fast-check）: `*.property.test.ts`。`MindMapModel` の生成器は `app/domain/model.arb.ts`（ID一意・トップレベル≥1・`position` はトップレベルのみ、を構成で保証）。ドメイン操作の契約・reducer のフォーカス不変条件・シリアライズ往復・レイアウトの非重複はここで総当たりする。ランダムな `EditorAction` 列の生成器は `app/application/editorState.arb.ts` の `actionStepArb` / `resolveStep`（全変種を `satisfies` で網羅強制）。同じアクション列で駆動される状態機械（reducer・閲覧専用ガード）は必ずこれを共有すること。
 - ブラウザe2e: `pnpm test:e2e`（chromium; `*.browser.test.tsx`）
