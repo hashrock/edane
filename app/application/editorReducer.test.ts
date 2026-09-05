@@ -265,36 +265,58 @@ describe("deleteAtEnd", () => {
     expect(editorReducer(s, { type: "deleteAtEnd", pos: 2 })).toBe(s);
   });
 
-  it("keeps the caret inside the merged text when undo left a stale buffer", () => {
-    // Click into a node -> ⌘Z -> Delete at the end of the line, using only
-    // actions the components dispatch. Undo restores just the document
-    // (useNoteEditor's restoreDocument hands `replace` the current view
-    // verbatim) and reconcileView keeps a view whose node still exists, so
-    // editingText — the textarea's value — stays longer than the restored
-    // text. The caret the textarea then reports clears deleteAtEnd's "at the
-    // end?" guard while pointing past the merged text.
-    const before = updateNodeText(sampleModel(), "a", "AB");
-    // Click into "AB" (selected elsewhere until now) with the caret at its end.
-    let s = editorReducer(stateAt(before, "b"), {
+  it("puts the caret on the join, not on the reported position", () => {
+    // Was "click -> ⌘Z -> Delete at end" (#147): undo left a stale editingText,
+    // so the textarea reported a caret past the model's text. reconcileView now
+    // re-reads the buffer, so that route cannot produce the out-of-range caret
+    // any more — but deleteAtEnd's own contract still has to hold, so it is
+    // dispatched directly instead of being reached through undo.
+    const model = updateNodeText(sampleModel(), "a", "AB"); // a "AB" -> [a1 "A1"]
+    const s = stateAt(model, "a");
+    for (const pos of [2, 99]) {
+      const next = editorReducer(s, { type: "deleteAtEnd", pos });
+      expect(findNode(next.document.model, "a")!.text).toBe("ABA1");
+      expect(next.view.editingText).toBe("ABA1");
+      expect(next.view.cursorPos).toBe(2);
+      expect(next.view.selectionEnd).toBe(2);
+    }
+  });
+});
+
+describe("undo while editing (the document moves under the textarea)", () => {
+  it("clamps a click that lands past the restored text", () => {
+    // activateNode and dragSelect build a view literal directly rather than
+    // going through focusView; on canvas their offsets are computed from the
+    // painted text, so a click can name a position the model no longer has.
+    // (That reconcileView refreshes the buffer at all is covered by its own
+    // tests below, and end-to-end by MindmapEditor.undo.browser.test.tsx.)
+    const editing = editorReducer(
+      stateAt(updateNodeText(sampleModel(), "a", "AB"), "b"),
+      { type: "activateNode", nodeId: "a", cursorPos: 2, selectionEnd: 2, editing: true }
+    );
+    // ⌘Z: restore the shorter document, carrying the view over as-is.
+    const s = editorReducer(editing, {
+      type: "replace",
+      state: { document: { model: sampleModel(), clipboard: null }, view: editing.view },
+    });
+
+    const clicked = editorReducer(s, {
       type: "activateNode",
       nodeId: "a",
       cursorPos: 2,
       selectionEnd: 2,
       editing: true,
     });
-    // ⌘Z: the document goes back to "A", the view rides along unchanged.
-    s = editorReducer(s, {
-      type: "replace",
-      state: { document: { model: sampleModel(), clipboard: null }, view: s.view },
+    expect(clicked.view.editingText).toBe("A");
+    expect(clicked.view.cursorPos).toBe(1);
+
+    const dragged = editorReducer(s, {
+      type: "dragSelect",
+      nodeId: "a",
+      anchorOffset: 0,
+      focusOffset: 2,
     });
-    expect(s.view.editingText).toBe("AB"); // stale: the model says "A"
-    // Delete at the end of what the textarea shows.
-    const next = editorReducer(s, { type: "deleteAtEnd", pos: 2 });
-    expect(findNode(next.document.model, "a")!.text).toBe("AA1");
-    expect(next.view.editingText).toBe("AA1");
-    // The caret lands on the join (the pre-merge length), never past the text.
-    expect(next.view.cursorPos).toBe(1);
-    expect(next.view.selectionEnd).toBe(1);
+    expect(dragged.view.selectionEnd).toBe(1);
   });
 });
 
@@ -1476,6 +1498,46 @@ describe("reconcileView", () => {
       lastChildByParent: {},
     };
     expect(reconcileView(view, document)).toBe(view);
+  });
+
+  it("re-reads editingText from the restored node and clamps the caret", () => {
+    // The view's editingText is the textarea's value; a document swap moves the
+    // model out from under it. Undoing an edit to the node being edited used to
+    // leave the pre-undo text on screen, so ⌘Z looked like it did nothing.
+    const document: DocumentState = { model: sampleModel(), clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a",
+      editing: true,
+      editingText: "AB", // pre-undo; the restored node says "A"
+      cursorPos: 2,
+      selectionEnd: 2,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.editingText).toBe("A");
+    expect(reconciled.cursorPos).toBe(1);
+    expect(reconciled.selectionEnd).toBe(1);
+    // Still editing the same node — only the buffer was reconciled.
+    expect(reconciled.activeNodeId).toBe("a");
+    expect(reconciled.editing).toBe(true);
+  });
+
+  it("keeps the caret where it was when the restored text still contains it", () => {
+    const document: DocumentState = {
+      model: updateNodeText(sampleModel(), "a", "ALPHA"),
+      clipboard: null,
+    };
+    const view: ViewState = {
+      activeNodeId: "a",
+      editing: true,
+      editingText: "ALPHAX",
+      cursorPos: 1,
+      selectionEnd: 1,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.editingText).toBe("ALPHA");
+    expect(reconciled.cursorPos).toBe(1);
   });
 
   it("lands on the collapsed ancestor when the active node exists but is hidden", () => {
