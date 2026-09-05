@@ -5,10 +5,10 @@
  * 完了を任意の順で配送するドライバを振って、
  *
  *   1. 到着順に依存しない（同じ発行列なら、完了の順列をどう入れ替えても
- *      baseline は同じ）— 過去に巻き戻しバグを出した箇所そのもの
+ *      baseline も最終表示も同じ）— 過去に巻き戻しバグを出した箇所そのもの
  *   2. baseline は「最後に発行された、成功する保存」の内容に収束する
- *   3. `acked` は単調非減少で、発行数を超えない
- *   4. 失敗は何も動かさない
+ *   3. 表示は「最後に発行された保存の結末」を映す。追い越された応答は黙る
+ *   4. `acked` / `settled` は単調非減少で、発行数を超えない
  *   5. 静止したあとの `isDirty` は今の内容と baseline の一致だけで決まる
  *
  * を確かめる。冪等性とバックオフは短い単独のプロパティとして別に置く。
@@ -16,7 +16,6 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
-  acknowledgeSave,
   AUTOSAVE_DELAY_MS,
   AUTOSAVE_MAX_DELAY_MS,
   beginSave,
@@ -24,7 +23,9 @@ import {
   isDirty,
   isUntracked,
   nextRetryDelay,
+  settleSave,
   untrackedSave,
+  type SaveDisplay,
 } from "./saveTracker";
 
 /**
@@ -62,10 +63,15 @@ function run(steps: Step[], initial: string) {
   const inflight: Inflight[] = [];
   /** 成功する保存のうち最後に発行されたものの内容 = baseline の収束先。 */
   let winner = initial;
+  /** 最後に発行された保存の結末 = 静止したときヘッダーに残っているべき表示。 */
+  let lastIssuedOk: boolean | null = null;
+  /** 実際にヘッダーへ出た最後の表示。 */
+  let shown: SaveDisplay = null;
 
-  // 失敗応答は状態機械に触れない（呼び出し側が acknowledgeSave を呼ばない）。
   const settle = (entry: Inflight) => {
-    if (entry.ok) tracker = acknowledgeSave(tracker, entry.seq, entry.content).tracker;
+    const r = settleSave(tracker, entry.seq, entry.ok ? { ok: true, content: entry.content } : { ok: false });
+    tracker = r.tracker;
+    if (r.display) shown = r.display;
   };
 
   for (const step of steps) {
@@ -77,29 +83,33 @@ function run(steps: Step[], initial: string) {
       case "save": {
         tracker = beginSave(tracker);
         expect(tracker.issued).toBe(before.issued + 1);
-        // 発行だけでは保存済みの起点は動かない。
+        // 発行だけでは保存済みの起点も表示も動かない。
         expect(tracker.baseline).toBe(before.baseline);
         expect(tracker.acked).toBe(before.acked);
+        expect(tracker.settled).toBe(before.settled);
         inflight.push({ seq: tracker.issued, content, ok: step.ok });
         if (step.ok) winner = content;
+        lastIssuedOk = step.ok;
         break;
       }
       case "settle": {
         if (inflight.length === 0) break;
         const [entry] = inflight.splice(step.n % inflight.length, 1);
         settle(entry);
-        // 4. 失敗は何も動かさない。
-        if (!entry.ok) expect(tracker).toBe(before);
+        // 失敗は baseline を動かさない。
+        if (!entry.ok) expect(tracker.baseline).toBe(before.baseline);
         break;
       }
     }
-    // 3. `acked` は単調非減少で、発行数を超えない。
+    // 4. どちらの連番も単調非減少で、発行数を超えない。
     expect(tracker.acked).toBeGreaterThanOrEqual(before.acked);
+    expect(tracker.settled).toBeGreaterThanOrEqual(before.settled);
     expect(tracker.acked).toBeLessThanOrEqual(tracker.issued);
+    expect(tracker.settled).toBeLessThanOrEqual(tracker.issued);
   }
   // 残っている保存も（発行時に決めた成否で）片付けて静止させる。
   for (const entry of inflight.splice(0)) settle(entry);
-  return { tracker, content, winner };
+  return { tracker, content, winner, lastIssuedOk, shown };
 }
 
 /** 完了の到着順だけを入れ替えた同じ発行列。 */
@@ -129,19 +139,50 @@ describe("saveTracker under arbitrary completion orderings", () => {
     );
   });
 
-  it("ignores a completion it has already taken (duplicate delivery, or an older save landing late)", () => {
+  it("leaves the header showing the LAST ISSUED save's outcome, not whichever response landed last", () => {
     fc.assert(
-      fc.property(fc.string(), fc.string(), (first, second) => {
-        const issued = beginSave(beginSave(initialSaveTracker("initial")));
-        const newest = acknowledgeSave(issued, 2, second);
-        expect(newest.accepted).toBe(true);
-        for (const stale of [
-          acknowledgeSave(newest.tracker, 2, second), // 同じ応答の二重配送
-          acknowledgeSave(newest.tracker, 1, first), // 古い保存が遅れて到着
-        ]) {
-          expect(stale.accepted).toBe(false);
-          expect(stale.tracker).toBe(newest.tracker);
-        }
+      fc.property(stepsArb, fc.array(fc.nat(), { minLength: 1, maxLength: 20 }), (steps, perm) => {
+        const a = run(steps, "initial");
+        const b = run(shuffled(steps, perm), "initial");
+        // 3. 静止したとき残っている表示は、発行順で最後の保存の結末。到着順を
+        //    どう入れ替えても同じ（古い失敗が新しい成功を上書きしない）。
+        const expected: SaveDisplay =
+          a.lastIssuedOk === null ? null : a.lastIssuedOk ? "saved" : "save-failed";
+        expect(a.shown).toBe(expected);
+        expect(b.shown).toBe(expected);
+      }),
+      { numRuns: 300 }
+    );
+  });
+
+  it("shows nothing for a response that has been overtaken, in either direction", () => {
+    const t0 = beginSave(beginSave(initialSaveTracker("initial")));
+    // 新しい方(2)が先に成功 → 古い方(1)の失敗は黙る（かつては失敗表示が出た）。
+    const newestFirst = settleSave(t0, 2, { ok: true, content: "b" });
+    expect(newestFirst.display).toBe("saved");
+    const staleFailure = settleSave(newestFirst.tracker, 1, { ok: false });
+    expect(staleFailure.display).toBeNull();
+    expect(staleFailure.tracker.baseline).toBe("b");
+
+    // 新しい方(2)が先に失敗 → 古い方(1)の成功は baseline だけ進めて黙る。
+    // いま画面にある内容はまだ保存されていないので「保存しました」とは言えない。
+    const failedNewest = settleSave(t0, 2, { ok: false });
+    expect(failedNewest.display).toBe("save-failed");
+    const staleSuccess = settleSave(failedNewest.tracker, 1, { ok: true, content: "a" });
+    expect(staleSuccess.display).toBeNull();
+    expect(staleSuccess.tracker.baseline).toBe("a");
+  });
+
+  it("ignores a completion it has already taken (duplicate delivery)", () => {
+    fc.assert(
+      fc.property(fc.string(), fc.boolean(), (content, ok) => {
+        const issued = beginSave(initialSaveTracker("initial"));
+        const outcome = ok ? ({ ok: true, content } as const) : ({ ok: false } as const);
+        const first = settleSave(issued, 1, outcome);
+        expect(first.display).not.toBeNull();
+        const again = settleSave(first.tracker, 1, outcome);
+        expect(again.display).toBeNull();
+        expect(again.tracker).toEqual(first.tracker);
       })
     );
   });

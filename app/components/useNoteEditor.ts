@@ -20,14 +20,16 @@ import {
 } from "../application/editorReducer";
 import { guardedStep } from "../application/readOnlyGuard";
 import {
-  acknowledgeSave,
   AUTOSAVE_DELAY_MS,
   beginSave,
   initialSaveTracker,
   isDirty as isTrackerDirty,
   isUntracked,
   nextRetryDelay,
+  settleSave,
   untrackedSave,
+  type SaveDisplay,
+  type SaveOutcome,
   type SaveTracker,
 } from "../application/saveTracker";
 import {
@@ -51,8 +53,9 @@ import { copyText } from "../lib/clipboard";
 export type SaveStatusText =
   | ""
   | "saving"
-  | "saved"
-  | "save-failed"
+  // 保存の結末は saveTracker が決めるので、そちらを単一ソースにする（片方だけ
+  // 改名しても、ここが合わなければコンパイルで気づく）。
+  | NonNullable<SaveDisplay>
   | "uploading"
   | "upload-failed"
   | "storage-limit"
@@ -231,6 +234,13 @@ export function useNoteEditor({
       saveRef.current = beginSave(saveRef.current);
       const seq = saveRef.current.issued;
       updateSaveStatus("saving");
+      // 結末の反映は一本化する。追い越された応答が表示を動かさない規則は
+      // saveTracker が持っていて、ここは言われたとおり出すだけ。
+      const settle = (outcome: SaveOutcome) => {
+        const { tracker, display } = settleSave(saveRef.current, seq, outcome);
+        saveRef.current = tracker;
+        if (display) updateSaveStatus(display);
+      };
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
           method: "PUT",
@@ -242,19 +252,10 @@ export function useNoteEditor({
             isPublic: pub ?? isPublic,
           }),
         });
-        if (res.ok) {
-          // Advance the baseline only if no newer save has already been
-          // acknowledged — an out-of-order older completion must not roll the
-          // baseline (and the "unsaved" state) backwards.
-          const acked = acknowledgeSave(saveRef.current, seq, content);
-          saveRef.current = acked.tracker;
-          if (acked.accepted) updateSaveStatus("saved");
-          return true;
-        }
-        updateSaveStatus("save-failed");
-        return false;
+        settle(res.ok ? { ok: true, content } : { ok: false });
+        return res.ok;
       } catch {
-        updateSaveStatus("save-failed");
+        settle({ ok: false });
         return false;
       }
     },

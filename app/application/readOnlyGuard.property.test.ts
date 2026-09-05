@@ -10,11 +10,16 @@
  *   1. 決して編集モードに入らない
  *   2. 折りたたみ以外でモデルが変わらない（`collapsed` を剥がすと初期モデルに
  *      戻るという保存則）
- *   3. reducer 本来のフォーカス不変条件も壊れない
- *   4. `readOnly=false` では editorReducer そのもの（恒等性）
+ *   3. クリップボードを動かせるのは copyBranch だけ
+ *   4. reducer 本来のフォーカス不変条件も壊れない
+ *   5. `readOnly=false` では editorReducer そのもの（恒等性）
  *
- * を確かめる。3 が要るのは、遮断が「reducer の結果を捨てて prev を返す」実装
+ * を確かめる。4 が要るのは、遮断が「reducer の結果を捨てて prev を返す」実装
  * だから: 捨て方を間違えると文書とビューがずれた状態が残りうる。
+ *
+ * さらに `READ_ONLY_ALLOWED`（人が書く宣言）と結果の検査（構造的な保証）が
+ * 食い違っていないこと——**許可したアクションで結果の検査が一度も発動しない**
+ * ——も確かめる。表が嘘をついた瞬間にここが落ちる。
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
@@ -26,7 +31,7 @@ import {
   initialEditorState,
   resolveStep,
 } from "./editorState.arb";
-import { guardedStep } from "./readOnlyGuard";
+import { guardedStep, isReadOnlyAllowed } from "./readOnlyGuard";
 
 describe("readOnly guard along random action sequences", () => {
   it("never enters edit mode and never changes the document except by collapsing", () => {
@@ -48,13 +53,13 @@ describe("readOnly guard along random action sequences", () => {
             expect(action.type, `model changed by ${where}`).toBe("toggleCollapse");
           }
           if (state.document.clipboard !== prev.document.clipboard) {
-            // コピーは読む操作なので通る。カットとペーストは木を変えるので
-            // モデルごと弾かれ、クリップボードも動かない。`replace` は文書を
-            // 丸ごと差し替えるアクションで、同じモデルを載せてくれば通る
-            // （閲覧専用では undo スタックに何も積まれないので実際には来ない）。
-            expect(["copyBranch", "replace"], `clipboard changed by ${where}`).toContain(
-              action.type
-            );
+            // コピーだけが読む操作として通る。カットとペーストは木を変えるので
+            // 宣言で弾かれ、`replace`（undo/redo の文書差し替え）も同様。
+            expect(action.type, `clipboard changed by ${where}`).toBe("copyBranch");
+          }
+          // 弾かれたアクションは何一つ起こしていない（同一参照）。
+          if (!isReadOnlyAllowed(action.type)) {
+            expect(state, `disallowed ${action.type} changed state after ${where}`).toBe(prev);
           }
           expectFocusInvariant(state, where);
         }
@@ -83,6 +88,47 @@ describe("readOnly guard along random action sequences", () => {
       }),
       { numRuns: 100 }
     );
+  });
+});
+
+describe("READ_ONLY_ALLOWED is an honest declaration", () => {
+  it("never needs the result check: an allowed action never edits or opens the editor", () => {
+    fc.assert(
+      fc.property(modelArb, fc.array(actionStepArb, { maxLength: 25 }), (model, steps) => {
+        let state = initialEditorState(model);
+        const mint = sequentialIds("p");
+        const nextId = sequentialIds();
+        for (const step of steps) {
+          const action = resolveStep(step, state, mint);
+          if (!isReadOnlyAllowed(action.type)) {
+            // 宣言で弾かれる手は、状態を進めずに次の手へ（列は続ける）。
+            continue;
+          }
+          // 許可した手を、結果の検査ぬきで（＝素の reducer で）走らせる。
+          const stripped =
+            action.type === "activateNode" && action.editing
+              ? { ...action, editing: false }
+              : action;
+          const raw = editorReducer(state, stripped, nextId);
+          expect(raw.view.editing, `allowed ${action.type} entered edit mode`).toBe(false);
+          if (raw.document.model !== state.document.model) {
+            expect(action.type, `allowed ${action.type} changed the model`).toBe("toggleCollapse");
+          }
+          // よって検査ありの guardedStep と結果が一致する。
+          expect(guardedStep(state, action, true, sequentialIds())).toEqual(raw);
+          state = raw;
+        }
+      }),
+      { numRuns: 300 }
+    );
+  });
+
+  it("is fail-closed for a type that is not in the table", () => {
+    // 網羅とキーの妥当性は `satisfies` がコンパイル時に見る。実行時に効くのは
+    // 「表に無いものを通さない」ことだけ——素の添字なら `Object.prototype` の
+    // メンバが truthy を返して通ってしまう。
+    expect(isReadOnlyAllowed("constructor")).toBe(false);
+    expect(isReadOnlyAllowed("nope")).toBe(false);
   });
 });
 

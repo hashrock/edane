@@ -59,18 +59,73 @@ export const SITE_TEMPLATE_MAX_BYTES = 64 * 1024;
 export const SITE_SCHEMA_MAX_BYTES = 4 * 1024;
 export const SITE_BUILD_MAX_BYTES = 2 * 1024 * 1024;
 
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+/**
+ * `parts` の UTF-8 バイト数の合計が `limit` を超えるか。
+ *
+ * 上限は保存先（D1 の TEXT 列）が実際に食う量の話なので、`.length`（UTF-16
+ * コードユニット数）では測れない——日本語なら1文字3バイト、絵文字なら4バイトで、
+ * `.length` 比較は上限の 1/3 しか守っていなかった。
+ *
+ * ただし UTF-8 は1コードユニットあたり1〜3バイトなので、大半はコードユニット数
+ * だけで決着がつく。2MB のビルド成果物を毎回 `Uint8Array` に符号化しないための
+ * 挟み込み（ASCII 主体の実際の成果物は一度も符号化されない）。この上下限は
+ * 部分ごとの合計でもそのまま成り立つ。
+ *
+ * 数えるのは**各 part を別々に符号化したバイト数の合計**で、連結してから
+ * 符号化した長さではない。html と css は別々の TEXT 列に入るので、それが実際に
+ * 食う量。両者は一致しないことがある——`parts[0]` が上位サロゲートで終わり
+ * `parts[1]` が下位サロゲートで始まると、連結時だけ対になって 3+3=6 バイトが
+ * 4バイトに縮む。
+ */
+export function exceedsBytes(limit: number, ...parts: string[]): boolean {
+  let units = 0;
+  for (const p of parts) units += p.length;
+  if (units > limit) return true; // bytes >= units
+  if (units * 3 <= limit) return false; // bytes <= units * 3
+  let bytes = 0;
+  for (const p of parts) bytes += utf8ByteLength(p);
+  return bytes > limit;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (ch) =>
     ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : "&quot;"
   );
 }
 
-/** 公開サイト関連の URL / パス。ここ以外で `/sites/...` を組み立てない。 */
-export function siteEditPath(pubId: string): string {
-  return `/sites/${encodeURIComponent(pubId)}/edit`;
+/**
+ * id を1つのパスセグメントに符号化する。表現できない id には `undefined`。
+ *
+ * `encodeURIComponent` は `.` を素通しするので、id が `..` だと URL 正規化が
+ * `/sites/../edit` を `/edit` に畳み、パスが `/sites/` の外へ出る。`%2E` へ
+ * 逃がしても無駄で、URL 標準はドットセグメントを percent-encoded の綴りごと
+ * 同一視する。つまり **`.` / `..` に復号されるセグメントは原理的に作れない**。
+ *
+ * 投げないのは、呼び出し側が3つともレンダー中のリンク組み立てだから
+ * （このアプリに error boundary は無く、throw は画面が真っ白になる）。
+ * `undefined` なら `href={undefined}` がリンクを落とすだけで済む。実際の
+ * pubId は `crypto.randomUUID()` 由来なのでここには来ない。
+ */
+function encodePathSegment(id: string): string | undefined {
+  return id === "." || id === ".." ? undefined : encodeURIComponent(id);
 }
-export function siteUrl(origin: string, pubId: string): string {
-  return `${origin.replace(/\/+$/, "")}/sites/${encodeURIComponent(pubId)}`;
+
+/**
+ * 公開サイト関連の URL / パス。ここ以外で `/sites/...` を組み立てない。
+ * 1つのパスセグメントにできない id には `undefined`（= リンクを出さない）。
+ */
+export function siteEditPath(pubId: string): string | undefined {
+  const seg = encodePathSegment(pubId);
+  // `seg &&` ではなく明示的に比較する（空 id は空セグメントで、falsy だが有効）。
+  return seg === undefined ? undefined : `/sites/${seg}/edit`;
+}
+export function siteUrl(origin: string, pubId: string): string | undefined {
+  const seg = encodePathSegment(pubId);
+  return seg === undefined ? undefined : `${origin.replace(/\/+$/, "")}/sites/${seg}`;
 }
 
 /**
@@ -134,8 +189,8 @@ export function validateSiteSave(body: unknown):
   if (typeof template !== "string" || typeof html !== "string" || typeof css !== "string" || typeof schema !== "string") {
     return { ok: false, error: "template, html and css are required" };
   }
-  if (template.length > SITE_TEMPLATE_MAX_BYTES) return { ok: false, error: "Template too large" };
-  if (schema.length > SITE_SCHEMA_MAX_BYTES) return { ok: false, error: "Schema too large" };
-  if (html.length + css.length > SITE_BUILD_MAX_BYTES) return { ok: false, error: "Build too large" };
+  if (exceedsBytes(SITE_TEMPLATE_MAX_BYTES, template)) return { ok: false, error: "Template too large" };
+  if (exceedsBytes(SITE_SCHEMA_MAX_BYTES, schema)) return { ok: false, error: "Schema too large" };
+  if (exceedsBytes(SITE_BUILD_MAX_BYTES, html, css)) return { ok: false, error: "Build too large" };
   return { ok: true, template, schema, build: { html, css } };
 }
