@@ -96,6 +96,16 @@ export function nodeIds(model: MindMapModel): string[] {
   return allIds(model).slice(1);
 }
 
+/**
+ * `collapsed` を落とした木。折りたたみは表示状態なので、木の中身だけを比べたい
+ * 比較（畳まれていない状態を前提にする参照実装、折りたたみ以外の変化が無いこと
+ * の確認）はこれを通してから行う。
+ */
+export function uncollapsed(node: MindMapModel): MindMapModel {
+  const { collapsed: _collapsed, ...rest } = node;
+  return { ...rest, children: node.children.map(uncollapsed) };
+}
+
 export function expectUniqueIds(model: MindMapModel): void {
   const ids = allIds(model);
   expect(new Set(ids).size).toBe(ids.length);

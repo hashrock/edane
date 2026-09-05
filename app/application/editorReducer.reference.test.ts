@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { topLevelNodes, type IdSource, type MindMapModel } from "../domain/model";
-import { modelArb, sequentialIds } from "../domain/model.arb";
+import { modelArb, sequentialIds, uncollapsed } from "../domain/model.arb";
 import { editorReducer, type EditorAction, type EditorState } from "./editorReducer";
 import { editorStateAt } from "./editorState.arb";
 
@@ -279,10 +279,6 @@ const KINDS: RefAction["kind"][] = [
 ];
 const stepArb = fc.record({ kind: fc.constantFrom(...KINDS), n: fc.nat() });
 
-const uncollapsed = (n: MindMapModel): MindMapModel => {
-  const { collapsed: _c, ...rest } = n;
-  return { ...rest, children: n.children.map(uncollapsed) };
-};
 const openModelArb = modelArb.map(uncollapsed);
 
 describe("editorReducer vs. flat-outline reference", () => {

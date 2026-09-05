@@ -27,6 +27,7 @@ import {
   SITE_SEARCH_SCRIPT,
   SITE_TEMPLATE_MAX_BYTES,
   renderSiteResponse,
+  exceedsBytes,
   siteEditPath,
   siteUrl,
   validateSiteSave,
@@ -159,30 +160,95 @@ describe("renderSiteResponse", () => {
 });
 
 describe("site urls", () => {
-  it("put the id in one path segment that decodes back to it, with no separator escaping it", () => {
+  /**
+   * `.` / `..` はドットセグメントとして URL 正規化に食われる。percent-encoded の
+   * 綴り（`%2e`）でも同じ扱いなので、この2つに復号されるセグメントは作れない
+   * ——ビルダーは `undefined` を返してリンクを出さない。それ以外は必ず
+   * `/sites/` の内側の1セグメントに収まり、復号すると元の id に戻る。
+   */
+  const pubIdArb = fc.oneof(
+    fc.constantFrom(".", "..", "../..", "%2e%2e", "a.b", "...", "a/b", "a?b#c"),
+    fc.string({ unit: "grapheme", maxLength: 12 })
+  );
+
+  it("puts the id in one path segment that survives URL normalisation and decodes back", () => {
     fc.assert(
-      fc.property(fc.string({ unit: "grapheme", maxLength: 12 }), (pubId) => {
+      fc.property(pubIdArb, (pubId) => {
+        const url = siteUrl("https://x.test", pubId);
         const path = siteEditPath(pubId);
-        const seg = path.slice("/sites/".length, -"/edit".length);
-        expect(path).toBe(`/sites/${seg}/edit`);
+        if (pubId === "." || pubId === "..") {
+          // 表現できない2つ。投げずに落とす（呼び出し側はレンダー中）。
+          expect(url).toBeUndefined();
+          expect(path).toBeUndefined();
+          return;
+        }
+        // URL() がドットセグメントを畳んだあとも `/sites/` の内側にいる。
+        const viewed = new URL(url!);
+        const edited = new URL(`https://x.test${path}`);
+        expect(viewed.pathname).toMatch(/^\/sites\/[^/]*$/);
+        expect(edited.pathname).toMatch(/^\/sites\/[^/]*\/edit$/);
+        const seg = viewed.pathname.slice("/sites/".length);
         expect(seg).not.toMatch(/[/?#&\s]/);
         expect(decodeURIComponent(seg)).toBe(pubId);
-        expect(siteUrl("https://x.test", pubId)).toBe(`https://x.test/sites/${seg}`);
+        // 2つのビルダーは同じセグメントを使う。
+        expect(path).toBe(`/sites/${seg}/edit`);
       })
     );
   });
 
   it("strips every trailing slash of the origin, never doubling the separator", () => {
     fc.assert(
-      fc.property(
-        fc.string({ unit: "grapheme", maxLength: 12 }),
-        fc.nat({ max: 4 }),
-        (pubId, slashes) => {
-          const url = siteUrl("https://x.test" + "/".repeat(slashes), pubId);
-          expect(url).toBe(siteUrl("https://x.test", pubId));
-          expect(url).not.toContain("//sites/");
-        }
-      )
+      fc.property(pubIdArb, fc.nat({ max: 4 }), (pubId, slashes) => {
+        const url = siteUrl("https://x.test" + "/".repeat(slashes), pubId);
+        expect(url).toBe(siteUrl("https://x.test", pubId));
+        expect(url ?? "").not.toContain("//sites/");
+      })
+    );
+  });
+});
+
+describe("exceedsBytes", () => {
+  /**
+   * ロング・サロゲートも引ける、多バイトを狙った生成器。`unit: "binary"` は
+   * 同じ目的を果たすが生成が桁違いに遅いので、単位を明示して同じ被覆を得る。
+   */
+  const mixedArb = fc.string({
+    unit: fc.constantFrom("a", " ", "é", "あ", "😀", "\uD800", "\uDFFF"),
+    maxLength: 40,
+  });
+
+  /** 各 part を別々に符号化した合計 = 列ごとに保存されるバイト数。 */
+  const bytesOf = (...parts: string[]) =>
+    parts.reduce((n, p) => n + new TextEncoder().encode(p).length, 0);
+
+  it("agrees with the platform encoder at every limit, short-circuits or not", () => {
+    fc.assert(
+      fc.property(mixedArb, mixedArb, fc.nat({ max: 130 }), (a, b, limit) => {
+        // 挟み込み（units / units*3）で早期に決める枝と、実際に符号化する枝の
+        // どちらを通っても答えは同じでなければならない。
+        expect(exceedsBytes(limit, a, b)).toBe(bytesOf(a, b) > limit);
+        expect(exceedsBytes(limit, a)).toBe(bytesOf(a) > limit);
+      }),
+      { numRuns: 300 }
+    );
+  });
+
+  it("counts each part separately — parts land in separate columns, so a surrogate pair split across the boundary is not re-joined", () => {
+    // 上位サロゲートで終わり、下位サロゲートで始まる。連結すると対になって
+    // 4バイトだが、別々に保存されるので実際は 3 + 3 = 6 バイト。
+    const a = "\uD800";
+    const b = "\uDFFF";
+    expect(bytesOf(a, b)).toBe(6);
+    expect(new TextEncoder().encode(a + b).length).toBe(4);
+    expect(exceedsBytes(5, a, b)).toBe(true);
+    expect(exceedsBytes(6, a, b)).toBe(false);
+  });
+
+  it("counts ASCII as one byte each, so an ASCII body behaves exactly as before", () => {
+    fc.assert(
+      fc.property(fc.stringMatching(/^[ -~]{0,40}$/), fc.nat({ max: 60 }), (ascii, limit) => {
+        expect(exceedsBytes(limit, ascii)).toBe(ascii.length > limit);
+      })
     );
   });
 });
@@ -191,6 +257,28 @@ describe("validateSiteSave", () => {
   /** Lengths straddling each limit, so both sides of every branch are hit. */
   const around = (limit: number) => fc.constantFrom(0, 1, limit - 1, limit, limit + 1);
   const filler = (n: number) => "x".repeat(n);
+
+  it("measures every limit in UTF-8 bytes, so multi-byte content cannot slip past it", () => {
+    fc.assert(
+      fc.property(
+        // 「あ」は UTF-8 で3バイト、絵文字は4バイト。UTF-16 長で測っていた頃は
+        // 上限ちょうどの「文字数」まで通っていたので、上限の3〜4倍の実バイト数が
+        // 保存されていた。
+        fc.constantFrom("あ", "😀", "é"),
+        fc.constantFrom(-1, 0, 1),
+        (ch, delta) => {
+          const bytesOf = (s: string) => new TextEncoder().encode(s).length;
+          // ちょうど上限に収まる個数 ± 1 文字。
+          const count = Math.floor(SITE_SCHEMA_MAX_BYTES / bytesOf(ch)) + delta;
+          const schema = ch.repeat(count);
+          const r = validateSiteSave({ template: "", schema, html: "", css: "" });
+          expect(r.ok).toBe(bytesOf(schema) <= SITE_SCHEMA_MAX_BYTES);
+          // 旧実装（UTF-16 長で比較）なら全部通っていたことを対比として固定する。
+          expect(schema.length).toBeLessThanOrEqual(SITE_SCHEMA_MAX_BYTES);
+        }
+      )
+    );
+  });
 
   it("accepts exactly the string bodies that fit every limit", () => {
     fc.assert(

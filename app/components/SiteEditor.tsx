@@ -156,6 +156,8 @@ export default function SiteEditor({
     setAi({ kind: "done" });
   }, [apiBase, aiInstruction, template, schemaText]);
 
+  // `undefined` はパスセグメントにできない id のときだけ（実際の pubId は
+  // UUID なので来ない）。リンクとコピーが無効になるだけ。
   const publicUrl = siteUrl(window.location.origin, publicationId);
 
   const onTemplateKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -187,7 +189,7 @@ export default function SiteEditor({
               </a>
               <button
                 type="button"
-                onClick={() => void copyText(publicUrl).then((ok) => setCopied(ok))}
+                onClick={() => publicUrl && void copyText(publicUrl).then((ok) => setCopied(ok))}
                 className="rounded border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-100"
               >
                 {copied ? t("copied") : t("copy")}

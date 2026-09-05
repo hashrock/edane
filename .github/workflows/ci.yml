@@ -23,9 +23,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Types first: cheapest signal, and vitest transpiles without typechecking
-      # so a type error would otherwise sail through the test jobs below.
-      - name: Typecheck
+      # `typecheck` builds first (see package.json): the build is itself a gate
+      # — a broken build used to reach main unnoticed — and it writes the
+      # gitignored `app/pages.gen.ts`. Without that file `InertiaPages` is empty
+      # and `PageName` degrades to `string`, so `tsc` silently stops checking
+      # the page names in server.ts. Keeping the dependency in the script, not
+      # in this file, means a fresh clone gets the same guarantee locally.
+      #
+      # Types before tests: cheap signal, and vitest transpiles without
+      # typechecking so a type error would otherwise sail through below.
+      - name: Build & typecheck
         run: pnpm run typecheck
 
       # Node (framework-agnostic) tests.

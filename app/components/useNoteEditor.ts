@@ -14,11 +14,24 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { router } from "@inertiajs/react";
 import { type MindMapModel, findNode, firstNavigableId } from "../domain/model";
 import {
-  editorReducer,
   type EditorState,
   type EditorAction,
   type UndoType,
 } from "../application/editorReducer";
+import { guardedStep } from "../application/readOnlyGuard";
+import {
+  AUTOSAVE_DELAY_MS,
+  beginSave,
+  initialSaveTracker,
+  isDirty as isTrackerDirty,
+  isUntracked,
+  nextRetryDelay,
+  settleSave,
+  untrackedSave,
+  type SaveDisplay,
+  type SaveOutcome,
+  type SaveTracker,
+} from "../application/saveTracker";
 import {
   parseContent,
   serializeModel,
@@ -40,8 +53,9 @@ import { copyText } from "../lib/clipboard";
 export type SaveStatusText =
   | ""
   | "saving"
-  | "saved"
-  | "save-failed"
+  // 保存の結末は saveTracker が決めるので、そちらを単一ソースにする（片方だけ
+  // 改名しても、ここが合わなければコンパイルで気づく）。
+  | NonNullable<SaveDisplay>
   | "uploading"
   | "upload-failed"
   | "storage-limit"
@@ -148,23 +162,15 @@ export function useNoteEditor({
   const [leaveConfirm, setLeaveConfirm] = useState<LeaveConfirm | null>(null);
 
   const saveTimerRef = useRef<any>(null);
-  // Serialized content last confirmed persisted. The server just handed us the
-  // initial model, so that's our clean baseline; every successful save advances
-  // it. `isDirty()` compares the live model against this. Lazily initialized:
-  // useRef(arg) は毎レンダーで引数を評価するので、素直に書くとレンダー毎に
-  // モデル全体を serialize してしまう（readOnly では丸ごと不要）。
-  const lastSavedContentRef = useRef<string | null>(null);
-  if (lastSavedContentRef.current === null && noteId && !readOnly) {
-    lastSavedContentRef.current = serializeModel(model);
+  // Autosave bookkeeping (baseline + out-of-order acks) — the rules live in
+  // application/saveTracker.ts; this ref just holds the value. Lazily
+  // initialized: useRef(arg) は毎レンダーで引数を評価するので、素直に書くと
+  // レンダー毎にモデル全体を serialize してしまう（readOnly では丸ごと不要）。
+  // The server just handed us the initial model, so that's the clean baseline.
+  const saveRef = useRef<SaveTracker>(untrackedSave);
+  if (isUntracked(saveRef.current) && noteId && !readOnly) {
+    saveRef.current = initialSaveTracker(serializeModel(model));
   }
-  // Monotonic save-dispatch counter. An edit can arrive while a save is still
-  // in flight, so two saves run concurrently and their responses may land out
-  // of order. Each save takes the next `saveSeqRef` on dispatch; on success we
-  // only advance the baseline when this save is the newest one acknowledged
-  // (`ackedSeqRef`), so a slow older save can never regress the baseline and
-  // resurrect a false "unsaved" state.
-  const saveSeqRef = useRef(0);
-  const ackedSeqRef = useRef(0);
   // Set true just before re-issuing a visit we already flushed, so the
   // navigation guard lets that one visit pass through instead of re-flushing.
   const bypassNavGuardRef = useRef(false);
@@ -177,25 +183,11 @@ export function useNoteEditor({
   const dispatch = useCallback(
     (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
-      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する。
-      // クリックによる選択は活かしたいので、activateNode は編集突入だけ剥がす。
-      if (readOnly && action.type === "activateNode" && action.editing) {
-        action = { ...action, editing: false };
-      }
-      const next = editorReducer(prev, action);
+      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する
+      // （規則は application/readOnlyGuard.ts）。
+      const next = guardedStep(prev, action, readOnly);
       if (next === prev) return prev;
-      if (readOnly) {
-        // 編集モードに入る遷移は捨てる（startEditing / dragSelect など）。
-        if (next.view.editing) return prev;
-        // モデルを変えるアクションも捨てる。折りたたみだけは閲覧操作として通す
-        // （保存系は readOnly で全部止まっているので永続化はされない）。
-        if (
-          next.document.model !== prev.document.model &&
-          action.type !== "toggleCollapse"
-        ) {
-          return prev;
-        }
-      } else if (undoType && next.document !== prev.document) {
+      if (!readOnly && undoType && next.document !== prev.document) {
         undoManagerRef.current.push(undoType, prev.document, next.document);
       }
       stateRef.current = next;
@@ -239,8 +231,16 @@ export function useNoteEditor({
     async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
       if (!noteId || readOnly) return true;
       const content = serializeModel(currentModel);
-      const seq = ++saveSeqRef.current;
+      saveRef.current = beginSave(saveRef.current);
+      const seq = saveRef.current.issued;
       updateSaveStatus("saving");
+      // 結末の反映は一本化する。追い越された応答が表示を動かさない規則は
+      // saveTracker が持っていて、ここは言われたとおり出すだけ。
+      const settle = (outcome: SaveOutcome) => {
+        const { tracker, display } = settleSave(saveRef.current, seq, outcome);
+        saveRef.current = tracker;
+        if (display) updateSaveStatus(display);
+      };
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
           method: "PUT",
@@ -252,21 +252,10 @@ export function useNoteEditor({
             isPublic: pub ?? isPublic,
           }),
         });
-        if (res.ok) {
-          // Advance the baseline only if no newer save has already been
-          // acknowledged — an out-of-order older completion must not roll the
-          // baseline (and the "unsaved" state) backwards.
-          if (seq > ackedSeqRef.current) {
-            ackedSeqRef.current = seq;
-            lastSavedContentRef.current = content;
-            updateSaveStatus("saved");
-          }
-          return true;
-        }
-        updateSaveStatus("save-failed");
-        return false;
+        settle(res.ok ? { ok: true, content } : { ok: false });
+        return res.ok;
       } catch {
-        updateSaveStatus("save-failed");
+        settle({ ok: false });
         return false;
       }
     },
@@ -274,13 +263,11 @@ export function useNoteEditor({
   );
 
   // Are there edits not yet confirmed persisted? Only meaningful with a noteId
-  // (guest/embed mode has no autosave and nothing to guard).
+  // (guest/embed mode has no autosave and nothing to guard — the tracker has
+  // no baseline there, so this is false).
   const isDirty = useCallback(
-    () =>
-      !!noteId &&
-      !readOnly &&
-      serializeModel(modelRef.current) !== lastSavedContentRef.current,
-    [noteId, readOnly]
+    () => isTrackerDirty(saveRef.current, serializeModel(modelRef.current)),
+    []
   );
 
   // Debounced auto-save (with retry-on-failure).
@@ -299,10 +286,10 @@ export function useNoteEditor({
     const arm = (delay: number) => {
       saveTimerRef.current = setTimeout(async () => {
         const ok = await saveNote(modelRef.current);
-        if (!cancelled && !ok && isDirty()) arm(Math.min(delay * 2, 15000));
+        if (!cancelled && !ok && isDirty()) arm(nextRetryDelay(delay));
       }, delay);
     };
-    arm(1500);
+    arm(AUTOSAVE_DELAY_MS);
     return () => {
       cancelled = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);

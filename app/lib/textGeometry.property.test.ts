@@ -2,9 +2,8 @@
  * Caret geometry on random multi-line text (node fallback measurement: 8px
  * per character, a character-count wrap estimate).
  *
- *  - wrapNodeText: the visual lines are substrings of the source at their
- *    lineStarts, in increasing order, joined back they are the visualText, and
- *    with an infinite cap they are exactly the hard lines;
+ *  (wrapNodeText's own invariants live with it, in measureText.property.test.ts.)
+ *
  *  - posToLineCol / lineColToPos: inverse of each other at every offset when
  *    only hard breaks exist; with soft wraps an offset inside consumed
  *    whitespace resolves to the end of its line, never past the offset;
@@ -27,34 +26,6 @@ import { wrapNodeText } from "./measureText";
 
 const lineArb = fc.string({ maxLength: 70 }).map((s) => s.replace(/\n/g, " "));
 const textArb = fc.array(lineArb, { minLength: 1, maxLength: 5 }).map((ls) => ls.join("\n"));
-
-describe("wrapNodeText", () => {
-  it("yields ordered substrings that join back to visualText; an infinite cap gives the hard lines", () => {
-    fc.assert(
-      fc.property(textArb, fc.constantFrom(Infinity, 60, 120, 420), (text, cap) => {
-        const w = wrapNodeText(text, { maxWidth: cap });
-        expect(w.lines.join("\n")).toBe(w.visualText);
-        expect(w.lineStarts.length).toBe(w.lines.length);
-        expect(w.lineStarts[0]).toBe(0);
-        for (let i = 0; i < w.lines.length; i++) {
-          expect(text.startsWith(w.lines[i], w.lineStarts[i])).toBe(true);
-          if (i > 0) expect(w.lineStarts[i]).toBeGreaterThan(w.lineStarts[i - 1]);
-        }
-        if (cap === Infinity) {
-          expect(w.lines).toEqual(text.split("\n"));
-        } else {
-          expect(w.lines.length).toBeGreaterThanOrEqual(text.split("\n").length);
-          // Trailing whitespace on a hard line is kept (the caret can sit in it)
-          // and still counts toward the last visual line's width, so the cap
-          // only binds for lines without it.
-          if (!text.split("\n").some((l) => /\s$/.test(l))) {
-            expect(w.width).toBeLessThanOrEqual(cap + 1e-9);
-          }
-        }
-      })
-    );
-  });
-});
 
 describe("posToLineCol / lineColToPos", () => {
   it("round-trip every offset with hard breaks only", () => {
