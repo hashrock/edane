@@ -28,6 +28,7 @@ import { pasteCommand, type PasteSource } from "./editorCommands";
 import { editorReducer, type EditorState } from "./editorReducer";
 import {
   actionStepArb,
+  editorStateAt,
   expectFocusInvariant,
   initialEditorState,
   onTrailingEdge,
@@ -75,6 +76,31 @@ function selecting(model: MindMapModel, nodeId: string): EditorState {
     editing: false,
   });
 }
+
+/**
+ * The caret a text action reports is a position in the TEXTAREA, which is not
+ * always a position in the model (see deleteAtEnd in editorReducer.ts). The
+ * sequence property above states the same bound — it is expectFocusInvariant's
+ * caret clause — but only draws the document swap next to the delete, on a node
+ * that has a successor to merge, after tens of thousands of runs: a soak found
+ * it at 350x, 1000x and 1600x, each on a different seed, while the normal 300
+ * let it through. Stating the bound over the reported caret directly costs a
+ * handful of runs. `max` stays near the generated text lengths so both sides of
+ * deleteAtEnd's "is the caret at the end?" guard get sampled.
+ */
+describe("deleteAtEnd against a caret the model cannot vouch for", () => {
+  it("never leaves the caret outside the text it is a caret into", () => {
+    fc.assert(
+      fc.property(modelAndVisibleArb, fc.nat({ max: 20 }), ({ model, nodeId }, pos) => {
+        const state = editorStateAt(model, nodeId, { editing: true });
+        const next = editorReducer(state, { type: "deleteAtEnd", pos });
+        const len = next.view.editingText.length;
+        expect(next.view.cursorPos).toBeLessThanOrEqual(len);
+        expect(next.view.selectionEnd).toBeLessThanOrEqual(len);
+      })
+    );
+  });
+});
 
 describe("selection-mode ↑/↓ (sibling-first) is decided by tree position only", () => {
   it("↓ dead-ends exactly on the trailing edge, otherwise lands outside the subtree on the next sibling-or-ancestor's-sibling", () => {
