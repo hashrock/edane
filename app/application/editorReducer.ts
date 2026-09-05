@@ -388,11 +388,10 @@ function documentReducer(
       // Hand the (now longer) node back through the generic focus path so the
       // view's editingText follows the merge; the caret stays at the join.
       // The join is the PRE-merge length, not `action.pos`: focusCursorPos is a
-      // model position (as in backspaceAtStart), while `action.pos` comes from
-      // the textarea, whose value can outrun the model — undo swaps the
-      // document through `replace` and carries the view over as-is (see
-      // reconcileView), and a stale caret clears the guard above while pointing
-      // past the merged text.
+      // model position (as in backspaceAtStart), while `action.pos` is an
+      // offset into the textarea's value, which the reducer cannot assume is
+      // the same string. Any caret at or past the end of the node means the
+      // same thing here — the join — so read it from the model.
       const joinPos = currentNode.text.length;
       return {
         document: { ...document, model: newModel },
@@ -688,6 +687,34 @@ function documentReducer(
 }
 
 // --- View reducer ---
+
+/**
+ * The caret invariant: cursorPos and selectionEnd are offsets INTO
+ * `editingText`, so they must lie within it.
+ *
+ * A caret cannot be checked where it enters. It arrives from the textarea —
+ * `action.pos`, `action.cursorPos`, a drag's offsets — describing the
+ * textarea's value at the moment of the event, while `editingText` is whatever
+ * the case assigns; the two disagree whenever the document moved underneath
+ * the buffer or the event raced the model. Cases building a view literal
+ * directly (activateNode, dragSelect) bypass focusView and each had to
+ * remember to bound the caret themselves; `setTitle` was the only one that did.
+ *
+ * Normalising on the way out instead makes the bound structural — a new case
+ * cannot reintroduce the gap, because it never gets to return an unnormalised
+ * view. The reducer has two exits and both apply it: the tail of editorReducer,
+ * and reconcileView for the `replace` path that returns before it. Identity is
+ * preserved when nothing is out of range, so a no-op still returns the same
+ * reference.
+ */
+function withCaretInBuffer(view: ViewState): ViewState {
+  const len = view.editingText.length;
+  const cursorPos = Math.min(Math.max(view.cursorPos, 0), len);
+  const selectionEnd = Math.min(Math.max(view.selectionEnd, 0), len);
+  if (cursorPos === view.cursorPos && selectionEnd === view.selectionEnd)
+    return view;
+  return { ...view, cursorPos, selectionEnd };
+}
 
 /**
  * Move focus to a node, resolving its text from the (new) document model.
@@ -1056,13 +1083,9 @@ function viewReducer(
 
     case "setTitle": {
       if (view.activeNodeId !== prevDocument.model.id) return view;
-      const clamp = (pos: number) => Math.min(pos, action.text.length);
-      return {
-        ...view,
-        editingText: action.text,
-        cursorPos: clamp(view.cursorPos),
-        selectionEnd: clamp(view.selectionEnd),
-      };
+      // The title can get shorter under the caret; withCaretInBuffer brings it
+      // back in range on the way out.
+      return { ...view, editingText: action.text };
     }
 
     case "replace":
@@ -1088,6 +1111,19 @@ function viewReducer(
  * previous node, then the next — mirroring deleteNode's refocus behaviour so
  * selection stays close to where the user was. Without it (or when no
  * neighbour survives) we fall back to the first top-level node.
+ *
+ * A node that survived the swap needs reconciling too, in the text: the view
+ * carries `editingText`, the textarea's value, and undo restores the document
+ * *under* it. Left alone, the textarea keeps showing the pre-undo text — ⌘Z
+ * visibly does nothing to the node being edited — and the next keystroke
+ * commits that buffer back through typeText, silently undoing the undo. So the
+ * buffer is re-read from the restored node and the caret is kept where it was,
+ * clamped into the text that is actually there now.
+ *
+ * The one buffer that is *meant* to run ahead of the model — an uncommitted IME
+ * composition — is not excepted here, because composition is not in ViewState.
+ * It does not have to be: both editors' onKeyDown returns while isComposing, so
+ * no undo/redo can be dispatched mid-composition in the first place.
  */
 export function reconcileView(
   view: ViewState,
@@ -1096,7 +1132,10 @@ export function reconcileView(
 ): ViewState {
   const visible = new Set(getFlatOrder(document.model));
   if (view.activeNodeId && visible.has(view.activeNodeId)) {
-    return view;
+    const text = findNode(document.model, view.activeNodeId)!.text;
+    return withCaretInBuffer(
+      text === view.editingText ? view : { ...view, editingText: text }
+    );
   }
   // Existing but hidden — the document swap (undo of an expand, say) folded
   // an ancestor over the active node. Land on the ancestor that hides it,
@@ -1188,14 +1227,16 @@ export function editorReducer(
     docResult.document = { ...docResult.document, model };
     docResult.focusId = firstNavigableId(model);
   }
-  const nextView = viewReducer(
-    state.view,
-    action,
-    state.document,
-    docResult.document,
-    docResult.focusId,
-    docResult.focusCursorPos,
-    docResult.focusSelectionEnd
+  const nextView = withCaretInBuffer(
+    viewReducer(
+      state.view,
+      action,
+      state.document,
+      docResult.document,
+      docResult.focusId,
+      docResult.focusCursorPos,
+      docResult.focusSelectionEnd
+    )
   );
 
   if (docResult.document === state.document && nextView === state.view) {

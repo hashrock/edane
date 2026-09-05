@@ -101,6 +101,36 @@ describe("MindmapEditor undo/redo", () => {
     await waitFor(() => api().getModel().children[0].text.includes("X"));
   });
 
+  it("undo while editing refreshes the textarea, so the next keystroke cannot revert it (regression)", async () => {
+    // Undo is `when: "global"` — it fires while a node is being edited, and it
+    // restores only the document. The view (and with it editingText, which IS
+    // the textarea's value) used to ride over unchanged: ⌘Z left the pre-undo
+    // text on screen, and the next character was sent as typeText carrying that
+    // whole stale buffer, committing it back and silently undoing the undo.
+    // reconcileView now re-reads the buffer from the restored node.
+    render(
+      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    );
+    await activate("a");
+
+    await userEvent.keyboard("{End}");
+    await userEvent.keyboard("X");
+    await waitFor(() => api().getModel().children[0].text.includes("X"));
+
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    await waitFor(() => api().getModel().children[0].text === "Alpha");
+    // The textarea shows the restored text, not the one that was undone.
+    const input = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    await waitFor(() => input.value === "Alpha");
+
+    // The next keystroke must build on "Alpha". Before the fix it carried the
+    // stale buffer along and the "X" came back with it.
+    await userEvent.keyboard("{End}");
+    await userEvent.keyboard("Y");
+    await waitFor(() => api().getModel().children[0].text.includes("Y"));
+    expect(api().getModel().children[0].text).not.toContain("X");
+  });
+
   it("undoing a pasted branch lands the active node on the nearest surviving neighbour (regression)", async () => {
     // Undo only restores the document (see UndoManager); if the active node
     // was part of what got undone, activeNodeId used to keep pointing at a

@@ -67,8 +67,9 @@ export function initialEditorState(model: MindMapModel): EditorState {
  * The editor's standing invariant, checked after any action: ids unique; a
  * top-level node exists; the active node is set, is not the (invisible) root
  * and is visible (no collapsed ancestor); nested nodes carry no canvas
- * position; while editing (and the buffer matches the model), the caret stays
- * within the edited text. One DFS collects everything.
+ * position; the caret stays within the edit buffer. One DFS collects
+ * everything. (That the buffer itself tracks the model is a separate property
+ * — see "the edit buffer follows the document" in editorReducer.property.test.)
  */
 export function expectFocusInvariant(state: EditorState, trail: string): void {
   const { model } = state.document;
@@ -90,15 +91,17 @@ export function expectFocusInvariant(state: EditorState, trail: string): void {
   expect(active, `active node after ${trail}`).not.toBeNull();
   expect(active, `active is root after ${trail}`).not.toBe(model.id);
   expect(visible.has(active!), `active visible after ${trail}`).toBe(true);
-  // Mid-IME the buffer runs ahead of the model (typeText with
-  // commitModel=false), and caret actions are defined against the committed
-  // text; the bound only holds once the two agree.
-  const committed = findNode(model, active!)?.text;
-  if (state.view.editing && committed === state.view.editingText) {
-    const len = state.view.editingText.length;
-    expect(state.view.cursorPos, `caret after ${trail}`).toBeLessThanOrEqual(len);
-    expect(state.view.selectionEnd, `selection after ${trail}`).toBeLessThanOrEqual(len);
-  }
+  // The caret is an offset into editingText, so it is bounded by editingText —
+  // NOT by the model's text, and with no exemptions. It used to be checked only
+  // where the two agreed, which quietly excused mid-IME states (typeText with
+  // commitModel=false, where the buffer is *meant* to run ahead) but also every
+  // state where a document swap had left the buffer stale. withCaretInBuffer
+  // normalises every view the reducer returns, so the bound is unconditional.
+  const len = state.view.editingText.length;
+  expect(state.view.cursorPos, `caret after ${trail}`).toBeGreaterThanOrEqual(0);
+  expect(state.view.cursorPos, `caret after ${trail}`).toBeLessThanOrEqual(len);
+  expect(state.view.selectionEnd, `selection after ${trail}`).toBeGreaterThanOrEqual(0);
+  expect(state.view.selectionEnd, `selection after ${trail}`).toBeLessThanOrEqual(len);
 }
 
 /** Is the node on the tree's trailing edge (last child of a last child … of the last top-level node)? */
@@ -233,16 +236,22 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
   // asynchronous completions (link metadata, uploads) and undo may name any.
   const vis = (n: number) => pick(getFlatOrder(model), n);
   const id = (n: number) => pick(nodeIds(model), n);
+  // What a pointer gesture can address is what is on screen: the buffer for the
+  // node being edited (the canvas measures the live editingText), the model's
+  // text for every other node.
   const textOf = (nodeId: string | null) =>
-    nodeId ? (findNode(model, nodeId)?.text ?? "") : "";
+    nodeId === state.view.activeNodeId && state.view.editing
+      ? state.view.editingText
+      : nodeId
+        ? (findNode(model, nodeId)?.text ?? "")
+        : "";
   // Caret positions come from the textarea, whose value is the live
-  // editingText while editing (it may run ahead of the model mid-IME, or
-  // after `replace` swaps the document under a view that keeps editing).
-  // Sequences that pair the mid-IME divergence with a keymap action are not
-  // reachable in the app — both editors' onKeyDown returns while isComposing —
-  // but they are kept: they cost nothing to generate and modelling the
-  // textarea faithfully is what exposes the `replace` variant, which IS
-  // reachable (see deleteAtEnd's join comment in editorReducer.ts).
+  // editingText while editing — it runs ahead of the model mid-IME (typeText
+  // with commitModel=false). Pairing that divergence with a keymap action is
+  // not reachable in the app (both editors' onKeyDown returns while
+  // isComposing), but it is generated anyway: it costs nothing, and modelling
+  // the textarea rather than the model is what makes these sequences able to
+  // report a caret the model cannot vouch for.
   const activeText = state.view.editing
     ? state.view.editingText
     : textOf(state.view.activeNodeId);

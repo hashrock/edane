@@ -25,7 +25,7 @@ import {
 } from "../domain/model";
 import { modelAndVisibleArb, modelArb, nodeArb, sequentialIds } from "../domain/model.arb";
 import { pasteCommand, type PasteSource } from "./editorCommands";
-import { editorReducer, type EditorState } from "./editorReducer";
+import { editorReducer, reconcileView, type EditorState } from "./editorReducer";
 import {
   actionStepArb,
   editorStateAt,
@@ -78,26 +78,98 @@ function selecting(model: MindMapModel, nodeId: string): EditorState {
 }
 
 /**
- * The caret a text action reports is a position in the TEXTAREA, which is not
- * always a position in the model (see deleteAtEnd in editorReducer.ts). The
- * sequence property above states the same bound — it is expectFocusInvariant's
- * caret clause — but only draws the document swap next to the delete, on a node
- * that has a successor to merge, after tens of thousands of runs: a soak found
- * it at 350x, 1000x and 1600x, each on a different seed, while the normal 300
- * let it through. Stating the bound over the reported caret directly costs a
- * handful of runs. `max` stays near the generated text lengths so both sides of
- * deleteAtEnd's "is the caret at the end?" guard get sampled.
+ * withCaretInBuffer now bounds every caret the reducer returns, so "the caret
+ * stays inside the text" is structural and would pass here for free. What is
+ * NOT structural is *where* the caret lands: deleteAtEnd promises the join, and
+ * any reported position at or past the end of the node has to mean that same
+ * place — which is the contract the #147 soak failure was really about. `max`
+ * stays near the generated text lengths so both sides of deleteAtEnd's "is the
+ * caret at the end?" guard get sampled.
  */
 describe("deleteAtEnd against a caret the model cannot vouch for", () => {
-  it("never leaves the caret outside the text it is a caret into", () => {
+  it("lands the caret on the join for any reported position at or past the end", () => {
     fc.assert(
       fc.property(modelAndVisibleArb, fc.nat({ max: 20 }), ({ model, nodeId }, pos) => {
+        const before = findNode(model, nodeId)!.text;
+        fc.pre(pos >= before.length);
         const state = editorStateAt(model, nodeId, { editing: true });
         const next = editorReducer(state, { type: "deleteAtEnd", pos });
-        const len = next.view.editingText.length;
-        expect(next.view.cursorPos).toBeLessThanOrEqual(len);
-        expect(next.view.selectionEnd).toBeLessThanOrEqual(len);
+        fc.pre(next !== state); // no successor to merge: nothing to say
+        expect(next.view.editingText).toBe(findNode(next.document.model, nodeId)!.text);
+        expect(next.view.cursorPos).toBe(before.length);
+        expect(next.view.selectionEnd).toBe(before.length);
       })
+    );
+  });
+});
+
+/**
+ * The other half of the fix, and the one the caret bound does not imply: the
+ * buffer has to keep describing the document. `editingText` IS the textarea's
+ * value, so a buffer that drifts from the model is text the user can see and
+ * commit back (typeText sends the whole buffer) — which is how undo used to
+ * revert itself. The single exception is an uncommitted IME composition, where
+ * the buffer is *meant* to run ahead; it is sticky (nothing re-reads the buffer
+ * until an action focuses a node), so the check stops at the first one rather
+ * than resuming after it.
+ */
+describe("the edit buffer follows the document", () => {
+  it("editingText is the active node's text until an uncommitted IME step", () => {
+    fc.assert(
+      fc.property(modelArb, fc.array(actionStepArb, { maxLength: 25 }), (model, steps) => {
+        let state = initialEditorState(model);
+        const nextId = sequentialIds();
+        const mint = sequentialIds("p");
+        const trail: string[] = [];
+        for (const step of steps) {
+          const action = resolveStep(step, state, mint);
+          trail.push(action.type);
+          state = editorReducer(state, action, nextId);
+          if (action.type === "typeText" && !action.commitModel) return;
+          const node = findNode(state.document.model, state.view.activeNodeId!);
+          expect(state.view.editingText, `buffer after ${trail.join(" → ")}`).toBe(
+            node!.text
+          );
+        }
+      }),
+      { numRuns: 300 }
+    );
+  });
+});
+
+/**
+ * reconcileView is the one place a view meets a document it was not derived
+ * from (undo/redo). Whatever it lands on, the view it returns must describe
+ * that document: the buffer is the node's text, and the caret is inside it.
+ * Stated over an arbitrary INCOMPATIBLE view — a caret and a buffer drawn
+ * independently of the model — because that is exactly what a document swap
+ * hands it.
+ */
+describe("reconcileView leaves no view describing the old document", () => {
+  it("returns a buffer that is the active node's text, with the caret inside it", () => {
+    fc.assert(
+      fc.property(
+        modelArb,
+        fc.string({ maxLength: 8 }),
+        fc.nat({ max: 20 }),
+        fc.nat({ max: 20 }),
+        fc.boolean(),
+        (model, buffer, pos, sel, editing) => {
+          const stale: EditorState["view"] = {
+            ...initialEditorState(model).view,
+            editing,
+            editingText: buffer,
+            cursorPos: pos,
+            selectionEnd: sel,
+          };
+          const view = reconcileView(stale, { model, clipboard: null });
+          const active = findNode(model, view.activeNodeId!);
+          expect(active).not.toBeNull();
+          expect(view.editingText).toBe(active!.text);
+          expect(view.cursorPos).toBeLessThanOrEqual(view.editingText.length);
+          expect(view.selectionEnd).toBeLessThanOrEqual(view.editingText.length);
+        }
+      )
     );
   });
 });
