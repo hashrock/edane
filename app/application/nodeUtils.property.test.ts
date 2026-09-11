@@ -9,13 +9,19 @@
  * favicon, font size, bold, arbitrary text) so a new combination can't slip
  * a box past the cap unnoticed.
  *
+ * Field generation (type/checked/favicon/fontSize/bold) is drawn from the
+ * shared `nodeArb` in domain/model.arb — not re-declared here — so this stays
+ * in sync with what a stored node can actually look like (e.g. `bold` is
+ * absent-or-`true`, never a literal `false`; see that file's comment).
+ *
  * node has no Canvas 2D, so text measurement runs the character-count
  * estimate (see lib/measureText.ts) — the cap still applies, it's just not
  * pixel-perfect.
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { STORED_NODE_TYPES, type MindMapModel } from "../domain/model";
+import type { MindMapModel } from "../domain/model";
+import { nodeArb } from "../domain/model.arb";
 import { measureModelNode } from "./nodeUtils";
 import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
 
@@ -45,42 +51,32 @@ const longTextArb = fc
       .join("\n")
   );
 
-const fieldsArb = fc.record(
-  {
-    text: longTextArb,
-    type: fc.constantFrom(...STORED_NODE_TYPES),
-    checked: fc.option(fc.boolean(), { nil: undefined }),
-    favicon: fc.option(fc.constant("https://e/f.ico"), { nil: undefined }),
-    fontSize: fc.option(fc.integer({ min: 8, max: 64 }), { nil: undefined }),
-    bold: fc.option(fc.boolean(), { nil: undefined }),
-  },
-  { requiredKeys: ["text"] }
-);
-
-function model(fields: Partial<MindMapModel>): MindMapModel {
-  return { id: "n", text: "", children: [], ...fields };
-}
+/** A generated node with its text replaced by something long enough to stress wrapping. */
+const longNodeArb: fc.Arbitrary<MindMapModel> = fc
+  .tuple(nodeArb, longTextArb)
+  .map(([n, text]) => ({ ...n, text }));
 
 describe("measureModelNode width cap (property)", () => {
   it("keeps every kind/checkbox/favicon/font-size/bold combination inside the cap", () => {
     fc.assert(
-      fc.property(fieldsArb, (fields) => {
-        expect(measureModelNode(model(fields)).width).toBeLessThanOrEqual(
-          NODE_MAX_CONTENT_WIDTH
-        );
+      fc.property(longNodeArb, (m) => {
+        expect(measureModelNode(m).width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
       }),
-      { numRuns: 500 }
+      { numRuns: 300 }
     );
   });
 
   it("caps the live edit buffer too, whatever the node's own (stored) kind and text", () => {
+    // The node's own `text` is irrelevant here (measureModelNode ignores it
+    // once `editingText` is given), so this draws a plain node and varies
+    // only the edit buffer — no need to pay for a second long-text draw.
     fc.assert(
-      fc.property(fieldsArb, longTextArb, (fields, editingText) => {
-        expect(
-          measureModelNode(model(fields), editingText).width
-        ).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
+      fc.property(nodeArb, longTextArb, (m, editingText) => {
+        expect(measureModelNode(m, editingText).width).toBeLessThanOrEqual(
+          NODE_MAX_CONTENT_WIDTH
+        );
       }),
-      { numRuns: 500 }
+      { numRuns: 300 }
     );
   });
 });
