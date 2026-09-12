@@ -29,9 +29,6 @@ const codeBodyArb = fc
   .tuple(fc.constantFrom("export default function Page(){return null;}", "function Page(){return null;}"), safeText(), safeText())
   .map(([code, before, after]) => `${before}\n${code}\n${after}`);
 
-const IMPORT_LINE = "import { items, title } from './data.js';";
-const withImport = (body: string, hasImport: boolean) => (hasImport ? `${IMPORT_LINE}\n\n${body}` : body);
-
 const fenceLangArb = fc.constantFrom("", "jsx", "tsx", "js", "javascript");
 
 describe("extractTemplate", () => {
@@ -64,7 +61,7 @@ describe("extractTemplate", () => {
     );
   });
 
-  it("an unclosed code fence is always `truncated` once <think> is closed", () => {
+  it("an unclosed code fence is always `truncated`", () => {
     fc.assert(
       fc.property(safeText(), fenceLangArb, safeText(), (prefix, lang, body) => {
         const response = `${prefix}\n\`\`\`${lang}\n${body}`;
@@ -77,7 +74,7 @@ describe("extractTemplate", () => {
   it("an `ok` result always carries exactly one data.js import and ends with a newline", () => {
     fc.assert(
       fc.property(codeBodyArb, fc.boolean(), fenceLangArb, (body, hasImport, lang) => {
-        const content = withImport(body, hasImport);
+        const content = hasImport ? `import { items, title } from './data.js';\n\n${body}` : body;
         const response = `\`\`\`${lang}\n${content}\n\`\`\``;
         const out = extractTemplate(response);
         expect(out.kind).toBe("ok");
