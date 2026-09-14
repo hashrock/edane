@@ -38,6 +38,7 @@ import {
   nestUnder,
   addSiblingAfter,
   detachBranch,
+  landOnPredecessor,
   cloneWithNewIds,
   indentNode,
   dedentNode,
@@ -427,18 +428,11 @@ function documentReducer(
     case "cutBranch": {
       const { model } = document;
       if (!activeNodeId || activeNodeId === model.id) return { document }; // never cut root
-      const order = getFlatOrder(model);
-      const idx = order.indexOf(activeNodeId);
       const { model: newModel, removed } = detachBranch(model, activeNodeId);
       if (!removed) return { document };
-      const prevId = idx > 0 ? order[idx - 1] : null;
-      const landId =
-        prevId && findNode(newModel, prevId)
-          ? prevId
-          : firstNavigableId(newModel);
       return {
         document: { model: newModel, clipboard: removed },
-        focusId: landId,
+        focusId: landOnPredecessor(model, activeNodeId, newModel),
       };
     }
 
@@ -537,8 +531,6 @@ function documentReducer(
 
     case "deleteNode": {
       if (action.nodeId === document.model.id) return { document }; // never delete root
-      const order = getFlatOrder(document.model);
-      const idx = order.indexOf(action.nodeId);
       // Delete the node together with its WHOLE subtree (children are removed,
       // not promoted to the parent level).
       const { model: newModel, removed } = detachBranch(
@@ -549,12 +541,10 @@ function documentReducer(
       const newDocument = { ...document, model: newModel };
       // Only refocus if the currently active node disappeared.
       if (activeNodeId && !findNode(newModel, activeNodeId)) {
-        const prevId = idx > 0 ? order[idx - 1] : null;
-        const landId =
-          prevId && findNode(newModel, prevId)
-            ? prevId
-            : firstNavigableId(newModel);
-        return { document: newDocument, focusId: landId };
+        return {
+          document: newDocument,
+          focusId: landOnPredecessor(document.model, action.nodeId, newModel),
+        };
       }
       return { document: newDocument };
     }
@@ -679,17 +669,11 @@ function documentReducer(
       ) {
         return { document };
       }
-      const order = getFlatOrder(document.model);
-      const idx = order.indexOf(activeNodeId);
       const { model: newModel } = detachBranch(document.model, activeNodeId);
-      // Land on the predecessor (nearest surviving node), else the first
-      // top-level node — mirrors deleteNode's refocus preference.
-      const prevId = idx > 0 ? order[idx - 1] : null;
-      const landId =
-        prevId && findNode(newModel, prevId)
-          ? prevId
-          : firstNavigableId(newModel);
-      return { document: { ...document, model: newModel }, focusId: landId };
+      return {
+        document: { ...document, model: newModel },
+        focusId: landOnPredecessor(document.model, activeNodeId, newModel),
+      };
     }
 
     case "replace":
