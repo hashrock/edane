@@ -199,6 +199,13 @@ const TOGGLE_GAP = 4;
 const TOGGLE_R = 9;
 const TOGGLE_HIT_R = 12;
 
+// The toggle button's center-x, hugging the right edge of the node's box.
+// SSoT for this offset — draw pass, morph tween, and the test-hook API all
+// place the same button and must agree on where it is.
+function toggleCenterX(nodeX: number, width: number, depth: number): number {
+  return nodeX + nodeBoxWidth(width, depth === 0) + TOGGLE_GAP + TOGGLE_R;
+}
+
 /**
  * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
  * - "text": drag inside the node being edited extends a text selection.
@@ -2952,10 +2959,8 @@ export function MindmapEditorView({
       // childCount counts direct children even while collapsed (when the flat
       // `children` array is empty), so it's the true leaf test for both states.
       if (node.childCount === 0) return; // leaves have nothing to toggle
-      const isRoot = node.depth === 0;
       const parentWidth = textWidths.get(node.id) ?? node.width;
-      const rectW = nodeBoxWidth(parentWidth, isRoot);
-      const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+      const cx = toggleCenterX(node.x, parentWidth, node.depth);
       const cy = node.y;
       if (cx < cullLeft || cx > cullRight || cy < cullTop || cy > cullBottom) {
         return;
@@ -3279,9 +3284,7 @@ export function MindmapEditorView({
       return;
     }
 
-    const isRoot = node.depth === 0;
-    const rectW = nodeBoxWidth(node.width, isRoot);
-    const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+    const cx = toggleCenterX(node.x, node.width, node.depth);
     const cy = node.y;
     // toCollapsed: the button is BECOMING the count pill (collapse). Each shape
     // starts in the pre-toggle look and tweens to the post-toggle one.
@@ -3389,9 +3392,7 @@ export function MindmapEditorView({
         if (!node || !stage) return null;
         if (node.childCount === 0) return null;
         const scale = stage.scaleX();
-        const isRoot = node.depth === 0;
-        const rectW = nodeBoxWidth(node.width, isRoot);
-        const worldX = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+        const worldX = toggleCenterX(node.x, node.width, node.depth);
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
