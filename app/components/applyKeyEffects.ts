@@ -15,6 +15,7 @@ import type {
   UndoType,
 } from "../application/editorReducer";
 import type { KeyEffect } from "../application/editorKeymap";
+import { assertNever } from "../lib/assertNever";
 
 export interface KeyEffectDeps {
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
@@ -67,6 +68,8 @@ export function applyKeyEffects(
       case "redo":
         deps.redo?.();
         break;
+      default:
+        assertNever(effect);
     }
   }
   return current;

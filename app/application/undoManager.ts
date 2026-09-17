@@ -15,6 +15,7 @@
  */
 
 import type { DocumentState, UndoType } from "./editorReducer";
+import { assertNever } from "../lib/assertNever";
 
 /** UndoType plus the one label the manager itself generates (batched text edits). */
 export type UndoCommandType = UndoType | "text";
@@ -133,6 +134,8 @@ export function undoReducer(state: UndoState, event: UndoEvent): UndoState {
     }
     case "clear":
       return initialUndoState;
+    default:
+      return assertNever(event);
   }
 }
 
