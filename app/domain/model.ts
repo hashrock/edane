@@ -462,6 +462,24 @@ export function detachBranch(
 }
 
 /**
+ * Where focus should land after `nodeId` (found in `model`, the pre-detach
+ * state) is gone from `newModel`: its flat-order predecessor if it still
+ * exists there, else the first navigable node.
+ */
+export function landOnPredecessor(
+  model: MindMapModel,
+  nodeId: string,
+  newModel: MindMapModel
+): string {
+  const order = getFlatOrder(model);
+  const idx = order.indexOf(nodeId);
+  const prevId = idx > 0 ? order[idx - 1] : null;
+  return prevId && findNode(newModel, prevId)
+    ? prevId
+    : firstNavigableId(newModel);
+}
+
+/**
  * Deep-clone a subtree, assigning a fresh id to every node. Text, kind and
  * formatting are preserved. Used when pasting a branch so the copy never shares
  * ids with the source.
