@@ -5,6 +5,7 @@ import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
 import { siteEditPath } from "../application/siteTemplate";
 import { copyText } from "../lib/clipboard";
+import { formatBytes } from "../lib/formatBytes";
 import {
   LOCALE_LABELS,
   setLocale,
@@ -54,12 +55,6 @@ const INACTIVE_LABEL: Record<
   "note-private": "inactiveNotePrivate",
   "node-missing": "inactiveNodeMissing",
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
 
 export default function Settings({ user }: { user: User }) {
   const locale = useLocale(); // 言語切り替えで再レンダー（t() の購読）

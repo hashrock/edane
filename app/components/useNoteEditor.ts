@@ -44,6 +44,8 @@ import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
 import { UndoManager } from "../application/undoManager";
 import { copyText } from "../lib/clipboard";
+import { formatBytes } from "../lib/formatBytes";
+import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 
 /**
  * updateSaveStatus に渡す状態コード。表示文言は描画時に現在のUI言語で解決する
@@ -93,6 +95,13 @@ const SAVE_STATUS_MESSAGE = {
   "link-copied": "copyLinkSuccess",
   "link-copy-failed": "copyLinkFailure",
 } as const satisfies Record<Exclude<SaveStatusText, "">, MessageKey>;
+
+/** ステータス→ t() に渡す埋め込みパラメータ（不要なものは省略）。 */
+const SAVE_STATUS_PARAMS: Partial<
+  Record<Exclude<SaveStatusText, "">, Record<string, string>>
+> = {
+  "storage-limit": { limit: formatBytes(IMAGE_STORAGE_LIMIT_BYTES) },
+};
 
 export interface NoteEditorInit {
   noteId?: string;
@@ -234,7 +243,10 @@ export function useNoteEditor({
   const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
-    el.textContent = status === "" ? "" : t(SAVE_STATUS_MESSAGE[status]);
+    el.textContent =
+      status === ""
+        ? ""
+        : t(SAVE_STATUS_MESSAGE[status], SAVE_STATUS_PARAMS[status]);
     el.style.transition = "opacity 300ms ease";
     if (status === "") {
       // Hidden state (e.g. unsaved): drop out immediately, no fade.

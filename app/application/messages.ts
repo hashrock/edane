@@ -34,7 +34,7 @@ export const MESSAGES_JA = {
   saveRetry: "再試行",
   statusUploading: "画像アップロード中...",
   statusUploadFailed: "アップロード失敗",
-  statusStorageLimit: "容量超過（上限10MB）",
+  statusStorageLimit: "容量超過（上限{limit}）",
 
   // --- 共有リンク（publicNoteLink） ---
   privateNoteCopyReason: "非公開のため共有できません",
@@ -381,7 +381,7 @@ export const MESSAGES_EN = {
   saveRetry: "Retry",
   statusUploading: "Uploading image...",
   statusUploadFailed: "Upload failed",
-  statusStorageLimit: "Storage limit exceeded (10MB max)",
+  statusStorageLimit: "Storage limit exceeded ({limit} max)",
 
   // --- Share link ---
   privateNoteCopyReason: "Private notes can't be shared",
