@@ -10,7 +10,7 @@
  */
 
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
-import { isKeyOf } from "../domain/isKeyOf";
+import { closedStringSet } from "../domain/isKeyOf";
 
 export interface EditorPreferences {
   /**
@@ -63,15 +63,15 @@ export const PREFERENCES_KEY = "edane:editor-preferences";
  * keeps {@link isTabBehavior} (used to validate localStorage JSON) from
  * silently dropping a newly-added value instead of erroring loudly at the
  * type level (same trick as `STORED_NODE_TYPE_SET` in domain/model.ts).
+ * {@link closedStringSet} derives both the predicate and {@link TAB_BEHAVIORS}
+ * from this one set.
  */
 const TAB_BEHAVIOR_SET = {
   indent: true,
   "insert-child": true,
 } as const satisfies Record<EditorPreferences["tabBehavior"], true>;
 
-function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"] {
-  return isKeyOf(TAB_BEHAVIOR_SET, value);
-}
+const { is: isTabBehavior, values: TAB_BEHAVIORS } = closedStringSet(TAB_BEHAVIOR_SET);
 
 /**
  * Every `tabBehavior` member, derived from {@link TAB_BEHAVIOR_SET} so
@@ -79,9 +79,7 @@ function isTabBehavior(value: unknown): value is EditorPreferences["tabBehavior"
  * {@link isTabBehavior}) stay in sync automatically when a member is added,
  * renamed, or removed (same trick as `NODE_TYPES` in domain/model.ts).
  */
-export const TAB_BEHAVIORS = Object.keys(
-  TAB_BEHAVIOR_SET
-) as EditorPreferences["tabBehavior"][];
+export { TAB_BEHAVIORS };
 
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `enterBehavior`. */
 const ENTER_BEHAVIOR_SET = {
@@ -89,16 +87,11 @@ const ENTER_BEHAVIOR_SET = {
   edit: true,
 } as const satisfies Record<EditorPreferences["enterBehavior"], true>;
 
-function isEnterBehavior(
-  value: unknown
-): value is EditorPreferences["enterBehavior"] {
-  return isKeyOf(ENTER_BEHAVIOR_SET, value);
-}
+const { is: isEnterBehavior, values: ENTER_BEHAVIORS } =
+  closedStringSet(ENTER_BEHAVIOR_SET);
 
 /** Every `enterBehavior` member, derived like {@link TAB_BEHAVIORS}. */
-export const ENTER_BEHAVIORS = Object.keys(
-  ENTER_BEHAVIOR_SET
-) as EditorPreferences["enterBehavior"][];
+export { ENTER_BEHAVIORS };
 
 /** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `arrowBehavior`. */
 const ARROW_BEHAVIOR_SET = {
@@ -106,16 +99,11 @@ const ARROW_BEHAVIOR_SET = {
   navigate: true,
 } as const satisfies Record<EditorPreferences["arrowBehavior"], true>;
 
-function isArrowBehavior(
-  value: unknown
-): value is EditorPreferences["arrowBehavior"] {
-  return isKeyOf(ARROW_BEHAVIOR_SET, value);
-}
+const { is: isArrowBehavior, values: ARROW_BEHAVIORS } =
+  closedStringSet(ARROW_BEHAVIOR_SET);
 
 /** Every `arrowBehavior` member, derived like {@link TAB_BEHAVIORS}. */
-export const ARROW_BEHAVIORS = Object.keys(
-  ARROW_BEHAVIOR_SET
-) as EditorPreferences["arrowBehavior"][];
+export { ARROW_BEHAVIORS };
 
 /**
  * Read preferences from storage. Unknown fields are dropped and invalid

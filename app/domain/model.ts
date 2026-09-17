@@ -2,7 +2,7 @@
  * Domain layer: pure tree model and operations.
  * No framework or rendering dependencies.
  */
-import { isKeyOf } from "./isKeyOf";
+import { closedStringSet } from "./isKeyOf";
 
 /**
  * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
@@ -21,7 +21,8 @@ type StoredNodeType = Exclude<NodeType, "text">;
  * adding a `NodeType` member refuses to compile here until it's declared,
  * which is what keeps {@link isStoredNodeType} (used to validate persisted
  * JSON) from silently dropping a newly-added type instead of erroring loudly
- * at the type level.
+ * at the type level. {@link closedStringSet} derives both the predicate and
+ * {@link STORED_NODE_TYPES} from this one set.
  */
 const STORED_NODE_TYPE_SET = {
   image: true,
@@ -29,9 +30,11 @@ const STORED_NODE_TYPE_SET = {
   markdown: true,
 } as const satisfies Record<StoredNodeType, true>;
 
-export function isStoredNodeType(value: unknown): value is StoredNodeType {
-  return isKeyOf(STORED_NODE_TYPE_SET, value);
-}
+const { is: isStoredNodeType, values: STORED_NODE_TYPES } = closedStringSet(
+  STORED_NODE_TYPE_SET
+);
+
+export { isStoredNodeType };
 
 /**
  * The non-"text" `NodeType` members as an array, derived from
@@ -39,7 +42,7 @@ export function isStoredNodeType(value: unknown): value is StoredNodeType {
  * than just test membership via {@link isStoredNodeType}) stay in sync
  * automatically when a `NodeType` member is added, renamed, or removed.
  */
-export const STORED_NODE_TYPES = Object.keys(STORED_NODE_TYPE_SET) as StoredNodeType[];
+export { STORED_NODE_TYPES };
 
 /** Every `NodeType`, the default first. */
 export const NODE_TYPES: NodeType[] = ["text", ...STORED_NODE_TYPES];

@@ -12,7 +12,7 @@
  */
 
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
-import { isKeyOf } from "../domain/isKeyOf";
+import { closedStringSet } from "../domain/isKeyOf";
 import {
   MESSAGES_JA,
   MESSAGES_EN,
@@ -31,15 +31,13 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   en: "English",
 };
 
-/** editorPreferences と同じ網羅性イディオム（値検証用）。 */
+/** editorPreferences と同じ網羅性イディオム（値検証用、closedStringSet 経由）。 */
 const LOCALE_SET = {
   ja: true,
   en: true,
 } as const satisfies Record<Locale, true>;
 
-export function isLocale(value: unknown): value is Locale {
-  return isKeyOf(LOCALE_SET, value);
-}
+export const isLocale = closedStringSet(LOCALE_SET).is;
 
 const CATALOGS: Record<Locale, Record<MessageKey, string>> = {
   ja: MESSAGES_JA,
