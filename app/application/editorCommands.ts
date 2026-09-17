@@ -26,6 +26,7 @@ import type { EditorState } from "./editorReducer";
 import type { KeyEffect } from "./editorKeymap";
 import { markdownToModel } from "./markdown";
 import { textToModel } from "./persistence";
+import { assertNever } from "../lib/assertNever";
 
 /** What is being pasted, after the clipboard has been decoded. */
 export type PasteSource =
@@ -114,5 +115,7 @@ function pastedNodes(
     }
     case "plain":
       return textToModel("_", source.text, nextId).children;
+    default:
+      return assertNever(source.mode);
   }
 }
