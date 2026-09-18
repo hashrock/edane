@@ -18,6 +18,8 @@ export type Env = {
     SESSION_SECRET: string;
     ENCRYPTION_KEY: string;
     DEV_BYPASS_AUTH?: string;
+    /** GET /api/stats の Bearer トークン（secret）。未設定なら endpoint は 404。 */
+    STATS_TOKEN?: string;
   };
   Variables: {
     user: SessionUser | null;

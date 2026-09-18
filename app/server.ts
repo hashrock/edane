@@ -38,10 +38,16 @@ import {
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
+import { statsRoutes } from "./stats";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
 
 const app = new Hono<Env>();
+
+// --- Signup stats for the repos.hashrock.info admin (Bearer STATS_TOKEN) ---
+// Mounted before the session middleware on purpose: it must not depend on
+// cookies or the AuthProvider at all. Everything lives in app/stats/.
+app.route("/api/stats", statsRoutes());
 
 // --- Session middleware ---
 // Who is signed in is decided by the AuthProvider selected from env (auth/):

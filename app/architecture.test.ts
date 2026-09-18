@@ -55,6 +55,9 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   // the pure layers (fixtures) plus the write repositories in utils. Only
   // server.ts mounts it; no layer may import it.
   scenarios: ["domain", "lib", "application", "db", "utils", "auth"],
+  // stats = GET /api/stats (signup counts, Bearer STATS_TOKEN). Server
+  // infrastructure on the user repository; deliberately independent of auth.
+  stats: ["db", "utils"],
 };
 
 const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));
