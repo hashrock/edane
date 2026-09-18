@@ -131,6 +131,7 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 import EditorSettingsDialog from "./EditorSettingsDialog";
+import ServiceSwitcher from "./ServiceSwitcher";
 
 // パネルを開くまで markdown レンダラ（marked / dompurify）を読み込まない。
 const MarkdownPanel = lazy(() => import("./MarkdownPanel"));
@@ -3674,6 +3675,8 @@ export function MindmapEditorView({
               {t("saveToAccount")}
             </button>
           )}
+          {/* 埋め込み（iframe）では出さない。埋め込み先のページのメニューではないため */}
+          {!embed && <ServiceSwitcher className="text-slate-500 hover:text-slate-700" />}
         </div>
       </header>
       <div

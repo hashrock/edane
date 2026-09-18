@@ -12,6 +12,8 @@ const Document = ({ page }: { page: PageObject }) => (
       <ViteClient />
       <Script src="/app/client.tsx" />
       <Link href="/app/styles.css" rel="stylesheet" />
+      {/* hashrock のサービス切り替え（components/ServiceSwitcher.tsx）。repos が落ちても読み込みが失敗するだけ */}
+      <script type="module" src="https://repos.hashrock.info/switcher/v1.js" />
     </head>
     <body className="bg-slate-50 min-h-screen">
       <script

@@ -9,6 +9,7 @@ import { formatBytes } from "../lib/formatBytes";
 import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
 import { useLocale } from "../components/useLocale";
 import type { MessageKey } from "../application/messages";
+import ServiceSwitcher from "../components/ServiceSwitcher";
 
 type User = SessionUser | null;
 
@@ -181,6 +182,7 @@ export default function Settings({ user }: { user: User }) {
         </Link>
         <div className="h-6 w-px bg-slate-200" />
         <h1 className="text-lg font-bold tracking-tight">{t("projectSettings")}</h1>
+        <ServiceSwitcher className="ml-auto text-slate-500 hover:text-slate-900" />
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-8 md:px-6">
