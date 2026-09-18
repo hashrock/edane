@@ -37,7 +37,10 @@ const LOCALE_SET = {
   en: true,
 } as const satisfies Record<Locale, true>;
 
-export const isLocale = closedStringSet(LOCALE_SET).is;
+const { is: isLocale, values: LOCALES } = closedStringSet(LOCALE_SET);
+
+/** Every `Locale` member, derived from {@link LOCALE_SET} like `TAB_BEHAVIORS`. */
+export { isLocale, LOCALES };
 
 const CATALOGS: Record<Locale, Record<MessageKey, string>> = {
   ja: MESSAGES_JA,

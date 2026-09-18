@@ -3,6 +3,8 @@ import {
   DEFAULT_LOCALE,
   detectLocale,
   LOCALE_KEY,
+  LOCALE_LABELS,
+  LOCALES,
   getLocale,
   isLocale,
   loadLocale,
@@ -139,6 +141,15 @@ describe("catalog integrity", () => {
     expect(isLocale("en")).toBe(true);
     expect(isLocale("de")).toBe(false);
     expect(isLocale(1)).toBe(false);
+  });
+
+  it("keeps LOCALES in sync with isLocale and LOCALE_LABELS", () => {
+    // LOCALES is derived from the same closed set isLocale checks membership
+    // against, so a newly added Locale can't update one without the other.
+    for (const locale of LOCALES) {
+      expect(isLocale(locale)).toBe(true);
+      expect(LOCALE_LABELS[locale]).toBeTruthy();
+    }
   });
 });
 
