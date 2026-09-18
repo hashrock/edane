@@ -40,6 +40,7 @@ import { renderMarkdownHtml } from "../lib/markdownHtml";
 import { useTextInputHandlers } from "./useTextInputHandlers";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
+import ServiceSwitcher from "./ServiceSwitcher";
 
 interface Props {
   engine: NoteEditorEngine;
@@ -414,6 +415,8 @@ export default function OutlineEditor({
             {t("saveButton")}
           </button>
         )}
+        {/* 埋め込み（iframe）では出さない。埋め込み先のページのメニューではないため */}
+        {!embed && <ServiceSwitcher className="text-slate-500 hover:text-slate-700" />}
         </div>
       </header>
 

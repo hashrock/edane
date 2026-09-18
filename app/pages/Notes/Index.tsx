@@ -20,6 +20,7 @@ import { dateLocale, t } from "../../application/i18n";
 import { useLocale } from "../../components/useLocale";
 import { copyText } from "../../lib/clipboard";
 import type { SessionUser } from "../../user";
+import ServiceSwitcher from "../../components/ServiceSwitcher";
 
 /** コピー結果を出しておく時間（ms）。 */
 const FLASH_MS = 2500;
@@ -154,6 +155,8 @@ export default function NotesIndex({
               {t("loginWithGoogle")}
             </a>
           )}
+          {/* ログアウトと押し間違えないよう少し離す */}
+          <ServiceSwitcher className="ml-2 text-slate-500 hover:text-slate-900" />
         </div>
       </header>
 
