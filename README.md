@@ -34,6 +34,10 @@ pnpm dev    # Vite + Cloudflare Worker が http://localhost:5173 で起動
 
 `wrangler.jsonc` の `vars.DEV_BYPASS_AUTH` が有効なため、ローカルでは Google OAuth をスキップして Dev User として自動ログインする。シークレットは `.dev.vars` に置く。
 
+### サインアップ数（`GET /api/stats`）
+
+repos.hashrock.info の管理画面向けに、Bearer `STATS_TOKEN`（secret、未設定なら 404）でユーザー数を返す。詳細は [docs/stats.md](docs/stats.md)。
+
 ## デプロイ
 
 ```bash
