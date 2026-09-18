@@ -6,12 +6,7 @@ import { publicationUrls } from "../application/nodePublication";
 import { siteEditPath } from "../application/siteTemplate";
 import { copyText } from "../lib/clipboard";
 import { formatBytes } from "../lib/formatBytes";
-import {
-  LOCALE_LABELS,
-  setLocale,
-  t,
-  type Locale,
-} from "../application/i18n";
+import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
 import { useLocale } from "../components/useLocale";
 import type { MessageKey } from "../application/messages";
 
@@ -206,7 +201,7 @@ export default function Settings({ user }: { user: User }) {
             {t("languageHeading")}
           </h2>
           <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-3">
-            {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+            {LOCALES.map((l) => (
               <label
                 key={l}
                 className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
