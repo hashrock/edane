@@ -19,7 +19,10 @@ import { parseBranch, serializeBranch } from "./branchClipboard";
 
 function expectWellFormed(node: MindMapModel) {
   expectUniqueIds(node);
-  const walk = (n: MindMapModel) => {
+  // depth 0 = the value passed to normalizeTree itself (the document root for
+  // parseContent's caller); only it may carry multiRoot. depth 1 = top-level
+  // nodes; only they may carry position. See NormalizeRole in persistence.ts.
+  const walk = (n: MindMapModel, depth: number) => {
     expect(typeof n.id).toBe("string");
     expect(n.id).not.toBe("");
     expect(typeof n.text).toBe("string");
@@ -31,14 +34,18 @@ function expectWellFormed(node: MindMapModel) {
     if ("linkTitle" in n) expect(typeof n.linkTitle).toBe("string");
     if ("favicon" in n) expect(typeof n.favicon).toBe("string");
     if ("checked" in n) expect(typeof n.checked).toBe("boolean");
-    if ("multiRoot" in n) expect(n.multiRoot).toBe(false);
+    if ("multiRoot" in n) {
+      expect(depth).toBe(0);
+      expect(n.multiRoot).toBe(false);
+    }
     if ("position" in n) {
+      expect(depth).toBe(1);
       expect(Number.isFinite(n.position!.x)).toBe(true);
       expect(Number.isFinite(n.position!.y)).toBe(true);
     }
-    n.children.forEach(walk);
+    n.children.forEach((c) => walk(c, depth + 1));
   };
-  walk(node);
+  walk(node, 0);
 }
 
 describe("JSON round trips", () => {

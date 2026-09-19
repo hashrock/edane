@@ -52,6 +52,14 @@ export function textToModel(
 }
 
 /**
+ * Where a node being normalized sits, for the two placement-restricted
+ * fields: `multiRoot` is only meaningful on the invisible document root,
+ * `position` only on a top-level node (see model.ts). A node one level down
+ * from either becomes "top"/"nested" in turn — see the recursive call below.
+ */
+type NormalizeRole = "root" | "top" | "nested";
+
+/**
  * Validate and normalize an arbitrary parsed value into a well-formed
  * MindMapModel *tree with unique ids*.
  *
@@ -63,21 +71,28 @@ export function textToModel(
  * makes edits, deletes and publish/upload targeting hit (or leave behind) the
  * wrong node. JSON already guarantees a tree (no shared references → no shared
  * child, no cycles), so the one hazard it can carry is a duplicated — or
- * missing / malformed — id, or a field whose value falls outside its known
- * enum/type.
+ * missing / malformed — id, a field whose value falls outside its known
+ * enum/type, or a placement-restricted field (`position`, `multiRoot`)
+ * surviving at a depth where it isn't meaningful — `nestUnder` is the only
+ * domain code trusted to strip a stale `position`, and it only runs when a
+ * node is actively nested, so a value smuggled in fully nested from the start
+ * would otherwise never pass through it (e.g. `dedentNode` moves a node back
+ * to top level without adding one, trusting it was never there).
  *
  * This walks the value depth-first, dropping malformed children (anything that
  * is not a `{text, children[]}` shape), reassigning any id that is missing,
  * non-string or already seen, and dropping (rather than passing through) any
- * optional field whose value doesn't match its declared type, so the returned
- * model is a genuine well-formed, unique-id tree. Returns null when the value
- * isn't a usable node at all (caller then falls back to the legacy text
- * parser).
+ * optional field whose value doesn't match its declared type — including a
+ * placement-restricted one at a depth where it doesn't apply — so the
+ * returned model is a genuine well-formed, unique-id tree. Returns null when
+ * the value isn't a usable node at all (caller then falls back to the legacy
+ * text parser).
  */
 export function normalizeTree(
   value: unknown,
   seen: Set<string>,
-  nextId: IdSource = generateId
+  nextId: IdSource = generateId,
+  role: NormalizeRole = "root"
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -97,8 +112,9 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
-  if (v.multiRoot === false) node.multiRoot = false;
+  if (role === "root" && v.multiRoot === false) node.multiRoot = false;
   if (
+    role === "top" &&
     v.position &&
     typeof v.position === "object" &&
     Number.isFinite((v.position as { x?: unknown }).x) &&
@@ -108,8 +124,9 @@ export function normalizeTree(
     node.position = { x: p.x, y: p.y };
   }
 
+  const childRole: NormalizeRole = role === "root" ? "top" : "nested";
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen, nextId);
+    const normalized = normalizeTree(child, seen, nextId, childRole);
     if (normalized) node.children.push(normalized);
   }
   return node;

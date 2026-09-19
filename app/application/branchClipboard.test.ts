@@ -59,6 +59,24 @@ describe("parseBranch with malformed payloads", () => {
     expect(parsed!.fontSize).toBeUndefined();
   });
 
+  it("keeps the branch root's position but never its multiRoot (a branch is never a document root)", () => {
+    const json = JSON.stringify({
+      id: "root",
+      text: "Root",
+      position: { x: 5, y: 6 },
+      multiRoot: false,
+      children: [
+        { id: "child", text: "c", position: { x: 7, y: 8 }, children: [] },
+      ],
+    });
+    const parsed = parseBranch(json);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.position).toEqual({ x: 5, y: 6 });
+    expect(parsed!.multiRoot).toBeUndefined();
+    // A nested node's position is never meaningful, branch root or not.
+    expect(parsed!.children[0].position).toBeUndefined();
+  });
+
   it("reassigns duplicated ids so the pasted branch is a unique-id tree", () => {
     const json = JSON.stringify({
       id: "dup",

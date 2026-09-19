@@ -203,6 +203,44 @@ describe("parseContent", () => {
     ]);
   });
 
+  it("drops position/multiRoot smuggled in below the depth where they're meaningful", () => {
+    // position is only meaningful on a top-level node (depth 1 below the
+    // document root), multiRoot only on the root itself (depth 0) — a value
+    // carrying either one deeper than that isn't legitimate output of this
+    // app, only untrusted input, and normalizeTree must not let it through
+    // (nestUnder is the only code trusted to strip a stale position, and it
+    // only runs on an actual nesting operation — see persistence.ts).
+    const json = JSON.stringify({
+      id: "r",
+      text: "Root",
+      children: [
+        {
+          id: "top",
+          text: "t",
+          position: { x: 1, y: 2 },
+          multiRoot: false,
+          children: [
+            {
+              id: "nested",
+              text: "n",
+              position: { x: 3, y: 4 },
+              multiRoot: false,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+    const model = parseContent(json, "ignored");
+    expect(model.multiRoot).toBeUndefined(); // root itself never had it set
+    const top = model.children[0];
+    expect(top.position).toEqual({ x: 1, y: 2 });
+    expect(top.multiRoot).toBeUndefined();
+    const nested = top.children[0];
+    expect(nested.position).toBeUndefined();
+    expect(nested.multiRoot).toBeUndefined();
+  });
+
   it("keeps an explicit multiRoot: false and drops everything else (true is the default)", () => {
     const json = JSON.stringify({
       id: "r",
