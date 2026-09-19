@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { isStoredNodeType, type MindMapModel } from "../domain/model";
+import { getNodeDepths, isStoredNodeType, type MindMapModel } from "../domain/model";
 import { allIds, expectUniqueIds, modelArb, nodeArb, sequentialIds } from "../domain/model.arb";
 import {
   modelToText,
@@ -19,6 +19,10 @@ import { parseBranch, serializeBranch } from "./branchClipboard";
 
 function expectWellFormed(node: MindMapModel) {
   expectUniqueIds(node);
+  // depth 0 = the value passed to normalizeTree itself (the document root for
+  // parseContent's caller); only it may carry multiRoot. depth 1 = top-level
+  // nodes; only they may carry position. See normalizeTree in persistence.ts.
+  const depths = getNodeDepths(node);
   const walk = (n: MindMapModel) => {
     expect(typeof n.id).toBe("string");
     expect(n.id).not.toBe("");
@@ -31,8 +35,12 @@ function expectWellFormed(node: MindMapModel) {
     if ("linkTitle" in n) expect(typeof n.linkTitle).toBe("string");
     if ("favicon" in n) expect(typeof n.favicon).toBe("string");
     if ("checked" in n) expect(typeof n.checked).toBe("boolean");
-    if ("multiRoot" in n) expect(n.multiRoot).toBe(false);
+    if ("multiRoot" in n) {
+      expect(depths.get(n.id)).toBe(0);
+      expect(n.multiRoot).toBe(false);
+    }
     if ("position" in n) {
+      expect(depths.get(n.id)).toBe(1);
       expect(Number.isFinite(n.position!.x)).toBe(true);
       expect(Number.isFinite(n.position!.y)).toBe(true);
     }

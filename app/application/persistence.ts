@@ -63,21 +63,30 @@ export function textToModel(
  * makes edits, deletes and publish/upload targeting hit (or leave behind) the
  * wrong node. JSON already guarantees a tree (no shared references → no shared
  * child, no cycles), so the one hazard it can carry is a duplicated — or
- * missing / malformed — id, or a field whose value falls outside its known
- * enum/type.
+ * missing / malformed — id, a field whose value falls outside its known
+ * enum/type, or a placement-restricted field (`position`, `multiRoot`)
+ * surviving at a depth where it isn't meaningful (`multiRoot`: only depth 0,
+ * the document root; `position`: only depth 1, a top-level node — see
+ * model.ts) — `nestUnder` is the only domain code trusted to strip a stale
+ * `position`, and it only runs when a node is actively nested, so a value
+ * smuggled in fully nested from the start would otherwise never pass through
+ * it (e.g. `dedentNode` moves a node back to top level without adding one,
+ * trusting it was never there).
  *
  * This walks the value depth-first, dropping malformed children (anything that
  * is not a `{text, children[]}` shape), reassigning any id that is missing,
  * non-string or already seen, and dropping (rather than passing through) any
- * optional field whose value doesn't match its declared type, so the returned
- * model is a genuine well-formed, unique-id tree. Returns null when the value
- * isn't a usable node at all (caller then falls back to the legacy text
- * parser).
+ * optional field whose value doesn't match its declared type — including a
+ * placement-restricted one at a depth where it doesn't apply — so the
+ * returned model is a genuine well-formed, unique-id tree. Returns null when
+ * the value isn't a usable node at all (caller then falls back to the legacy
+ * text parser).
  */
 export function normalizeTree(
   value: unknown,
   seen: Set<string>,
-  nextId: IdSource = generateId
+  nextId: IdSource = generateId,
+  depth = 0
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -97,8 +106,9 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
-  if (v.multiRoot === false) node.multiRoot = false;
+  if (depth === 0 && v.multiRoot === false) node.multiRoot = false;
   if (
+    depth === 1 &&
     v.position &&
     typeof v.position === "object" &&
     Number.isFinite((v.position as { x?: unknown }).x) &&
@@ -109,7 +119,7 @@ export function normalizeTree(
   }
 
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen, nextId);
+    const normalized = normalizeTree(child, seen, nextId, depth + 1);
     if (normalized) node.children.push(normalized);
   }
   return node;

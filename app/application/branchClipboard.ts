@@ -35,6 +35,12 @@ export function serializeBranch(node: MindMapModel): string {
  * outside its declared type is dropped rather than smuggled into the model —
  * a hand-edited or foreign payload under this MIME could otherwise carry
  * anything.
+ *
+ * A branch is never a document root, so it is normalized at depth 1 — a
+ * top-level node (`position` — a copied tree root's canvas position —
+ * survives; `multiRoot`, meaningful only at depth 0, the root, never does),
+ * regardless of where it lands: a paste always nests it under the active
+ * node, and that nesting itself is what drops the position (see nestUnder).
  */
 export function parseBranch(text: string): MindMapModel | null {
   if (!text) return null;
@@ -44,5 +50,5 @@ export function parseBranch(text: string): MindMapModel | null {
   } catch {
     return null;
   }
-  return normalizeTree(data, new Set());
+  return normalizeTree(data, new Set(), undefined, 1);
 }
