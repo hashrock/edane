@@ -52,14 +52,6 @@ export function textToModel(
 }
 
 /**
- * Where a node being normalized sits, for the two placement-restricted
- * fields: `multiRoot` is only meaningful on the invisible document root,
- * `position` only on a top-level node (see model.ts). A node one level down
- * from either becomes "top"/"nested" in turn — see the recursive call below.
- */
-type NormalizeRole = "root" | "top" | "nested";
-
-/**
  * Validate and normalize an arbitrary parsed value into a well-formed
  * MindMapModel *tree with unique ids*.
  *
@@ -73,11 +65,13 @@ type NormalizeRole = "root" | "top" | "nested";
  * child, no cycles), so the one hazard it can carry is a duplicated — or
  * missing / malformed — id, a field whose value falls outside its known
  * enum/type, or a placement-restricted field (`position`, `multiRoot`)
- * surviving at a depth where it isn't meaningful — `nestUnder` is the only
- * domain code trusted to strip a stale `position`, and it only runs when a
- * node is actively nested, so a value smuggled in fully nested from the start
- * would otherwise never pass through it (e.g. `dedentNode` moves a node back
- * to top level without adding one, trusting it was never there).
+ * surviving at a depth where it isn't meaningful (`multiRoot`: only depth 0,
+ * the document root; `position`: only depth 1, a top-level node — see
+ * model.ts) — `nestUnder` is the only domain code trusted to strip a stale
+ * `position`, and it only runs when a node is actively nested, so a value
+ * smuggled in fully nested from the start would otherwise never pass through
+ * it (e.g. `dedentNode` moves a node back to top level without adding one,
+ * trusting it was never there).
  *
  * This walks the value depth-first, dropping malformed children (anything that
  * is not a `{text, children[]}` shape), reassigning any id that is missing,
@@ -92,7 +86,7 @@ export function normalizeTree(
   value: unknown,
   seen: Set<string>,
   nextId: IdSource = generateId,
-  role: NormalizeRole = "root"
+  depth = 0
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -112,9 +106,9 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
-  if (role === "root" && v.multiRoot === false) node.multiRoot = false;
+  if (depth === 0 && v.multiRoot === false) node.multiRoot = false;
   if (
-    role === "top" &&
+    depth === 1 &&
     v.position &&
     typeof v.position === "object" &&
     Number.isFinite((v.position as { x?: unknown }).x) &&
@@ -124,9 +118,8 @@ export function normalizeTree(
     node.position = { x: p.x, y: p.y };
   }
 
-  const childRole: NormalizeRole = role === "root" ? "top" : "nested";
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen, nextId, childRole);
+    const normalized = normalizeTree(child, seen, nextId, depth + 1);
     if (normalized) node.children.push(normalized);
   }
   return node;
