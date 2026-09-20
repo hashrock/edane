@@ -156,9 +156,8 @@ export function assignNodePositions(
 
   const roots = layoutRoots(nodes);
 
-  // Placed roots go exactly where the user put them. Their vertical extents
-  // are what the auto-stacked roots must steer clear of.
-  const placedBands: Array<[top: number, bottom: number]> = [];
+  // Placed roots go exactly where the user put them — nothing else is allowed
+  // to shift them, and they do not shift anything else either.
   for (const root of roots) {
     if (!root.position) continue;
     const rootLayout = layoutMap.get(root.id);
@@ -167,32 +166,23 @@ export function assignNodePositions(
     rootLayout.y = root.position.y;
     root.x = root.position.x;
     root.y = root.position.y;
-    const half = rootLayout.subtreeHeight / 2;
-    placedBands.push([root.y - half - TREE_GAP, root.y + half + TREE_GAP]);
     positionChildren(root.id);
   }
 
   // Unplaced roots stack downward in array order: the first sits at
   // (startX, startY), each further block starts below the previous one plus
-  // TREE_GAP. A block that would overlap a placed tree's vertical band is
-  // pushed below that band (x is ignored: keeping the auto column clear of
-  // every placed tree is simpler to predict than a 2-D packing).
+  // TREE_GAP. They deliberately ignore the placed trees: an auto tree may end
+  // up overlapping one. Pushing the auto column clear of every placed band
+  // used to be the rule, but it made unrelated trees jump whenever a tree was
+  // dropped or grew a line, which is worse than an overlap the user can fix
+  // by dragging.
   let blockTop: number | null = null;
   for (const root of roots) {
     if (root.position) continue;
     const rootLayout = layoutMap.get(root.id);
     if (!rootLayout) continue;
     const half = rootLayout.subtreeHeight / 2;
-    let top: number = blockTop === null ? startY - half : blockTop;
-    for (let moved = true; moved; ) {
-      moved = false;
-      for (const [bandTop, bandBottom] of placedBands) {
-        if (top < bandBottom && top + half * 2 > bandTop) {
-          top = bandBottom;
-          moved = true;
-        }
-      }
-    }
+    const top: number = blockTop === null ? startY - half : blockTop;
     rootLayout.x = startX;
     rootLayout.y = top + half;
     root.x = startX;

@@ -109,4 +109,20 @@ describe("multi-root layout", () => {
     expect(m.r2.y).toBeGreaterThan(m.r1.y + 32);
   });
 
+  it("does not push unplaced roots out of a placed tree's way", () => {
+    // 未配置ルートは配置済みツリーを無視して素直に縦に積む。避けさせると、
+    // 木をドロップしたり1行増やしたりするたびに無関係な木が飛ぶ。
+    const ns = nodes([
+      ["placed", []],
+      ["r1", []],
+      ["r2", []],
+    ]);
+    ns[0].position = { x: 100, y: 300 };
+    layoutMindMap(ns);
+    const m = byId(ns);
+    expect([m.placed.x, m.placed.y]).toEqual([100, 300]);
+    // r1 は配置済みツリーと同じ位置に重なったままでよい。
+    expect([m.r1.x, m.r1.y]).toEqual([100, 300]);
+    expect(m.r2.y).toBeGreaterThan(m.r1.y + 32);
+  });
 });
