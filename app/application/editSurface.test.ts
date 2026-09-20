@@ -1,18 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { EDIT_SURFACE, handleAuxInputKeys, type AuxKeyEvent } from "./editSurface";
-import type { EditorAction, EditorState } from "./editorReducer";
+import { recorder } from "./editSurface.testHelpers";
 import type { NodeType } from "../domain/model";
-
-// A dispatch stub that records actions; the returned state is never inspected
-// by handleAuxInputKeys, so a bare object cast is enough.
-function recorder() {
-  const actions: EditorAction[] = [];
-  const dispatch = (action: EditorAction) => {
-    actions.push(action);
-    return {} as EditorState;
-  };
-  return { actions, dispatch };
-}
 
 /** The aux input's contents for these cases; the caret defaults to the middle
  *  so ←/→ are ordinary caret moves unless a test parks it on an edge. */

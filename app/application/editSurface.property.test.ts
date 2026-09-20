@@ -10,16 +10,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { handleAuxInputKeys, type AuxKeyEvent } from "./editSurface";
-import type { EditorAction, EditorState } from "./editorReducer";
-
-function recorder() {
-  const actions: EditorAction[] = [];
-  const dispatch = (action: EditorAction) => {
-    actions.push(action);
-    return {} as EditorState;
-  };
-  return { actions, dispatch };
-}
+import { recorder } from "./editSurface.testHelpers";
 
 function key(k: string, currentTarget: AuxKeyEvent["currentTarget"]): AuxKeyEvent {
   return {
