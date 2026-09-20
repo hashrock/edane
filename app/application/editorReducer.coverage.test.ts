@@ -5,15 +5,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode } from "../domain/model";
 import { editorReducer, type EditorState } from "./editorReducer";
 
-function sampleModel(): MindMapModel {
+function sampleModel(): MindMapDocument {
   return {
-    id: "root",
-    text: "Root",
-    children: [
+    title: "Root",
+    roots: [
       { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
       { id: "b", text: "B", children: [] },
     ],
@@ -21,7 +20,7 @@ function sampleModel(): MindMapModel {
 }
 
 /** State where activeNodeId points to a node that does NOT exist in the model. */
-function orphanState(model: MindMapModel): EditorState {
+function orphanState(model: MindMapDocument): EditorState {
   return {
     document: { model, clipboard: null },
     view: {
@@ -102,11 +101,10 @@ describe("orphaned activeNodeId — defensive !currentNode/!node guards", () => 
 
 describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
   /** Model where 'a' is collapsed, hiding 'a1' from the flat navigation order. */
-  function collapsedModel(): MindMapModel {
+  function collapsedModel(): MindMapDocument {
     return {
-      id: "root",
-      text: "Root",
-      children: [
+      title: "Root",
+      roots: [
         {
           id: "a",
           text: "A",
@@ -140,11 +138,10 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     expect(findNode(next.document.model, "a")!.text).toBe("A");
   });
 
-  it("cutBranch on a node hidden inside a collapsed parent lands at root", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
+  it("cutBranch on a node hidden inside a collapsed parent lands on the first root", () => {
+    const model: MindMapDocument = {
+      title: "Root",
+      roots: [
         {
           id: "a",
           text: "A",
@@ -154,7 +151,7 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
         { id: "b", text: "B", children: [] },
       ],
     };
-    // a1 is hidden, so idx = -1 → prevId = null → landId = first top-level "a"
+    // a1 is hidden, so idx = -1 → prevId = null → landId = first root "a"
     const s: EditorState = {
       document: { model, clipboard: null },
       view: {
@@ -172,11 +169,10 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
     expect(next.document.clipboard?.text).toBe("A1");
   });
 
-  it("deleteNode of the active node hidden inside collapsed parent refocuses to the first top-level node", () => {
-    const model: MindMapModel = {
-      id: "root",
-      text: "Root",
-      children: [
+  it("deleteNode of the active node hidden inside collapsed parent refocuses to the first root", () => {
+    const model: MindMapDocument = {
+      title: "Root",
+      roots: [
         {
           id: "a",
           text: "A",
@@ -186,7 +182,7 @@ describe("collapsed-subtree edge cases (idx = -1 in getFlatOrder)", () => {
         { id: "b", text: "B", children: [] },
       ],
     };
-    // Deleting a1 while it is active; a1 is hidden → idx = -1 → landId = first top-level "a"
+    // Deleting a1 while it is active; a1 is hidden → idx = -1 → landId = first root "a"
     const s: EditorState = {
       document: { model, clipboard: null },
       view: {

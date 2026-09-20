@@ -39,25 +39,17 @@ const HIT_SLACK_Y = 5;
 // Horizontal slack: a slightly generous box is easier to hit while dragging.
 const HIT_SLACK_X = 8;
 
-/** The invisible document root as a drop parent for top-level nodes. */
-export interface DropRoot {
-  id: string;
-  /** Top-level node ids in order (the root's `children`). */
-  children: string[];
-}
-
 /**
  * Resolve the drop target under the pointer (world coordinates).
  *
- * `nodes` is the laid-out flat array (top-level nodes have depth 0; the
- * document root is not in it; collapsed nodes appear without their hidden
- * descendants). `excluded` holds the dragged node and its visible descendants.
- * `parentOf` maps child id → parent id for the same array, with top-level
- * nodes mapping to `root.id`.
+ * `nodes` is the laid-out flat array (roots have depth 0; collapsed nodes
+ * appear without their hidden descendants). `excluded` holds the dragged node
+ * and its visible descendants. `parentOf` maps child id → parent id for the
+ * same array; a root has no entry.
  *
- * A top-level node (tree root) has no sibling zones — its whole box is a child
- * drop — because a sibling of a tree root would be a new tree, and trees are
- * only created on purpose (see `isTopLevel` in domain/model.ts).
+ * A root has no sibling zones — its whole box is a child drop — because a
+ * sibling of a root would be a new tree, and trees are only created on
+ * purpose (see `isRoot` in domain/model.ts).
  *
  * Returns null over empty space, over an excluded node, or when the resolved
  * position is a no-op (the branch would land exactly where it already is) —
@@ -68,7 +60,6 @@ export function resolveDropTarget(
   draggedId: string,
   excluded: Set<string>,
   parentOf: Map<string, string>,
-  root: DropRoot,
   worldX: number,
   worldY: number
 ): DropTarget | null {
@@ -93,24 +84,22 @@ export function resolveDropTarget(
     const zone = isRoot ? 0 : Math.min(h * 0.3, SIBLING_ZONE_MAX);
     let target: DropTarget;
     if (!isRoot && worldY < top + zone) {
-      target = siblingTarget(nodes, parentOf, root, node.id, "before");
+      target = siblingTarget(nodes, parentOf, node.id, "before");
     } else if (!isRoot && worldY > bottom - zone) {
-      target = siblingTarget(nodes, parentOf, root, node.id, "after");
+      target = siblingTarget(nodes, parentOf, node.id, "after");
     } else {
       target = { kind: "child", parentId: node.id, targetId: node.id };
     }
-    return isNoopFor(nodes, parentOf, root, draggedId, target) ? null : target;
+    return isNoopFor(nodes, parentOf, draggedId, target) ? null : target;
   }
   return null;
 }
 
-/** Children (in order) of a parent id — a laid-out node or the document root. */
+/** Children (in order) of a laid-out parent node. */
 function childrenOf(
   nodes: MindMapNode[],
-  root: DropRoot,
   parentId: string
 ): string[] | undefined {
-  if (parentId === root.id) return root.children;
   return nodes.find((n) => n.id === parentId)?.children;
 }
 
@@ -118,12 +107,12 @@ function childrenOf(
 function siblingTarget(
   nodes: MindMapNode[],
   parentOf: Map<string, string>,
-  root: DropRoot,
   siblingId: string,
   position: "before" | "after"
 ): DropTarget {
+  // Only non-roots have sibling zones, so the parent always exists here.
   const parentId = parentOf.get(siblingId)!;
-  const idx = childrenOf(nodes, root, parentId)!.indexOf(siblingId);
+  const idx = childrenOf(nodes, parentId)!.indexOf(siblingId);
   return {
     kind: "sibling",
     parentId,
@@ -137,13 +126,13 @@ function siblingTarget(
 function isNoopFor(
   nodes: MindMapNode[],
   parentOf: Map<string, string>,
-  root: DropRoot,
   draggedId: string,
   target: DropTarget
 ): boolean {
+  // A dragged root has no parent, so nesting it anywhere is always a change.
   const curParentId = parentOf.get(draggedId);
-  if (curParentId !== target.parentId) return false;
-  const siblings = curParentId ? childrenOf(nodes, root, curParentId) : undefined;
+  if (curParentId === undefined || curParentId !== target.parentId) return false;
+  const siblings = childrenOf(nodes, curParentId);
   if (!siblings) return false;
   const curIndex = siblings.indexOf(draggedId);
   if (target.kind === "child") {

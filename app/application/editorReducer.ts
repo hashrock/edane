@@ -22,18 +22,19 @@
  * selectionEnd. There is no multi-node selection.
  */
 
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
-  findParentAndIndex,
+  locateNode,
   getFlatOrder,
-  firstNavigableId,
-  ensureTopLevelNode,
+  firstRootId,
+  ensureRoot,
   placeBranchAt,
   addRootAt,
-  isTopLevel,
   generateId,
   cloneModel,
+  cloneDocument,
+  setDocumentTitle,
   addSiblingAfter,
   detachBranch,
   cloneWithNewIds,
@@ -56,7 +57,7 @@ import {
 import { assertNever } from "../lib/assertNever";
 
 export interface DocumentState {
-  model: MindMapModel;
+  model: MindMapDocument;
   // Internal branch clipboard: the subtree captured by copyBranch / cutBranch,
   // pasted as a child of the active node by pasteBranch. null = empty.
   clipboard: MindMapModel | null;
@@ -132,10 +133,10 @@ export type EditorAction =
   // position among the parent's current children; absent = append).
   | { type: "moveBranch"; nodeId: string; newParentId: string; index?: number }
   // Drag & drop onto empty canvas: put the node's tree at a free position. A
-  // nested node is detached and becomes a new top-level tree there.
+  // nested node is detached and becomes a new root there.
   | { type: "placeBranchAt"; nodeId: string; x: number; y: number }
-  // Context menu on empty canvas: a new blank tree root at that position,
-  // handed straight into edit mode. The only way a tree root is created.
+  // Context menu on empty canvas: a new blank root at that position, handed
+  // straight into edit mode.
   | { type: "addRootAt"; x: number; y: number }
   // --- navigation ---
   | { type: "moveUp" }
@@ -201,7 +202,7 @@ export type EditorAction =
       focusOffset: number;
     }
   // Insert an empty sibling right after the active node and edit it (Enter in
-  // selection mode). Falls back to a child when the root is active.
+  // selection mode). Becomes a child when a root is active (see isRoot).
   | { type: "insertSiblingAfter" }
   // --- context-menu node ops ---
   | { type: "toggleCollapse"; nodeId: string }
@@ -282,7 +283,7 @@ function documentReducer(
         // never move a node's content onto a fresh id, see splitNode).
         const result = splitNode(model, activeNodeId, 0);
         return {
-          document: { ...document, model: result.model },
+          document: { ...document, model: result.doc },
           focusId: activeNodeId,
           focusCursorPos: 0,
           focusSelectionEnd: 0,
@@ -293,7 +294,7 @@ function documentReducer(
       // the suffix becomes a following sibling; the caret lands at its start.
       const result = splitNode(model, activeNodeId, action.pos);
       return {
-        document: { ...document, model: result.model },
+        document: { ...document, model: result.doc },
         focusId: result.newNodeId,
         focusCursorPos: 0,
         focusSelectionEnd: 0,
@@ -366,7 +367,7 @@ function documentReducer(
       const merged = mergeIntoPredecessor(model, activeNodeId);
       if (!merged) return { document };
       return {
-        document: { ...document, model: merged.model },
+        document: { ...document, model: merged.doc },
         focusId: merged.targetId,
         // Caret lands at the merge boundary, not the end of the merged text.
         focusCursorPos: merged.caretPos,
@@ -408,16 +409,20 @@ function documentReducer(
 
     case "cutBranch": {
       const { model } = document;
-      if (!activeNodeId || activeNodeId === model.id) return { document }; // never cut root
+      if (!activeNodeId) return { document };
       const order = getFlatOrder(model);
       const idx = order.indexOf(activeNodeId);
-      const { model: newModel, removed } = detachBranch(model, activeNodeId);
+      const { doc: newModel, removed } = detachBranch(model, activeNodeId);
       if (!removed) return { document };
+      // Cutting the last root empties the document; editorReducer() restores
+      // a blank root and refocuses it (see ensureRoot below).
       const prevId = idx > 0 ? order[idx - 1] : null;
       const landId =
         prevId && findNode(newModel, prevId)
           ? prevId
-          : firstNavigableId(newModel);
+          : newModel.roots.length > 0
+            ? firstRootId(newModel)
+            : activeNodeId;
       return {
         document: { model: newModel, clipboard: removed },
         focusId: landId,
@@ -459,16 +464,14 @@ function documentReducer(
     case "insertNodes": {
       const { targetId, nodes } = action;
       if (nodes.length === 0) return { document };
-      const newModel = cloneModel(document.model);
-      const parentInfo = isTopLevel(newModel, targetId)
-        ? null // a tree root takes them as children, not as new trees
-        : findParentAndIndex(newModel, targetId);
-      if (parentInfo) {
-        parentInfo.parent.children.splice(parentInfo.index + 1, 0, ...nodes);
+      const newModel = cloneDocument(document.model);
+      const loc = locateNode(newModel, targetId);
+      if (!loc) return { document };
+      if (loc.parent === null) {
+        // A root takes them as children, not as new trees (see isRoot).
+        loc.siblings[loc.index].children.push(...nodes);
       } else {
-        const root = findNode(newModel, targetId);
-        if (!root) return { document };
-        root.children.push(...nodes);
+        loc.siblings.splice(loc.index + 1, 0, ...nodes);
       }
       const last = nodes[nodes.length - 1];
       return {
@@ -515,24 +518,26 @@ function documentReducer(
     }
 
     case "deleteNode": {
-      if (action.nodeId === document.model.id) return { document }; // never delete root
       const order = getFlatOrder(document.model);
       const idx = order.indexOf(action.nodeId);
       // Delete the node together with its WHOLE subtree (children are removed,
       // not promoted to the parent level).
-      const { model: newModel, removed } = detachBranch(
+      const { doc: newModel, removed } = detachBranch(
         document.model,
         action.nodeId
       );
-      if (removed === null) return { document }; // root (or unknown) → no-op
+      if (removed === null) return { document }; // unknown → no-op
       const newDocument = { ...document, model: newModel };
-      // Only refocus if the currently active node disappeared.
+      // Only refocus if the currently active node disappeared. (Deleting the
+      // last root is handled by editorReducer(): ensureRoot + refocus.)
       if (activeNodeId && !findNode(newModel, activeNodeId)) {
         const prevId = idx > 0 ? order[idx - 1] : null;
         const landId =
           prevId && findNode(newModel, prevId)
             ? prevId
-            : firstNavigableId(newModel);
+            : newModel.roots.length > 0
+              ? firstRootId(newModel)
+              : activeNodeId;
         return { document: newDocument, focusId: landId };
       }
       return { document: newDocument };
@@ -598,12 +603,13 @@ function documentReducer(
     }
 
     case "setTitle": {
-      const nextModel = updateNodeText(
-        document.model,
-        document.model.id,
-        action.text
-      );
-      return { document: { ...document, model: nextModel } };
+      if (action.text === document.model.title) return { document };
+      return {
+        document: {
+          ...document,
+          model: setDocumentTitle(document.model, action.text),
+        },
+      };
     }
 
     // Pure view actions: the document never changes.
@@ -629,19 +635,18 @@ function documentReducer(
     case "exitEditing": {
       // Leaving edit mode on a blank leaf node deletes it — an accidentally
       // created empty node (Enter then Escape) shouldn't linger. Never delete
-      // the root, never the only top-level node (the document must keep one —
-      // deleting it would just get it replaced by another blank), and never a
-      // node that still has children (its subtree would vanish with it); those
-      // just exit to selection with no model change.
+      // the only root (the document must keep one — deleting it would just get
+      // it replaced by another blank), and never a node that still has
+      // children (its subtree would vanish with it); those just exit to
+      // selection with no model change.
       if (!activeNodeId) return { document };
       const node = findNode(document.model, activeNodeId);
-      const onlyTopLevel =
-        document.model.children.length === 1 &&
-        document.model.children[0].id === activeNodeId;
+      const onlyRoot =
+        document.model.roots.length === 1 &&
+        document.model.roots[0].id === activeNodeId;
       if (
         !node ||
-        node.id === document.model.id ||
-        onlyTopLevel ||
+        onlyRoot ||
         node.text.trim() !== "" ||
         node.children.length > 0
       ) {
@@ -649,14 +654,15 @@ function documentReducer(
       }
       const order = getFlatOrder(document.model);
       const idx = order.indexOf(activeNodeId);
-      const { model: newModel } = detachBranch(document.model, activeNodeId);
+      const { doc: newModel } = detachBranch(document.model, activeNodeId);
       // Land on the predecessor (nearest surviving node), else the first
-      // top-level node — mirrors deleteNode's refocus preference.
+      // root — mirrors deleteNode's refocus preference. (`onlyRoot` above
+      // guarantees a root survives.)
       const prevId = idx > 0 ? order[idx - 1] : null;
       const landId =
         prevId && findNode(newModel, prevId)
           ? prevId
-          : firstNavigableId(newModel);
+          : firstRootId(newModel);
       return { document: { ...document, model: newModel }, focusId: landId };
     }
 
@@ -687,19 +693,20 @@ function documentReducer(
  */
 function rememberChild(
   view: ViewState,
-  model: MindMapModel,
+  model: MindMapDocument,
   nodeId: string
 ): ViewState["lastChildByParent"] {
-  const info = findParentAndIndex(model, nodeId);
-  if (!info) return view.lastChildByParent; // the root has no parent to key on
-  if (view.lastChildByParent[info.parent.id] === nodeId)
+  const loc = locateNode(model, nodeId);
+  // A root has no parent to key on.
+  if (!loc || loc.parent === null) return view.lastChildByParent;
+  if (view.lastChildByParent[loc.parent.id] === nodeId)
     return view.lastChildByParent;
-  return { ...view.lastChildByParent, [info.parent.id]: nodeId };
+  return { ...view.lastChildByParent, [loc.parent.id]: nodeId };
 }
 
 function focusView(
   view: ViewState,
-  model: MindMapModel,
+  model: MindMapDocument,
   nodeId: string,
   cursorPos?: number,
   selectionEnd?: number
@@ -797,7 +804,8 @@ function viewReducer(
     case "moveDownSiblingFirst": {
       if (!view.activeNodeId) return view;
       const dir = action.type === "moveUpSiblingFirst" ? -1 : 1;
-      const info = findParentAndIndex(model, view.activeNodeId);
+      const loc = locateNode(model, view.activeNodeId);
+      if (!loc) return view;
       // THE RULE: these never descend into a node's children — going a level
       // deeper is → 's job. Otherwise "↓ on a parent" would mean one thing for
       // a node with a following sibling and another for the last child of a
@@ -806,24 +814,28 @@ function viewReducer(
       //
       // Siblings share a parent, so if the active node is visible they all are
       // — no collapsed check needed here (unlike moveToChild). The same holds
-      // for the parent and for any ancestor's sibling below.
+      // for the parent and for any ancestor's sibling below. The roots are
+      // siblings of one another, so ↑/↓ on a root walks the trees in order.
       if (dir === -1) {
-        if (!info) return view; // the root: nothing above it
-        const prev = info.parent.children[info.index - 1];
+        const prev = loc.siblings[loc.index - 1];
         if (prev) return focusView(view, model, prev.id);
         // First child → the parent, which is what sits above it on the canvas.
-        // The first top-level node has nothing above it: its parent is the
-        // invisible root (the title), never a focus target.
-        if (info.parent.id === model.id) return view;
-        return focusView(view, model, info.parent.id);
+        // The first root has nothing above it.
+        if (loc.parent === null) return view;
+        return focusView(view, model, loc.parent.id);
       }
       // Down: the next sibling, else climb until an ancestor has one — i.e.
       // step over the whole subtree we are in and land on the next thing at
-      // any level. This runs out on the tree's trailing edge: the root, its
-      // last child, ITS last child, and so on. Those nodes may still have
-      // children (↓ just refuses to descend into them) — → is how you get in.
-      for (let at = info; at; at = findParentAndIndex(model, at.parent.id)) {
-        const next = at.parent.children[at.index + 1];
+      // any level. This runs out on the document's trailing edge: the last
+      // root, its last child, ITS last child, and so on. Those nodes may still
+      // have children (↓ just refuses to descend into them) — → is how you get
+      // in.
+      for (
+        let at: ReturnType<typeof locateNode> = loc;
+        at;
+        at = at.parent ? locateNode(model, at.parent.id) : null
+      ) {
+        const next = at.siblings[at.index + 1];
         if (next) return focusView(view, model, next.id);
       }
       return view;
@@ -831,10 +843,8 @@ function viewReducer(
 
     case "moveToParent": {
       if (!view.activeNodeId) return view;
-      const info = findParentAndIndex(model, view.activeNodeId);
-      if (!info) return view; // root has no parent
-      // A top-level node's parent is the invisible root: nothing to go to.
-      if (info.parent.id === model.id) return view;
+      const loc = locateNode(model, view.activeNodeId);
+      if (!loc || loc.parent === null) return view; // a root has no parent
       // Record the child we are LEAVING, not just the parent we arrive at.
       // rememberChild covers every path that navigated into the child, but
       // recording the departure here makes ← → a round-trip even when the
@@ -843,10 +853,10 @@ function viewReducer(
         ...view,
         lastChildByParent: {
           ...view.lastChildByParent,
-          [info.parent.id]: view.activeNodeId,
+          [loc.parent.id]: view.activeNodeId,
         },
       };
-      return focusView(leaving, model, info.parent.id);
+      return focusView(leaving, model, loc.parent.id);
     }
 
     case "moveToChild": {
@@ -1041,16 +1051,8 @@ function viewReducer(
       };
     }
 
-    case "setTitle": {
-      if (view.activeNodeId !== prevDocument.model.id) return view;
-      const clamp = (pos: number) => Math.min(pos, action.text.length);
-      return {
-        ...view,
-        editingText: action.text,
-        cursorPos: clamp(view.cursorPos),
-        selectionEnd: clamp(view.selectionEnd),
-      };
-    }
+    case "setTitle":
+      return view; // the title is not a node; the selection is untouched
 
     case "replace":
       return view; // handled directly by editorReducer
@@ -1072,7 +1074,7 @@ function viewReducer(
  * flat order and land on the nearest surviving neighbour — preferring the
  * previous node, then the next — mirroring deleteNode's refocus behaviour so
  * selection stays close to where the user was. Without it (or when no
- * neighbour survives) we fall back to the first top-level node.
+ * neighbour survives) we fall back to the first root.
  */
 export function reconcileView(
   view: ViewState,
@@ -1096,14 +1098,14 @@ export function reconcileView(
  * Given a node that vanished from `document`, find the nearest node in
  * `prevDocument`'s flat order that still exists in `document`. Walks outward
  * from the vanished node's position, previous side first. Returns the first
- * top-level node when there's no prior order or no neighbour survives.
+ * root when there's no prior order or no neighbour survives.
  */
 function findNearestSurvivor(
   vanishedId: string | null,
   document: DocumentState,
   prevDocument?: DocumentState
 ): string {
-  const rootId = firstNavigableId(document.model);
+  const rootId = firstRootId(document.model);
   if (!vanishedId || !prevDocument) return rootId;
   const order = getFlatOrder(prevDocument.model);
   const idx = order.indexOf(vanishedId);
@@ -1145,13 +1147,13 @@ export function editorReducer(
     action,
     state.view.activeNodeId
   );
-  // The document must always keep a top-level node (the root is the title,
-  // not a node — with no children there'd be nothing to select). Deleting or
-  // cutting the last one replaces it with a blank node that takes the focus.
-  if (docResult.document.model.children.length === 0) {
-    const model = ensureTopLevelNode(docResult.document.model);
+  // The document must always keep a root (with none there'd be nothing to
+  // select). Deleting or cutting the last one replaces it with a blank root
+  // that takes the focus.
+  if (docResult.document.model.roots.length === 0) {
+    const model = ensureRoot(docResult.document.model);
     docResult.document = { ...docResult.document, model };
-    docResult.focusId = firstNavigableId(model);
+    docResult.focusId = firstRootId(model);
   }
   const nextView = viewReducer(
     state.view,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapDocument, type MindMapModel } from "../domain/model";
 
 // Root is the title (not a canvas node). DFS order: a, a1, b
 const MODEL: MindMapModel = {
@@ -51,7 +51,7 @@ beforeEach(() => {
 /** Render the editor and wait until the canvas is interactive. */
 async function setup(model: MindMapModel = MODEL) {
   render(
-    <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+    <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: model.children })} initialTitle="Root" />
   );
   // The first top-level node starts selected.
   await waitFor(() => api().getActiveNodeId() === "a");
@@ -88,16 +88,10 @@ async function setup(model: MindMapModel = MODEL) {
   return { fire, drag };
 }
 
-function childIds(model: MindMapModel, id: string): string[] {
-  const find = (n: MindMapModel): MindMapModel | null => {
-    if (n.id === id) return n;
-    for (const c of n.children) {
-      const f = find(c);
-      if (f) return f;
-    }
-    return null;
-  };
-  return (find(model)?.children ?? []).map((c) => c.id);
+/** Child ids under a node; `"root"` = the document's roots. */
+function childIds(doc: MindMapDocument, id: string): string[] {
+  const list = id === "root" ? doc.roots : (findNode(doc, id)?.children ?? []);
+  return list.map((c) => c.id);
 }
 
 describe("MindmapEditor drag & drop node move", () => {
@@ -161,7 +155,7 @@ describe("MindmapEditor drag & drop node move", () => {
     await drag("b", 700, 500);
 
     // Still a top-level tree, now pinned to a position of its own.
-    await waitFor(() => api().getModel().children[1]?.position != null);
+    await waitFor(() => api().getModel().roots[1]?.position != null);
     expect(childIds(api().getModel(), "root")).toEqual(["a", "b"]);
     const after = await waitFor(() => {
       const r = api().getNodeRect("b");

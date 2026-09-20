@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode, getFlatOrder } from "../domain/model";
 import {
   editorReducer,
@@ -27,11 +27,10 @@ import {
   type EditorState,
 } from "./editorReducer";
 
-function sampleModel(): MindMapModel {
+function sampleModel(): MindMapDocument {
   return {
-    id: "root",
-    text: "Root",
-    children: [
+    title: "Root",
+    roots: [
       {
         id: "a",
         text: "A",

@@ -161,7 +161,7 @@ beforeEach(() => {
 async function canvasEditTarget(target: MindMapModel) {
   render(
     <MindmapEditor
-      initialContent={JSON.stringify(modelWith(target))}
+      initialContent={JSON.stringify({ version: 2, roots: modelWith(target).children })}
       initialTitle="Root"
     />
   );
@@ -271,7 +271,7 @@ const outlineActive = () => engine().stateRef.current.view.activeNodeId;
 /** Render the outline and click the target row's content to start editing.
  *  Rows are flat-ordered (the root is the title, not a row): prev(0), target(1). */
 async function outlineEditTarget(target: MindMapModel) {
-  render(<OutlineHarness content={JSON.stringify(modelWith(target))} />);
+  render(<OutlineHarness content={JSON.stringify({ version: 2, roots: modelWith(target).children })} />);
   const row = await waitFor(
     () => document.querySelectorAll<HTMLElement>("ul > li")[1]
   );

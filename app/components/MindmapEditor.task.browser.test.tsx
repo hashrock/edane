@@ -104,7 +104,7 @@ beforeEach(() => {
   document.head.appendChild(style);
   render(
     <MindmapEditor
-      initialContent={JSON.stringify(MODEL)}
+      initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
       initialTitle="Shopping"
     />
   );

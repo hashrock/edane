@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent, page } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 
 const MD_SOURCE =
   "# 見出し\n\n- 項目A\n- 項目B\n\n> 引用\n\n<script>alert(1)</script>";
@@ -39,11 +39,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
 const panel = () => document.querySelector('[data-testid="md-panel"]');
 const panelBody = () =>
   document.querySelector('[data-testid="md-panel-body"]');
-const findNode = (m: MindMapModel, id: string): MindMapModel | null =>
-  m.id === id ? m : m.children.reduce<MindMapModel | null>(
-    (hit, c) => hit ?? findNode(c, id),
-    null
-  );
 
 // The default 414px-wide test viewport can't reach clicks on the right of the
 // canvas: the first tree is centred on open, so its toggle / second tree sit
@@ -62,7 +57,7 @@ beforeEach(async () => {
 describe("MindmapEditor markdown compact card + panel", () => {
   it("renders the markdown node as a compact card, not a tall block", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -76,7 +71,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
 
   it("opens the panel with sanitized rendered HTML on edit intent", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -105,7 +100,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
 
   it("edits the source from the panel's edit tab", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -158,7 +153,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
   // therefore never moves focus at all.
   it("keeps the keyboard in the panel while typing (no canvas shortcuts)", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "plain");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -191,7 +186,7 @@ describe("MindmapEditor markdown compact card + panel", () => {
     await waitFor(() => document.activeElement === textarea);
 
     const before = api().getModel();
-    const siblingCount = before.children.length;
+    const siblingCount = before.roots.length;
 
     // Several real characters: one keystroke alone would not have caught the
     // old bug, since the focus theft happened on the first one's state update.
@@ -204,18 +199,18 @@ describe("MindmapEditor markdown compact card + panel", () => {
     expect(findNode(after, "md")!.text).toContain("HELLO");
     expect(findNode(after, "md")!.type).toBe("markdown");
     // ...and no selection shortcut fired behind it.
-    expect(after.children.length).toBe(siblingCount);
+    expect(after.roots.length).toBe(siblingCount);
     expect(api().getActiveNodeId()).toBe("md");
 
     // Backspace is the destructive one: in selection mode it deletes the node.
     await userEvent.keyboard("[Backspace]");
     expect(document.activeElement).toBe(textarea);
     expect(findNode(api().getModel(), "md")).not.toBeNull();
-    expect(api().getModel().children.length).toBe(siblingCount);
+    expect(api().getModel().roots.length).toBe(siblingCount);
 
     // Enter forks a sibling in selection mode; here it must type a newline.
     await userEvent.keyboard("[Enter]");
-    expect(api().getModel().children.length).toBe(siblingCount);
+    expect(api().getModel().roots.length).toBe(siblingCount);
 
     // Leaving edit mode hands the keyboard back, so arrows navigate again.
     const viewBtn = Array.from(

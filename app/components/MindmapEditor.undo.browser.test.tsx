@@ -59,13 +59,13 @@ async function activate(nodeId: string) {
 describe("MindmapEditor undo/redo", () => {
   it("undoes and redoes a structural edit (Enter adds a node)", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await activate("a");
 
     // "Alpha" is a tree root, so Enter at its end adds a child (never a
     // sibling tree).
-    const count = () => api().getModel().children[0].children.length;
+    const count = () => api().getModel().roots[0].children.length;
     const before = count(); // 0
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("{Enter}");
@@ -82,23 +82,23 @@ describe("MindmapEditor undo/redo", () => {
 
   it("undoes and redoes typed text", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await activate("a");
 
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("X");
     await waitFor(() => {
-      const t = api().getModel().children[0].text;
+      const t = api().getModel().roots[0].text;
       return t !== "Alpha" ? t : null;
     });
-    expect(api().getModel().children[0].text).toContain("X");
+    expect(api().getModel().roots[0].text).toContain("X");
 
     await userEvent.keyboard("{Meta>}z{/Meta}");
-    await waitFor(() => api().getModel().children[0].text === "Alpha");
+    await waitFor(() => api().getModel().roots[0].text === "Alpha");
 
     await userEvent.keyboard("{Meta>}{Shift>}z{/Shift}{/Meta}");
-    await waitFor(() => api().getModel().children[0].text.includes("X"));
+    await waitFor(() => api().getModel().roots[0].text.includes("X"));
   });
 
   it("undoing a pasted branch lands the active node on the nearest surviving neighbour (regression)", async () => {
@@ -121,7 +121,7 @@ describe("MindmapEditor undo/redo", () => {
       ],
     };
     render(
-      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: model.children })} initialTitle="Root" />
     );
     // "a" (a branch with a child) is selected on load; copy it.
     await waitFor(() => api().getActiveNodeId() === "a");
@@ -153,14 +153,14 @@ describe("MindmapEditor undo/redo", () => {
       })
     );
     await waitFor(() => {
-      const b = api().getModel().children.find((c) => c.id === "b");
+      const b = api().getModel().roots.find((c) => c.id === "b");
       return b != null && b.children.length > 0;
     });
 
     // One undo removes the whole pasted branch...
     await userEvent.keyboard("{Meta>}z{/Meta}");
     await waitFor(() => {
-      const b = api().getModel().children.find((c) => c.id === "b");
+      const b = api().getModel().roots.find((c) => c.id === "b");
       return b != null && b.children.length === 0;
     });
 
@@ -172,7 +172,7 @@ describe("MindmapEditor undo/redo", () => {
     // A follow-up keyboard action must actually take effect (previously it
     // silently no-op'd because activeNodeId pointed nowhere).
     const bChildrenBefore = () =>
-      api().getModel().children.find((c) => c.id === "b")!.children.length;
+      api().getModel().roots.find((c) => c.id === "b")!.children.length;
     const before = bChildrenBefore();
     document
       .querySelector("textarea")!

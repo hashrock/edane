@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import {
   publicationUrls,
   parsePublicationPath,
@@ -27,6 +27,12 @@ const TREE: MindMapModel = {
     },
     { id: "b", text: "https://example.com", type: "link", linkTitle: "Example", children: [] },
   ],
+};
+
+/** Two trees: TREE and a second root, so the path is looked up across roots. */
+const DOC: MindMapDocument = {
+  title: "Note",
+  roots: [TREE, { id: "r2", text: "Second", children: [{ id: "r2a", text: "Leaf", children: [] }] }],
 };
 
 describe("publicationUrls", () => {
@@ -114,12 +120,18 @@ describe("publishedNodeJson", () => {
 });
 
 describe("nodePathTexts", () => {
-  it("returns root-to-node texts inclusive", () => {
-    expect(nodePathTexts(TREE, "a1")).toEqual(["Root", "Alpha", "price: 1200"]);
-    expect(nodePathTexts(TREE, "root")).toEqual(["Root"]);
+  it("returns tree-root-to-node texts inclusive (the note title is not part of it)", () => {
+    expect(nodePathTexts(DOC, "a1")).toEqual(["Root", "Alpha", "price: 1200"]);
+    expect(nodePathTexts(DOC, "root")).toEqual(["Root"]);
+    expect(nodePathTexts(DOC, "a1")).not.toContain("Note");
+  });
+
+  it("finds nodes in any root", () => {
+    expect(nodePathTexts(DOC, "r2a")).toEqual(["Second", "Leaf"]);
+    expect(nodePathTexts(DOC, "r2")).toEqual(["Second"]);
   });
 
   it("returns null for a missing node", () => {
-    expect(nodePathTexts(TREE, "nope")).toBeNull();
+    expect(nodePathTexts(DOC, "nope")).toBeNull();
   });
 });

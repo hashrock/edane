@@ -9,12 +9,11 @@ import {
 } from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
-  findParentAndIndex,
-  firstNavigableId,
-  isTopLevel,
+  firstRootId,
+  isRoot,
   cloneWithNewIds,
   generateId,
 } from "../domain/model";
@@ -89,9 +88,10 @@ import ContextMenu, {
 } from "./ContextMenu";
 import PublicityDropdown from "./PublicityDropdown";
 import {
-  serializeModel,
+  serializeDocument,
   modelToText,
-  textToModel,
+  documentToText,
+  textToNodes,
 } from "../application/persistence";
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
@@ -240,8 +240,8 @@ type DragState =
 /** The "move" half of {@link DragState}, once narrowed. */
 type MoveDragState = Extract<DragState, { mode: "move" }>;
 
-/** Number of descendants (incl. hidden ones) of a node in the model. */
-function countDescendants(model: MindMapModel, nodeId: string): number {
+/** Number of descendants (incl. hidden ones) of a node in the document. */
+function countDescendants(model: MindMapDocument, nodeId: string): number {
   const node = findNode(model, nodeId);
   if (!node) return 0;
   let count = -1;
@@ -299,7 +299,7 @@ export interface RedrawStats {
 }
 
 export interface MindmapTestApi {
-  getModel: () => MindMapModel;
+  getModel: () => MindMapDocument;
   getActiveNodeId: () => string | null;
   /** Current selection state (focused node + caret + edit mode). */
   getSelection: () => {
@@ -666,8 +666,8 @@ export function MindmapEditorView({
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
-  // Title = root node text (the root is the header title, not a canvas node)
-  const title = model.text;
+  // The title is the document's own (edited in the header, not a canvas node).
+  const title = model.title;
 
   // --- Cursor blink ---
   useEffect(() => {
@@ -851,7 +851,7 @@ export function MindmapEditorView({
       const targetId =
         nodeIdAtClientPoint(e.clientX, e.clientY) ??
         st.view.activeNodeId ??
-        firstNavigableId(st.document.model);
+        firstRootId(st.document.model);
       // Each image becomes a fresh child of the drop target; upload sequentially
       // so the save-status line and the R2 requests don't stomp each other.
       void (async () => {
@@ -905,9 +905,8 @@ export function MindmapEditorView({
       if (!clipText.trim()) return;
       const cur = stateRef.current;
       const targetId =
-        cur.view.activeNodeId || firstNavigableId(cur.document.model);
-      const parsed = textToModel("_", clipText);
-      const freshChildren = parsed.children.map(cloneWithNewIds);
+        cur.view.activeNodeId || firstRootId(cur.document.model);
+      const freshChildren = textToNodes(clipText).map(cloneWithNewIds);
       if (freshChildren.length === 0) return;
       const next = dispatch(
         { type: "insertNodes", targetId, nodes: freshChildren },
@@ -1036,7 +1035,7 @@ export function MindmapEditorView({
       if (plan === "markdown-dialog") {
         // Offer decompose / markdown node / plain text.
         const targetId =
-          st.view.activeNodeId || firstNavigableId(st.document.model);
+          st.view.activeNodeId || firstRootId(st.document.model);
         setMdPaste({ text, targetId });
         return;
       }
@@ -1081,7 +1080,7 @@ export function MindmapEditorView({
           { id: generateId(), text: text.trim(), type: "markdown", children: [] },
         ]);
       } else {
-        insert(textToModel("_", text).children);
+        insert(textToNodes(text));
       }
       setTimeout(() => inputRef.current?.focus(), 0);
     },
@@ -1134,7 +1133,7 @@ export function MindmapEditorView({
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
     const copyAllText = () => {
-      const text = modelToText(stateRef.current.document.model);
+      const text = documentToText(stateRef.current.document.model);
       navigator.clipboard.writeText(text);
     };
     const copyBranch = () => {
@@ -1156,10 +1155,9 @@ export function MindmapEditorView({
         document: { model },
         view: { activeNodeId },
       } = stateRef.current;
-      const text = activeNodeId
-        ? modelToText(findNode(model, activeNodeId) || model)
-        : modelToText(model);
-      const prompt = `${t("chatgptPrompt", { title: model.text })}\n\n${text}`;
+      const active = activeNodeId ? findNode(model, activeNodeId) : null;
+      const text = active ? modelToText(active) : documentToText(model);
+      const prompt = `${t("chatgptPrompt", { title: model.title })}\n\n${text}`;
       window.open(
         `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`,
         "_blank"
@@ -1184,7 +1182,7 @@ export function MindmapEditorView({
               action: () => {
                 const id = stateRef.current.view.activeNodeId;
                 const n = id ? findNode(modelRef.current, id) : null;
-                if (!n || n.id === modelRef.current.id) return;
+                if (!n) return;
                 if (!supportsCheckbox(n.type ?? "text")) return;
                 setNodeCheckedRef.current(
                   n.id,
@@ -1467,7 +1465,7 @@ export function MindmapEditorView({
   // --- Guest mode: hand the current document off to be saved to an account ---
   const handleSaveToAccount = useCallback(() => {
     const m = stateRef.current.document.model;
-    onSaveToAccount?.({ title: m.text, content: serializeModel(m) });
+    onSaveToAccount?.({ title: m.title, content: serializeDocument(m) });
   }, [onSaveToAccount]);
 
   // --- Title editing ---
@@ -1737,10 +1735,8 @@ export function MindmapEditorView({
           const flat = nodesRef.current;
           const byId = new Map(flat.map((n) => [n.id, n]));
           const parentOf = new Map<string, string>();
+          // Roots have no parent and therefore no entry.
           for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
-          // Top-level nodes belong to the invisible document root.
-          const root = modelRef.current;
-          for (const c of root.children) parentOf.set(c.id, root.id);
           const excluded = new Set<string>();
           (function collect(id: string) {
             excluded.add(id);
@@ -1755,10 +1751,6 @@ export function MindmapEditorView({
           drag.nodeId,
           drag.excluded,
           drag.parentOf,
-          {
-            id: modelRef.current.id,
-            children: modelRef.current.children.map((c) => c.id),
-          },
           worldX,
           worldY
         );
@@ -1771,11 +1763,11 @@ export function MindmapEditorView({
             worldX <= n.x + nodeBoxWidth(n.width, n.depth === 0) &&
             Math.abs(worldY - n.y) <= nodeBoxHeight(n.height) / 2
         );
-        // Only a tree root can be dropped on empty canvas (free placement);
-        // a nested branch there would become a new tree, which is reserved
-        // for the explicit "add root" menu — so for it that's a no-drop.
+        // Only a root can be dropped on empty canvas (free placement); a
+        // nested branch there would become a new tree, which is reserved for
+        // the explicit "add root" menu — so for it that's a no-drop.
         drag.ghostAt =
-          overOwnSubtree || !isTopLevel(modelRef.current, drag.nodeId)
+          overOwnSubtree || !isRoot(modelRef.current, drag.nodeId)
             ? null
             : ghostAt;
         updateDropMarker(drag.drop);
@@ -2398,8 +2390,8 @@ export function MindmapEditorView({
     // Draw nodes
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      // Top-level nodes are the roots of their trees (the document root is
-      // the title and isn't drawn), so each gets the root styling.
+      // Depth 0 = a document root (see MindMapDocument.roots): each tree's
+      // root gets the root styling.
       const isRoot = node.depth === 0;
       // isEditing = caret/text-input active; isSelected = node highlighted but
       // not being edited (single click). A selected node renders like any other

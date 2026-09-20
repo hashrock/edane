@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 
 // Canvas counterpart of the outline view's "custom nodes keep their preview
 // while editing, with a URL box below" behaviour: editing an image/link node
@@ -44,15 +44,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-function findNode(node: MindMapModel, id: string): MindMapModel | null {
-  if (node.id === id) return node;
-  for (const child of node.children) {
-    const hit = findNode(child, id);
-    if (hit) return hit;
-  }
-  return null;
-}
-
 beforeEach(() => {
   const style = document.createElement("style");
   style.textContent = `
@@ -69,7 +60,7 @@ const urlInput = () =>
 /** Render, wait until interactive, then select `nodeId` and press Space. */
 async function editNode(nodeId: string) {
   render(
-    <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
   );
   await waitFor(() => api().getActiveNodeId() === "l");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);

@@ -13,21 +13,25 @@
 
 ↑ / ↓ も同じ理由で、**選択モードだけがレイアウトで変わる**。canvasの選択モードは `moveUpSiblingFirst` / `moveDownSiblingFirst`＝兄弟を辿り、尽きたら枝の外へ出る（↑は親へ、↓はサブツリーを飛び越えて次のノードへ）。**子には決して降りない — 階層を降りるのは → の仕事**。不変条件が対象とする**編集モード**では canvas / outline とも `moveUp` / `moveDown`＝フラット順。
 
-**↑ / ↓ が行き止まりになってはいけない**（編集モードならキャレットの閉じ込め、選択モードなら枝の末尾で操作不能）。ただし選択モードでは「移動先が木構造から決まる」ことのほうが優先で、**同じ操作の意味が木の位置や過去の操作履歴によって変わってはいけない**。canvasの↓が止まるのは木の末尾側の縁（最後のトップレベルノード → その最後の子 → そのまた最後の子…）だけで、そこは → で子に入る。↑が止まるのは最初のトップレベルノードだけ。
+**↑ / ↓ が行き止まりになってはいけない**（編集モードならキャレットの閉じ込め、選択モードなら枝の末尾で操作不能）。ただし選択モードでは「移動先が木構造から決まる」ことのほうが優先で、**同じ操作の意味が木の位置や過去の操作履歴によって変わってはいけない**。canvasの↓が止まるのはドキュメントの末尾側の縁（最後のルート → その最後の子 → そのまた最後の子…）だけで、そこは → で子に入る。↑が止まるのは最初のルートだけ。
 
 かつて↓のフォールバックをフラット順の隣にしていたときは、「自分が親の最後の子か」というユーザーに見えない条件で↓が子に降りたり降りなかったりしていた。**行き止まりを避けるためにフォールバックや記憶を足すときは、その移動先が木のどこでも同じ規則で決まるか確かめること。**
 
-### ルートは「ノード」ではない（invisible root）
+### ドキュメントはルートの配列（multi-root）
 
-`MindMapModel` のルートはノートのタイトルであり、canvas にも outline にも描かれず、選択・編集・ナビゲーションの対象にならない。ルートの子（トップレベルノード）がそれぞれ独立した木として並ぶ「マルチルート」の見た目になる。
+`MindMapDocument`（`app/domain/model.ts`）は `{ title, roots }`。`title` はノートのタイトルでノードではない（ヘッダーで編集し、`notes.title` 列に保存する）。`roots` は木の配列で、各ルート（`MindMapModel`）が canvas / outline に独立した木として並ぶ。**「見えないルートノード」は存在しない**。ノードを探す・位置を知るときは `findNode(doc, id)` / `locateNode(doc, id)`（`parent === null` ならルート、`siblings` は `doc.roots` か `parent.children`）を使い、`parent.id === model.id` のような比較を書かないこと。
 
-- 可視/ナビゲーション対象の集合を作る走査（`getFlatOrder` / `flattenToNodes` / `outlineRows`）はすべて `topLevelNodes(model)` から始める。ルートから始める走査を新たに書かないこと。
-- 「他にフォーカス先がない」フォールバックは `firstNavigableId(model)`（最初のトップレベルノード）。`model.id` にフォールバックしてはいけない（不可視ノードがアクティブになる）。
-- ドキュメントは常にトップレベルノードを1つ以上持つ。`parseContent` と `editorReducer` が `ensureTopLevelNode` で保証する。
-- canvas ではトップレベルノード（`MindMapNode.depth === 0`）が旧ルートの見た目（濃色・最小幅100）を引き継ぐ。`nodes[0]` をルート扱いするコードを書かないこと。
-- ドラッグ&ドロップでトップレベルノードの親は `model.id`（`DropRoot`）として扱う。
-- **木（ルート）は意図してしか作れない**。作る手段は空きキャンバスの右クリック →「ここにルートを追加」（`addRootAt`）だけ。トップレベルノードに対する「兄弟を作る」操作（Enter・分割・ペースト・`insertSiblingAfter`・DnD の兄弟ゾーン）はすべて「子を作る」に読み替える（`isTopLevel` で分岐。旧単一ルートと同じ扱い）。ネストしたノードを空き領域にドロップしても木にはならない（no-drop）。
-- 各木は canvas 上に自由配置できる。`MindMapModel.position`（トップレベルノードのみ有効、箱の左端x・縦中央y）を `treeLayout` が優先し、未配置の木は配置済みの木の縦の帯を避けて自動で縦に積む。トップレベルノードを空き領域にドロップすると `placeBranchAt` でそこに固定（ドメイン関数自体はネストノードの切り出しもできるが、UI からは呼ばない）。自分のサブツリー上で離した場合はキャンセル。`moveBranch` でネストされると `position` は捨てる。
+- 可視/ナビゲーション対象の集合を作る走査（`getFlatOrder` / `flattenToNodes` / `outlineRows`）はすべて `doc.roots` から始める。
+- 「他にフォーカス先がない」フォールバックは `firstRootId(doc)`。
+- ドキュメントは常にルートを1つ以上持つ。`parseContent` と `editorReducer` が `ensureRoot` で保証する（最後のルートを削除・カットすると空のルートに置き換わり、それがフォーカスを取る）。
+- canvas ではルート（`MindMapNode.depth === 0`）が濃色・最小幅100の見た目になる。`nodes[0]` をルート扱いするコードを書かないこと。
+- **木（ルート）は意図してしか作れない**。作る手段は、空きキャンバスの右クリック →「ここにルートを追加」（`addRootAt`）、ルート直下の子の Shift+Tab（`dedentNode`）、`placeBranchAt`（ドメイン関数。UI からはルートの自由配置にしか使わない）。ルートに対する「兄弟を作る」操作（Enter・分割・ペースト・`insertSiblingAfter`・DnD の兄弟ゾーン）はすべて「子を作る」に読み替える（`addSiblingAfter` / `splitNode` / `insertNodes` が `locateNode` の `parent === null` で分岐。旧単一ルートと同じ扱い）。ネストしたノードを空き領域にドロップしても木にはならない（no-drop）。
+- ルート同士は `doc.roots` 上の兄弟。選択モードの ↑↓（`moveUpSiblingFirst` / `moveDownSiblingFirst`）はルート間を順に辿り、Alt+↑↓（`moveNodeUp` / `moveNodeDown`）はルートの順序を入れ替え、Backspace/Delete の連結（`mergeIntoPredecessor` / `mergeSuccessorInto`）は隣のルートと木を結合する。
+- 各木は canvas 上に自由配置できる。`MindMapModel.position`（ルートのみ有効、箱の左端x・縦中央y）を `treeLayout` が優先し、未配置の木は配置済みの木の縦の帯を避けて自動で縦に積む。ルートを空き領域にドロップすると `placeBranchAt` でそこに固定。自分のサブツリー上で離した場合はキャンセル。ノードをネストする操作（`moveBranch` / `indentNode`）は `position` を捨てる。
+
+### 保存形式とマイグレーション
+
+`content` 列の JSON は **v2 `{ "version": 2, "roots": [...] }`**（`serializeDocument`）。タイトルは content に含めず、保存 API の `title` フィールド（`notes.title` 列）で運ぶ。`parseContent(content, title)` は v2 / v1（旧: ルートノード1個 `{ id, text, children }`）/ 旧インデントテキストの3形式を読み、必ず `MindMapDocument` を返す。**旧形式は単一ルートとして移行する**: v1 のルートノードは id・サブツリーごと `roots[0]` になり（#135 で一時的に「子＝別々の木」として表示していたものも、元の1本の木に戻る）、テキスト形式はタイトルを持つルート1個の下に行を並べる。木が複数になるのはユーザーがルートを追加したときだけ。**書き込みは常に v2** なので、開いて保存した時点でそのノートは移行される（暗号化された行を SQL で書き換える必要はない）。詳細は `docs/adr/0002-multi-root-document.md`。
 
 ### 守り方
 

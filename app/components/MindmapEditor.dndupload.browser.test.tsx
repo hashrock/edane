@@ -63,7 +63,7 @@ afterEach(() => {
 describe("MindmapEditor drag & drop image upload", () => {
   it("dropping an image file creates an image child node with the uploaded URL", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -89,7 +89,7 @@ describe("MindmapEditor drag & drop image upload", () => {
     const imageNode = await waitFor(() =>
       api()
         .getModel()
-        .children.find((c) => c.id === "a")!
+        .roots.find((c) => c.id === "a")!
         .children.find((c) => c.type === "image")
     );
     expect(imageNode.text).toBe(UPLOADED_URL);

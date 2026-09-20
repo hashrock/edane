@@ -27,7 +27,7 @@
 
 import type { EditorAction, EditorState, UndoType } from "./editorReducer";
 import type { MessageKey } from "./messages";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
 import {
@@ -64,7 +64,7 @@ export interface KeyContext {
 export interface KeymapDeps {
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved). */
-  saveNote: (model: MindMapModel) => void;
+  saveNote: (model: MindMapDocument) => void;
   openPalette: () => void;
   openHelp: () => void;
   undo: () => void;

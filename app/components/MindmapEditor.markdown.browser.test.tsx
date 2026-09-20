@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 
 const MODEL: MindMapModel = {
   id: "root",
@@ -89,9 +89,10 @@ function dialogShown(): boolean {
   return !!document.body.textContent?.includes("Markdown detected");
 }
 
-/** All node texts, depth-first. */
-function allNodes(m: MindMapModel): MindMapModel[] {
-  return [m, ...m.children.flatMap(allNodes)];
+/** All nodes of the document, depth-first. */
+function allNodes(doc: MindMapDocument): MindMapModel[] {
+  const inTree = (m: MindMapModel): MindMapModel[] => [m, ...m.children.flatMap(inTree)];
+  return doc.roots.flatMap(inTree);
 }
 
 beforeEach(() => {
@@ -107,7 +108,7 @@ beforeEach(() => {
 describe("MindmapEditor markdown paste", () => {
   it("offers a dialog when pasted text looks like markdown in selection mode", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -117,12 +118,12 @@ describe("MindmapEditor markdown paste", () => {
       document.body.textContent?.includes("Markdown detected")
     );
     // Model is untouched until a choice is made.
-    expect(api().getModel().children.length).toBe(1);
+    expect(api().getModel().roots.length).toBe(1);
   });
 
   it("pastes as a single markdown node", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -144,7 +145,7 @@ describe("MindmapEditor markdown paste", () => {
 
   it("decomposes markdown into a node subtree", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -167,11 +168,11 @@ describe("MindmapEditor markdown paste", () => {
 
   it("lands in selection mode and reverts in one undo", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await selectNode("a");
 
-    const before = api().getModel().children.length; // 1
+    const before = api().getModel().roots.length; // 1
 
     pasteMarkdown("# Heading\n- one\n- two");
     const btn = await waitFor(() =>
@@ -188,7 +189,7 @@ describe("MindmapEditor markdown paste", () => {
 
     // A single undo fully reverts the decompose paste.
     await userEvent.keyboard("{Meta>}z{/Meta}");
-    await waitFor(() => api().getModel().children.length === before);
+    await waitFor(() => api().getModel().roots.length === before);
     expect(allNodes(api().getModel()).some((n) => n.text === "Heading")).toBe(false);
   });
 });
@@ -196,7 +197,7 @@ describe("MindmapEditor markdown paste", () => {
 describe("MindmapEditor markdown paste while editing", () => {
   it("pastes straight into the text: no dialog, no new nodes, native insertion", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await editNode("a");
     const nodesBefore = allNodes(api().getModel()).length;
@@ -218,7 +219,7 @@ describe("MindmapEditor markdown paste while editing", () => {
 
   it("keeps single-line markdown (inline link / bold) native too", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await editNode("a");
 
@@ -230,7 +231,7 @@ describe("MindmapEditor markdown paste while editing", () => {
 
   it("still offers the dialog once editing is left", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await editNode("a");
     pasteMarkdown("# Heading\n- one");

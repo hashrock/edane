@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { outlineRows, verticalMoveInText } from "./outline";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 
-const tree: MindMapModel = {
-  id: "root",
-  text: "Title",
-  children: [
+const tree: MindMapDocument = {
+  title: "Title",
+  roots: [
     {
       id: "a",
       text: "A",
@@ -19,7 +18,7 @@ const tree: MindMapModel = {
 };
 
 describe("outlineRows", () => {
-  it("starts at the top-level nodes (the root is the title, not a row), DFS order with depth", () => {
+  it("lists every root at depth 0 (the title is not a row), DFS order with depth", () => {
     const rows = outlineRows(tree);
     expect(rows.map((r) => r.node.id)).toEqual(["a", "a1", "a2", "b", "b1"]);
     expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 0, 1]);
@@ -33,9 +32,9 @@ describe("outlineRows", () => {
   });
 
   it("omits descendants of a collapsed node but keeps the node", () => {
-    const collapsed: MindMapModel = {
+    const collapsed: MindMapDocument = {
       ...tree,
-      children: [{ ...tree.children[0], collapsed: true }, tree.children[1]],
+      roots: [{ ...tree.roots[0], collapsed: true }, tree.roots[1]],
     };
     const rows = outlineRows(collapsed);
     expect(rows.map((r) => r.node.id)).toEqual(["a", "b", "b1"]);

@@ -3,10 +3,10 @@
  */
 
 import {
+  type MindMapDocument,
   type MindMapModel,
   type NodePosition,
   type NodeType,
-  topLevelNodes,
   visibleChildrenOf,
 } from "../domain/model";
 import {
@@ -156,9 +156,9 @@ export interface MindMapNode {
    * must use the very cap the box was measured with.
    */
   contentMaxWidth: number;
-  /** Depth below the (invisible) root: 0 = top-level node (drawn as a tree root). */
+  /** Depth in its tree: 0 = a document root (drawn as a tree root). */
   depth: number;
-  /** Top-level nodes only: user-placed tree position (see MindMapModel.position). */
+  /** Roots only: user-placed tree position (see MindMapModel.position). */
   position?: NodePosition;
   /** Whether this node is collapsed (its descendants are hidden). */
   collapsed: boolean;
@@ -311,9 +311,8 @@ export function measureModelNode(
 }
 
 /**
- * Flatten model tree to MindMapNode[] for layout/rendering. The root itself is
- * not included (it is the note title, see `topLevelNodes`); each top-level node
- * starts its own tree at depth 0.
+ * Flatten the document's trees to MindMapNode[] for layout/rendering. Each
+ * root starts its own tree at depth 0; the title is not a node.
  *
  * Descendants of a collapsed node are omitted (the collapsed node itself stays,
  * reporting its hidden child count). Each node carries its measured box size
@@ -321,7 +320,7 @@ export function measureModelNode(
  * without overlap.
  */
 export function flattenToNodes(
-  model: MindMapModel,
+  doc: MindMapDocument,
   editing?: EditingNode
 ): MindMapNode[] {
   const nodes: MindMapNode[] = [];
@@ -360,6 +359,6 @@ export function flattenToNodes(
     if (vis.kind === "none") return;
     for (const child of vis.children) walk(child, depth + 1);
   }
-  for (const top of topLevelNodes(model)) walk(top, 0);
+  for (const root of doc.roots) walk(root, 0);
   return nodes;
 }

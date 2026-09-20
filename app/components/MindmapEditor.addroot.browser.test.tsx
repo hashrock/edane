@@ -56,7 +56,7 @@ beforeEach(() => {
 async function setup(readOnly = false) {
   render(
     <MindmapEditor
-      initialContent={JSON.stringify(MODEL)}
+      initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
       initialTitle="Root"
       readOnly={readOnly}
     />
@@ -91,8 +91,8 @@ describe("adding a tree root", () => {
     const btn = await waitFor(() => menuButton("Add root here"));
     btn.click();
 
-    await waitFor(() => api().getModel().children.length === 2);
-    const created = api().getModel().children[1];
+    await waitFor(() => api().getModel().roots.length === 2);
+    const created = api().getModel().roots[1];
     expect(created.text).toBe("");
     expect(created.position).toBeDefined();
     expect(api().getActiveNodeId()).toBe(created.id);
@@ -104,7 +104,7 @@ describe("adding a tree root", () => {
 
     // Typing lands in the new root.
     await userEvent.keyboard("Beta");
-    await waitFor(() => api().getModel().children[1].text === "Beta");
+    await waitFor(() => api().getModel().roots[1].text === "Beta");
   });
 
   it("right-click on a node opens the node menu, not the root item", async () => {

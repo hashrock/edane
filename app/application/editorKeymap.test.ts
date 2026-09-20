@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type { EditorState, EditorAction } from "./editorReducer";
 import {
   buildKeymap,
@@ -14,12 +14,11 @@ import {
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
 
-/** Root → A(children: A1) , B */
-function model(): MindMapModel {
+/** A(children: A1) , B — two roots */
+function model(): MindMapDocument {
   return {
-    id: "root",
-    text: "Root",
-    children: [
+    title: "Root",
+    roots: [
       { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
       { id: "b", text: "B", children: [] },
     ],
@@ -27,7 +26,7 @@ function model(): MindMapModel {
 }
 
 function state(
-  m: MindMapModel,
+  m: MindMapDocument,
   activeNodeId: string | null,
   editing: boolean,
   editingText = ""
@@ -61,7 +60,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}) {
       // Return a fresh, shaped state so run()'s `next !== ctx.state` checks pass
       // and any follow-up saveNote(next.document.model) is safe.
       return {
-        document: { model: {} as MindMapModel, clipboard: null },
+        document: { model: {} as MindMapDocument, clipboard: null },
         view: {
           activeNodeId: null,
           editing: false,
@@ -148,7 +147,7 @@ describe("preference: arrowBehavior = collapse", () => {
 
   it("Right expands a collapsed parent", () => {
     const m = model();
-    m.children[0].collapsed = true;
+    m.roots[0].collapsed = true;
     const { deps, dispatched } = makeDeps();
     run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
@@ -292,7 +291,7 @@ describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
   it("flips an open task done, and a done task back open", () => {
     const withTask = (checked: boolean) => {
       const m = model();
-      m.children[0].checked = checked;
+      m.roots[0].checked = checked;
       return m;
     };
     const open = makeDeps();
@@ -331,7 +330,7 @@ describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
 
   it("does nothing on a kind that shows no checkbox", () => {
     const m = model();
-    m.children[0].type = "image";
+    m.roots[0].type = "image";
     const { deps, dispatched } = makeDeps();
     const { preventDefault } = run(deps, state(m, "a", false), {
       key: "d",
@@ -432,7 +431,7 @@ describe("reorder and bold (cross-mode)", () => {
 
   it("Cmd+B is a no-op dispatch on a non-text node", () => {
     const m = model();
-    m.children[0].type = "image";
+    m.roots[0].type = "image";
     const { deps, dispatched } = makeDeps();
     const { preventDefault } = run(deps, state(m, "a", true), {
       key: "b",
@@ -629,7 +628,7 @@ describe("preference: tabBehavior = insert-child", () => {
 
   it("Tab is swallowed on an empty node (no empty-under-empty)", () => {
     const m = model();
-    m.children[0].text = ""; // "a" is now blank
+    m.roots[0].text = ""; // "a" is now blank
     const { deps, dispatched } = makeDeps();
     const { preventDefault } = run(
       deps,
@@ -712,7 +711,7 @@ describe("preference: arrowBehavior = navigate", () => {
 
   it("Right auto-expands a collapsed parent before moving in", () => {
     const m = model();
-    m.children[0].collapsed = true;
+    m.roots[0].collapsed = true;
     const { deps, dispatched } = makeDeps();
     run(deps, state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(dispatched).toEqual([

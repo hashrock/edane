@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { router } from "@inertiajs/react";
-import { type MindMapModel, findNode, firstNavigableId } from "../domain/model";
+import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
   editorReducer,
   type EditorState,
@@ -21,7 +21,7 @@ import {
 } from "../application/editorReducer";
 import {
   parseContent,
-  serializeModel,
+  serializeDocument,
 } from "../application/persistence";
 import { publicNoteUrl } from "../application/publicNoteLink";
 import { t } from "../application/i18n";
@@ -84,12 +84,12 @@ export interface NoteEditorEngine {
   state: EditorState;
   stateRef: React.MutableRefObject<EditorState>;
   /** Convenience alias for state.document.model. */
-  model: MindMapModel;
-  modelRef: React.MutableRefObject<MindMapModel>;
+  model: MindMapDocument;
+  modelRef: React.MutableRefObject<MindMapDocument>;
   /** Central dispatch: pure reducer + undo bookkeeping. Returns next state. */
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
-  /** Persist the model (no-op when the note is unsaved / guest mode). */
-  saveNote: (currentModel: MindMapModel, pub?: boolean) => Promise<boolean>;
+  /** Persist the document (no-op when the note is unsaved / guest mode). */
+  saveNote: (currentModel: MindMapDocument, pub?: boolean) => Promise<boolean>;
   updateSaveStatus: (status: SaveStatusText) => void;
   saveStatusRef: React.RefObject<HTMLSpanElement | null>;
   /**
@@ -112,6 +112,16 @@ export interface NoteEditorEngine {
   bypassNavGuardRef: React.MutableRefObject<boolean>;
 }
 
+/**
+ * What a save persists, as one comparable string: the content column plus the
+ * title column. The title is not part of the serialized content (see
+ * persistence.ts), so comparing content alone would miss a title-only edit
+ * and the navigation guard would let it be lost.
+ */
+function saveSnapshot(doc: MindMapDocument): string {
+  return JSON.stringify({ title: doc.title, content: serializeDocument(doc) });
+}
+
 export function useNoteEditor({
   noteId,
   initialContent,
@@ -120,11 +130,10 @@ export function useNoteEditor({
   readOnly = false,
 }: NoteEditorInit): NoteEditorEngine {
   // --- Single source of truth: the full editor state ---
-  // Exactly one node is always selected; the first top-level node starts
-  // active (the root is the title, not a node).
+  // Exactly one node is always selected; the first root starts active.
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
-    const firstId = firstNavigableId(model);
+    const firstId = firstRootId(model);
     return {
       document: { model, clipboard: null },
       view: {
@@ -148,14 +157,15 @@ export function useNoteEditor({
   const [leaveConfirm, setLeaveConfirm] = useState<LeaveConfirm | null>(null);
 
   const saveTimerRef = useRef<any>(null);
-  // Serialized content last confirmed persisted. The server just handed us the
-  // initial model, so that's our clean baseline; every successful save advances
-  // it. `isDirty()` compares the live model against this. Lazily initialized:
+  // Snapshot of the document last confirmed persisted (title + content, the
+  // two fields a save sends). The server just handed us the initial document,
+  // so that's our clean baseline; every successful save advances it.
+  // `isDirty()` compares the live document against this. Lazily initialized:
   // useRef(arg) は毎レンダーで引数を評価するので、素直に書くとレンダー毎に
   // モデル全体を serialize してしまう（readOnly では丸ごと不要）。
   const lastSavedContentRef = useRef<string | null>(null);
   if (lastSavedContentRef.current === null && noteId && !readOnly) {
-    lastSavedContentRef.current = serializeModel(model);
+    lastSavedContentRef.current = saveSnapshot(model);
   }
   // Monotonic save-dispatch counter. An edit can arrive while a save is still
   // in flight, so two saves run concurrently and their responses may land out
@@ -236,9 +246,10 @@ export function useNoteEditor({
   }, [noteId, updateSaveStatus]);
 
   const saveNote = useCallback(
-    async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
+    async (currentModel: MindMapDocument, pub?: boolean): Promise<boolean> => {
       if (!noteId || readOnly) return true;
-      const content = serializeModel(currentModel);
+      const content = serializeDocument(currentModel);
+      const snapshot = saveSnapshot(currentModel);
       const seq = ++saveSeqRef.current;
       updateSaveStatus("saving");
       try {
@@ -248,7 +259,7 @@ export function useNoteEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             content,
-            title: currentModel.text,
+            title: currentModel.title,
             isPublic: pub ?? isPublic,
           }),
         });
@@ -258,7 +269,7 @@ export function useNoteEditor({
           // baseline (and the "unsaved" state) backwards.
           if (seq > ackedSeqRef.current) {
             ackedSeqRef.current = seq;
-            lastSavedContentRef.current = content;
+            lastSavedContentRef.current = snapshot;
             updateSaveStatus("saved");
           }
           return true;
@@ -279,7 +290,7 @@ export function useNoteEditor({
     () =>
       !!noteId &&
       !readOnly &&
-      serializeModel(modelRef.current) !== lastSavedContentRef.current,
+      saveSnapshot(modelRef.current) !== lastSavedContentRef.current,
     [noteId, readOnly]
   );
 
@@ -324,8 +335,8 @@ export function useNoteEditor({
         keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: serializeModel(current),
-          title: current.text,
+          content: serializeDocument(current),
+          title: current.title,
           isPublic,
         }),
       }).catch(() => {});
@@ -378,7 +389,7 @@ export function useNoteEditor({
   // Undo/redo restore only the document; the current selection/caret (view
   // state) is carried over as-is. The `replace` reducer reconciles it against
   // the restored document, so if the active node no longer exists there it
-  // falls back to the first top-level node instead of dangling.
+  // falls back to the first root instead of dangling.
   const restoreDocument = useCallback(
     (restored: EditorState["document"] | null) => {
       if (!restored) return;

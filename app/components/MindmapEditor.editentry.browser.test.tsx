@@ -97,7 +97,7 @@ beforeEach(() => {
 describe("⌘/Ctrl+Enter enters edit mode", () => {
   it("starts editing the selected node with its whole text selected", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -114,12 +114,12 @@ describe("⌘/Ctrl+Enter enters edit mode", () => {
     expect(sel.selectionEnd).toBe("Alpha".length);
 
     // No sibling was inserted (plain Enter's job).
-    expect(api().getModel().children.length).toBe(2);
+    expect(api().getModel().roots.length).toBe(2);
   });
 
   it("leaves plain Enter as insert (a new node, not editing the selected one)", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -129,8 +129,8 @@ describe("⌘/Ctrl+Enter enters edit mode", () => {
     // A new empty node is inserted and focused — not "a" itself in edit mode.
     // "a" is a tree root, so the insert lands as its child (a sibling would be
     // a new tree, which only the canvas context menu creates).
-    await waitFor(() => api().getModel().children[0].children.length === 1);
-    const inserted = api().getModel().children[0].children[0];
+    await waitFor(() => api().getModel().roots[0].children.length === 1);
+    const inserted = api().getModel().roots[0].children[0];
     expect(inserted.text).toBe("");
     expect(api().getActiveNodeId()).toBe(inserted.id);
   });
@@ -139,7 +139,7 @@ describe("⌘/Ctrl+Enter enters edit mode", () => {
 describe("re-click on the selected node enters edit mode", () => {
   it("second click edits with the caret at the click point; the first only selects", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -171,7 +171,7 @@ describe("re-click on the selected node enters edit mode", () => {
 
   it("does not fire when the press turns into a drag", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -190,7 +190,7 @@ describe("re-click on the selected node enters edit mode", () => {
 
   it("keeps double-click selecting the whole text", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);

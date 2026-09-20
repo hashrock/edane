@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode } from "../domain/model";
 import { editorReducer, type EditorState } from "./editorReducer";
 
@@ -24,7 +24,7 @@ function buildTree(count: number): MindMapModel {
 }
 
 function measureInsertMs(count: number, iterations: number): number {
-  const model = buildTree(count);
+  const model: MindMapDocument = { title: "perf", roots: [buildTree(count)] };
   const targetId = `n${count - 1}`;
   const text = findNode(model, targetId)!.text;
   const state: EditorState = {
