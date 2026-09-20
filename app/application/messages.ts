@@ -23,10 +23,18 @@ export const MESSAGES_JA = {
   // --- 保存ステータス行（useNoteEditor.SaveStatus） ---
   statusSaving: "保存中...",
   statusSaved: "保存済み",
-  statusSaveFailed: "保存失敗",
+  statusSaveFailed: "保存できませんでした",
+  // 保存失敗の理由（saveTracker.SaveFailureReason ごと）。ヘッダーの説明と
+  // 離脱ダイアログの両方で使う。
+  saveFailedAuth:
+    "ログインが切れたか、このノートに書き込めません。別のタブでログインし直してから「再試行」を押してください。",
+  saveFailedServer: "サーバーが応答しません。自動で再試行します。",
+  saveFailedNetwork: "通信できません（オフライン？）。自動で再試行します。",
+  saveFailedOther: "サーバーが内容を受け付けませんでした。",
+  saveRetry: "再試行",
   statusUploading: "画像アップロード中...",
   statusUploadFailed: "アップロード失敗",
-  statusStorageLimit: "容量超過（上限10MB）",
+  statusStorageLimit: "容量超過（上限{limit}）",
 
   // --- 共有リンク（publicNoteLink） ---
   privateNoteCopyReason: "非公開のため共有できません",
@@ -100,8 +108,9 @@ export const MESSAGES_JA = {
   nodeTypeMarkdown: "Markdownにする",
   menuOpenLink: "リンクを開く",
   menuFetchLinkMeta: "リンク情報を取得（タイトル/favicon）",
-  menuAddChild: "子ノードを追加",
-  menuAddRoot: "ここにルートを追加",
+  menuAddChild: "子の項目を追加",
+  menuAddSibling: "同じ階層に項目を追加",
+  menuAddRoot: "ここに新しいツリーを追加",
   menuExpand: "展開する",
   menuCollapse: "折りたたむ",
   menuBiggerText: "文字を大きく",
@@ -139,6 +148,7 @@ export const MESSAGES_JA = {
   saveFailedTitle: "保存に失敗しました",
   leaveMessage:
     "未保存の変更があります。このまま移動すると変更が失われる可能性があります。移動しますか？",
+  nodeEmptyPlaceholder: "テキストを入力",
   leaveConfirm: "移動する",
   leaveCancel: "とどまる",
   backToList: "一覧へ戻る",
@@ -160,12 +170,23 @@ export const MESSAGES_JA = {
   moveDownTitle: "下へ移動",
   addItem: "項目を追加",
   deleteItem: "項目を削除",
+  // 下部ツールバーの見出し（アイコンの下に出す短いラベル）
+  tbOutdent: "上の階層へ",
+  tbIndent: "下の階層へ",
+  tbMoveUp: "上へ",
+  tbMoveDown: "下へ",
+  tbAdd: "追加",
+  tbDelete: "削除",
   saveButton: "保存",
 
   // --- ビュー操作（ズーム） ---
   zoomOut: "ズームアウト",
   zoomIn: "ズームイン",
-  zoomReset: "100%に戻す",
+  zoomReset: "100%に戻し、選択中の項目を中央に表示",
+  zoomFit: "全体を表示",
+  zoomUnavailableOutline: "アウトライン表示では拡大縮小できません",
+  layoutMindmap: "マインドマップ",
+  layoutOutline: "アウトライン",
 
   // --- Markdownパネル ---
   mdView: "表示",
@@ -226,6 +247,23 @@ export const MESSAGES_JA = {
   publicLabel: "公開",
   privateLabel: "非公開",
   copyLinkLabel: "リンクをコピー",
+  openPublicPage: "公開ページを開く",
+  publishConfirmTitle: "このノートを公開しますか？",
+  publishConfirmMessage:
+    "リンクを知っている人は誰でも閲覧できるようになります。あとで「非公開」に戻せます。",
+  publishConfirmLabel: "公開する",
+
+  // --- マルチルート切り替え ---
+  multiRootToggleOn: "複数ツリー",
+  multiRootToggleOff: "1ツリー",
+  multiRootToggleOnDesc: "空きキャンバスの右クリックで複数のツリーを作成できます",
+  multiRootToggleOffDesc: "このノートは1つのツリーとして扱います（右クリックからの追加を隠すだけの表示設定）",
+
+  // --- 404 ページ（server.ts が MESSAGES_JA で直接描画） ---
+  notFoundTitle: "ページが見つかりません",
+  notFoundMessage:
+    "URL が間違っているか、ノートが削除・非公開になったか、別のアカウントでのログインが必要です。",
+  notFoundBackToList: "ノート一覧へ戻る",
 
   // --- 設定ページ ---
   settingsHeadTitle: "設定",
@@ -333,10 +371,16 @@ export const MESSAGES_EN = {
   // --- Save status line ---
   statusSaving: "Saving...",
   statusSaved: "Saved",
-  statusSaveFailed: "Save failed",
+  statusSaveFailed: "Couldn't save",
+  saveFailedAuth:
+    "Your session expired or you can no longer write to this note. Sign in again in another tab, then press Retry.",
+  saveFailedServer: "The server isn't responding. Retrying automatically.",
+  saveFailedNetwork: "No connection (offline?). Retrying automatically.",
+  saveFailedOther: "The server rejected the content.",
+  saveRetry: "Retry",
   statusUploading: "Uploading image...",
   statusUploadFailed: "Upload failed",
-  statusStorageLimit: "Storage limit exceeded (10MB max)",
+  statusStorageLimit: "Storage limit exceeded ({limit} max)",
 
   // --- Share link ---
   privateNoteCopyReason: "Private notes can't be shared",
@@ -413,6 +457,7 @@ export const MESSAGES_EN = {
   menuOpenLink: "Open link",
   menuFetchLinkMeta: "Fetch link info (title/favicon)",
   menuAddChild: "Add child node",
+  menuAddSibling: "Add item at the same level",
   menuAddRoot: "Add root here",
   menuExpand: "Expand",
   menuCollapse: "Collapse",
@@ -452,6 +497,7 @@ export const MESSAGES_EN = {
   saveFailedTitle: "Save failed",
   leaveMessage:
     "You have unsaved changes. They may be lost if you leave. Leave anyway?",
+  nodeEmptyPlaceholder: "Type here",
   leaveConfirm: "Leave",
   leaveCancel: "Stay",
   backToList: "Back to list",
@@ -473,12 +519,22 @@ export const MESSAGES_EN = {
   moveDownTitle: "Move down",
   addItem: "Add item",
   deleteItem: "Delete item",
+  tbOutdent: "Outdent",
+  tbIndent: "Indent",
+  tbMoveUp: "Up",
+  tbMoveDown: "Down",
+  tbAdd: "Add",
+  tbDelete: "Delete",
   saveButton: "Save",
 
   // --- View controls (zoom) ---
   zoomOut: "Zoom out",
   zoomIn: "Zoom in",
-  zoomReset: "Reset to 100%",
+  zoomReset: "Reset to 100% and centre the selected item",
+  zoomFit: "Fit all",
+  zoomUnavailableOutline: "Zoom isn't available in the outline view",
+  layoutMindmap: "Mind map",
+  layoutOutline: "Outline",
 
   // --- Markdown panel ---
   mdView: "View",
@@ -539,6 +595,23 @@ export const MESSAGES_EN = {
   publicLabel: "Public",
   privateLabel: "Private",
   copyLinkLabel: "Copy link",
+  openPublicPage: "Open public page",
+  publishConfirmTitle: "Make this note public?",
+  publishConfirmMessage:
+    "Anyone with the link will be able to read it. You can switch it back to private later.",
+  publishConfirmLabel: "Make public",
+
+  // --- Multi-root toggle ---
+  multiRootToggleOn: "Multiple trees",
+  multiRootToggleOff: "Single tree",
+  multiRootToggleOnDesc: "Right-click empty canvas to create more than one tree",
+  multiRootToggleOffDesc: "Treats this note as a single tree (just hides the add-root menu)",
+
+  // --- 404 page (rendered by server.ts from MESSAGES_JA) ---
+  notFoundTitle: "Page not found",
+  notFoundMessage:
+    "The URL may be wrong, the note may have been deleted or made private, or you may need to sign in with a different account.",
+  notFoundBackToList: "Back to notes",
 
   // --- Settings page ---
   settingsHeadTitle: "Settings",

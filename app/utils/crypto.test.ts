@@ -62,3 +62,25 @@ describe("encodeNoteContentForStorage", () => {
     expect(await decodeStoredNoteContent(stored, "encrypted", SECRET)).toBe("round trip");
   });
 });
+
+describe("isEncrypted on legacy plaintext", () => {
+  // `atob` ignores ASCII whitespace, so a loose "does it decode?" check took
+  // ordinary English prose for ciphertext once it was long enough — and the
+  // failed decrypt then returned null, i.e. the note vanished.
+  it("does not mistake prose with spaces for ciphertext", () => {
+    expect(isEncrypted("hello world of mindmaps and more")).toBe(false);
+  });
+
+  it("does not mistake an indented legacy outline for ciphertext", () => {
+    expect(isEncrypted("Shopping\n  milk and eggs\n  bread and butter")).toBe(false);
+  });
+
+  it("returns legacy prose as-is even when it is long", async () => {
+    const legacy = "hello world of mindmaps and more";
+    expect(await decodeStoredNoteContent(legacy, "encrypted", SECRET)).toBe(legacy);
+  });
+
+  it("still recognises an encrypted empty note", async () => {
+    expect(isEncrypted(await encrypt("", SECRET))).toBe(true);
+  });
+});

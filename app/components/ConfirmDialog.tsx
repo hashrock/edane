@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 
@@ -46,12 +47,19 @@ export default function ConfirmDialog({
 
   if (!open) return null;
 
+  // Portal to <body>: a `position: fixed` overlay is positioned against the
+  // nearest transformed ancestor, and the editor header animates in with a
+  // transform (`.anim-header`) — a dialog opened from a header control
+  // (PublicityDropdown) was otherwise centred inside the 48px header and cut
+  // off at the top of the page.
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+
   const confirmClass =
     variant === "danger"
       ? "bg-red-600 hover:bg-red-700 focus:ring-red-100"
       : "bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-100";
 
-  return (
+  const dialog = (
     <div
       className="anim-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
       onClick={onCancel}
@@ -91,4 +99,5 @@ export default function ConfirmDialog({
       </div>
     </div>
   );
+  return portalTarget ? createPortal(dialog, portalTarget) : dialog;
 }

@@ -31,4 +31,5 @@
 - `serializeModel` → `serializeDocument`、`createDefaultModel` → `createDefaultDocument`、`textToModel` → `textToDocument` / `textToNodes`、`modelToText`（ノード単位）に加えて `documentToText`。
 - `nodePathTexts(doc, id)` はノートのタイトルを含まない（設定ページは `noteTitle` を別途持っている）。
 - `resolveDropTarget` から `DropRoot` 引数を撤去。ルートは `parentOf` に載らない。
+- #149 のノートごとの表示設定 `multiRoot`（ルートノードの属性だった）は `MindMapDocument.multiRoot` に移し、v2 JSON には `false` のときだけ書く。v1 のルートに付いていた値も移行時に引き継ぐ。
 - `/pub/:id.json` などノード単位の公開 API は影響なし。`formal/` の各ラウンドは当時のコードに対する記録なので更新しない。

@@ -85,3 +85,14 @@ describe("defaultTemplate", () => {
     expect(t).toContain("{item.area}");
   });
 });
+
+describe("parseSchema against prototype names", () => {
+  // `"toString" in FIELD_TYPES` is true via Object.prototype; the type
+  // annotation must be an own key (found by the preferences property test
+  // hitting the same idiom).
+  it("rejects an inherited property name as a type annotation", () => {
+    for (const name of ["toString", "constructor", "hasOwnProperty", "valueOf"]) {
+      expect(parseSchema(`a:${name}`).ok).toBe(false);
+    }
+  });
+});

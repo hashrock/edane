@@ -13,9 +13,12 @@ export function resolveDevGuestPreference(
   let setCookieHeader: string | undefined;
   if (queryGuestParam !== null) {
     guest = queryGuestParam !== "0";
-    setCookieHeader = guest
-      ? "dev_guest=1; Path=/; SameSite=Lax"
-      : "dev_guest=; Path=/; Max-Age=0; SameSite=Lax";
+    setCookieHeader = guest ? "dev_guest=1; Path=/; SameSite=Lax" : clearDevGuestCookieHeader();
   }
   return { guest, setCookieHeader };
+}
+
+/** The Set-Cookie that leaves guest mode (same as `?guest=0`). */
+export function clearDevGuestCookieHeader(): string {
+  return "dev_guest=; Path=/; Max-Age=0; SameSite=Lax";
 }

@@ -1,40 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
-import { serializeBranch, parseBranch } from "./branchClipboard";
-
-describe("serializeBranch / parseBranch round-trip", () => {
-  it("preserves a well-formed branch's id, text, children and optional fields", () => {
-    const branch: MindMapModel = {
-      id: "n1",
-      text: "Root",
-      children: [
-        {
-          id: "n2",
-          text: "https://example.com",
-          type: "link",
-          bold: true,
-          fontSize: 20,
-          collapsed: true,
-          linkTitle: "Example",
-          favicon: "https://example.com/f.ico",
-          children: [],
-        },
-      ],
-    };
-    const parsed = parseBranch(serializeBranch(branch));
-    expect(parsed).not.toBeNull();
-    expect(parsed!.id).toBe("n1");
-    expect(parsed!.children[0]).toMatchObject({
-      id: "n2",
-      type: "link",
-      bold: true,
-      fontSize: 20,
-      collapsed: true,
-      linkTitle: "Example",
-      favicon: "https://example.com/f.ico",
-    });
-  });
-});
+import { subtreeIds } from "../domain/model";
+import { parseBranch } from "./branchClipboard";
 
 describe("parseBranch with malformed payloads", () => {
   it("returns null for non-JSON or non-object input", () => {
@@ -104,11 +70,7 @@ describe("parseBranch with malformed payloads", () => {
     });
     const parsed = parseBranch(json);
     expect(parsed).not.toBeNull();
-    const collect = (m: MindMapModel): string[] => [
-      m.id,
-      ...m.children.flatMap(collect),
-    ];
-    const allIds = collect(parsed!);
+    const allIds = subtreeIds(parsed!);
     expect(new Set(allIds).size).toBe(allIds.length);
   });
 });

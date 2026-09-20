@@ -33,9 +33,22 @@ type Entry =
 
 const cache = new Map<string, Entry>();
 const listeners = new Set<() => void>();
+// Bumped on every load/error. A subscriber that arrives AFTER a load already
+// finished (React effects run after the first render that started the load,
+// and a data: URL can decode within that gap) would otherwise never hear about
+// it and keep laying out with the placeholder size until something else
+// triggers a layout; reading the version as a snapshot (useSyncExternalStore)
+// closes that gap.
+let version = 0;
 
 function notify() {
+  version++;
   for (const l of listeners) l();
+}
+
+/** Monotonic counter of completed loads/errors (a useSyncExternalStore snapshot). */
+export function imageCacheVersion(): number {
+  return version;
 }
 
 /** Subscribe to image load/error events; returns an unsubscribe fn. */

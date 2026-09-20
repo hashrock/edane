@@ -188,3 +188,48 @@ export function ensureVisibleOffset(
     changed: offsetX !== t.offsetX || offsetY !== t.offsetY,
   };
 }
+
+/** The smallest rectangle containing every input rect (null for no rects). */
+export function unionRect(rects: readonly Rect[]): Rect | null {
+  if (rects.length === 0) return null;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const r of rects) {
+    left = Math.min(left, r.x);
+    top = Math.min(top, r.y);
+    right = Math.max(right, r.x + r.width);
+    bottom = Math.max(bottom, r.y + r.height);
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * The transform that shows the whole world rectangle `bounds` inside a
+ * viewport of size `screen`, centred, with a `padding` screen-space margin on
+ * every side ("fit to view" / 全体表示). The scale is the largest that fits,
+ * capped at `maxScale` so a small document isn't blown up past 1:1, and never
+ * below `minScale` (the stage's minimum zoom) — a document too large even for
+ * the minimum zoom is centred at that zoom with its edges clipped, which is
+ * still a place the user can pan from. A degenerate (zero-size) bounds just
+ * centres at `maxScale`.
+ */
+export function fitTransform(
+  bounds: Rect,
+  screen: Size,
+  padding: number,
+  maxScale = 1,
+  minScale = 0
+): ViewTransform {
+  const availW = Math.max(1, screen.width - padding * 2);
+  const availH = Math.max(1, screen.height - padding * 2);
+  const raw = Math.min(
+    maxScale,
+    bounds.width > 0 ? availW / bounds.width : maxScale,
+    bounds.height > 0 ? availH / bounds.height : maxScale
+  );
+  const scale = Math.max(minScale, raw);
+  const { offsetX, offsetY } = centerOffset(rectCenter(bounds), scale, screen);
+  return { scale, offsetX, offsetY };
+}

@@ -3,6 +3,8 @@ import {
   DEFAULT_LOCALE,
   detectLocale,
   LOCALE_KEY,
+  LOCALE_LABELS,
+  LOCALES,
   getLocale,
   isLocale,
   loadLocale,
@@ -12,16 +14,7 @@ import {
   t,
 } from "./i18n";
 import { MESSAGES_JA, MESSAGES_EN, type MessageKey } from "./messages";
-import type { KeyValueStorage } from "./browserStorage";
-
-function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage {
-  const map = new Map(Object.entries(initial));
-  return {
-    getItem: (k) => map.get(k) ?? null,
-    setItem: (k, v) => void map.set(k, v),
-    removeItem: (k) => void map.delete(k),
-  };
-}
+import { memoryStorage, type KeyValueStorage } from "./browserStorage";
 
 // モジュールレベルの現在言語を書き換えるので、各テスト後にテスト既定の en
 // （vitest.setup.ts が固定する）へ戻す。
@@ -148,5 +141,24 @@ describe("catalog integrity", () => {
     expect(isLocale("en")).toBe(true);
     expect(isLocale("de")).toBe(false);
     expect(isLocale(1)).toBe(false);
+  });
+
+  it("keeps LOCALES in sync with isLocale and LOCALE_LABELS", () => {
+    // LOCALES is derived from the same closed set isLocale checks membership
+    // against, so a newly added Locale can't update one without the other.
+    for (const locale of LOCALES) {
+      expect(isLocale(locale)).toBe(true);
+      expect(LOCALE_LABELS[locale]).toBeTruthy();
+    }
+  });
+});
+
+describe("isLocale against prototype names", () => {
+  // `"toString" in LOCALE_SET` is true via Object.prototype; membership must
+  // be own-property only (same idiom fixed in editorPreferences / model).
+  it("rejects inherited property names", () => {
+    for (const name of ["toString", "constructor", "hasOwnProperty", "valueOf"]) {
+      expect(isLocale(name)).toBe(false);
+    }
   });
 });

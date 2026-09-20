@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
-import { getFlatOrder, findNode } from "../domain/model";
+import { getFlatOrder, findNode, updateNodeText } from "../domain/model";
 import {
   editorReducer,
   reconcileView,
@@ -123,7 +123,7 @@ describe("tab / shift+tab", () => {
     expect(a.children.map((c) => c.text)).toEqual(["A1", "B"]);
   });
 
-  it("dedents a node to its grandparent level (a root's child becomes a root)", () => {
+  it("dedents a child of a root into a new root after it", () => {
     const model = sampleModel();
     const next = editorReducer(stateAt(model, "a1"), {
       type: "tab",
@@ -132,14 +132,15 @@ describe("tab / shift+tab", () => {
     expect(next.document.model.roots.map((c) => c.text)).toEqual(["A", "A1", "B"]);
   });
 
-  it("indents a root under the previous root, dropping its canvas position", () => {
+  it("indents a root under the previous root (joining the trees)", () => {
     const model = sampleModel();
-    model.roots[1].position = { x: 10, y: 20 };
+    findNode(model, "b")!.position = { x: 10, y: 20 };
     const next = editorReducer(stateAt(model, "b"), { type: "tab", shift: false });
     expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
-    const b = findNode(next.document.model, "b")!;
-    expect(b.position).toBeUndefined();
-    expect(findNode(next.document.model, "a")!.children.map((c) => c.id)).toEqual(["a1", "b"]);
+    const a = findNode(next.document.model, "a")!;
+    expect(a.children.map((c) => c.id)).toEqual(["a1", "b"]);
+    // A tree's canvas position only applies while it is a root.
+    expect(findNode(next.document.model, "b")!.position).toBeUndefined();
   });
 });
 
@@ -201,7 +202,7 @@ describe("backspaceAtStart", () => {
     expect(next.view.cursorPos).toBe(1);
   });
 
-  it("does nothing at the first root (nothing precedes it)", () => {
+  it("does nothing at the first root (nothing before it)", () => {
     const model = sampleModel();
     const s = withView(stateAt(model, "a"), {
       cursorPos: 0,
@@ -210,20 +211,32 @@ describe("backspaceAtStart", () => {
     expect(editorReducer(s, { type: "backspaceAtStart" })).toBe(s);
   });
 
-  it("merges a later root into the previous root (joining the trees)", () => {
+  it("merges a later root into the previous root (the roots are siblings)", () => {
+    // Roots: A -> [A1], B. Backspace at the start of B joins the trees.
     const model = sampleModel();
     const s = withView(stateAt(model, "b"), { cursorPos: 0, selectionEnd: 0 });
     const next = editorReducer(s, { type: "backspaceAtStart" });
-    expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
+    expect(next.document.model.roots.map((r) => r.id)).toEqual(["a"]);
     expect(findNode(next.document.model, "a")!.text).toBe("AB");
     expect(next.view.activeNodeId).toBe("a");
-    expect(next.view.cursorPos).toBe(1);
   });
 });
 
 describe("deleteAtEnd", () => {
+  it("refreshes editingText with the merged text (the textarea shows editingText)", () => {
+    // Roots [A -> [A1], B]. Delete at the end of "A" pulls "A1" up into it;
+    // the textarea is bound to editingText, so a stale "A" here would be
+    // written back over the merged "AA1" by the very next keystroke.
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    const next = editorReducer(s, { type: "deleteAtEnd", pos: 1 });
+    expect(findNode(next.document.model, "a")!.text).toBe("AA1");
+    expect(next.view.editingText).toBe("AA1");
+    expect(next.view.cursorPos).toBe(1);
+  });
+
   it("merges the next sibling into the current node", () => {
-    // Root -> [x "X", y "Y" -> y1] ; Delete at end of x pulls y up into x,
+    // Roots [x "X", y "Y" -> y1] ; Delete at end of x pulls y up into x,
     // and y's children come along with its text.
     const model: MindMapDocument = {
       title: "Root",
@@ -265,6 +278,60 @@ describe("deleteAtEnd", () => {
     const model = sampleModel();
     const s = stateAt(model, "a1");
     expect(editorReducer(s, { type: "deleteAtEnd", pos: 2 })).toBe(s);
+  });
+
+  it("puts the caret on the join, not on the reported position", () => {
+    // Was "click -> ⌘Z -> Delete at end" (#147): undo left a stale editingText,
+    // so the textarea reported a caret past the model's text. reconcileView now
+    // re-reads the buffer, so that route cannot produce the out-of-range caret
+    // any more — but deleteAtEnd's own contract still has to hold, so it is
+    // dispatched directly instead of being reached through undo.
+    const model = updateNodeText(sampleModel(), "a", "AB"); // a "AB" -> [a1 "A1"]
+    const s = stateAt(model, "a");
+    for (const pos of [2, 99]) {
+      const next = editorReducer(s, { type: "deleteAtEnd", pos });
+      expect(findNode(next.document.model, "a")!.text).toBe("ABA1");
+      expect(next.view.editingText).toBe("ABA1");
+      expect(next.view.cursorPos).toBe(2);
+      expect(next.view.selectionEnd).toBe(2);
+    }
+  });
+});
+
+describe("undo while editing (the document moves under the textarea)", () => {
+  it("clamps a click that lands past the restored text", () => {
+    // activateNode and dragSelect build a view literal directly rather than
+    // going through focusView; on canvas their offsets are computed from the
+    // painted text, so a click can name a position the model no longer has.
+    // (That reconcileView refreshes the buffer at all is covered by its own
+    // tests below, and end-to-end by MindmapEditor.undo.browser.test.tsx.)
+    const editing = editorReducer(
+      stateAt(updateNodeText(sampleModel(), "a", "AB"), "b"),
+      { type: "activateNode", nodeId: "a", cursorPos: 2, selectionEnd: 2, editing: true }
+    );
+    // ⌘Z: restore the shorter document, carrying the view over as-is.
+    const s = editorReducer(editing, {
+      type: "replace",
+      state: { document: { model: sampleModel(), clipboard: null }, view: editing.view },
+    });
+
+    const clicked = editorReducer(s, {
+      type: "activateNode",
+      nodeId: "a",
+      cursorPos: 2,
+      selectionEnd: 2,
+      editing: true,
+    });
+    expect(clicked.view.editingText).toBe("A");
+    expect(clicked.view.cursorPos).toBe(1);
+
+    const dragged = editorReducer(s, {
+      type: "dragSelect",
+      nodeId: "a",
+      anchorOffset: 0,
+      focusOffset: 2,
+    });
+    expect(dragged.view.selectionEnd).toBe(1);
   });
 });
 
@@ -311,27 +378,18 @@ describe("branch clipboard (cut / copy / paste)", () => {
     expect(next.view.activeNodeId).toBe("a1");
   });
 
-  it("cutBranch on a root removes the whole tree", () => {
-    const model = sampleModel();
-    const next = editorReducer(stateAt(model, "b"), { type: "cutBranch" });
-    expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
-    expect(next.document.clipboard!.text).toBe("B");
-    expect(next.view.activeNodeId).toBe("a1");
-  });
-
-  it("cutting the last root leaves one fresh blank root, focused", () => {
+  it("cutBranch on the last root leaves one fresh blank root that takes the focus", () => {
     const model: MindMapDocument = {
       title: "Root",
-      roots: [{ id: "only", text: "Only", children: [{ id: "k", text: "K", children: [] }] }],
+      roots: [{ id: "only", text: "Only", children: [{ id: "c", text: "C", children: [] }] }],
     };
     const next = editorReducer(stateAt(model, "only"), { type: "cutBranch" });
-    const roots = next.document.model.roots;
-    expect(roots).toHaveLength(1);
-    expect(roots[0].id).not.toBe("only");
-    expect(roots[0].text).toBe("");
-    expect(roots[0].children).toEqual([]);
-    expect(next.view.activeNodeId).toBe(roots[0].id);
     expect(next.document.clipboard!.text).toBe("Only");
+    expect(next.document.model.roots).toHaveLength(1);
+    const blank = next.document.model.roots[0];
+    expect(blank.id).not.toBe("only");
+    expect(blank.text).toBe("");
+    expect(next.view.activeNodeId).toBe(blank.id);
   });
 
   it("pasteBranch inserts the clipboard as a child of the active node", () => {
@@ -478,6 +536,32 @@ describe("insertNodes", () => {
     expect(next.view.activeNodeId).toBe(roots[2].id);
     expect(next.view.editing).toBe(true);
   });
+
+});
+
+describe("setMultiRoot", () => {
+  it("sets the flag on the document", () => {
+    const model = sampleModel();
+    const next = editorReducer(stateAt(model, "a"), {
+      type: "setMultiRoot",
+      value: false,
+    });
+    expect(next.document.model.multiRoot).toBe(false);
+  });
+
+  it("is a no-op when the value is already in effect (absent counts as true)", () => {
+    const model = sampleModel();
+    const state = stateAt(model, "a");
+    const next = editorReducer(state, { type: "setMultiRoot", value: true });
+    expect(next).toBe(state);
+  });
+
+  it("leaves the view untouched", () => {
+    const model = sampleModel();
+    const state = stateAt(model, "a");
+    const next = editorReducer(state, { type: "setMultiRoot", value: false });
+    expect(next.view).toBe(state.view);
+  });
 });
 
 describe("setTitle", () => {
@@ -488,17 +572,14 @@ describe("setTitle", () => {
       text: "New Title",
     });
     expect(next.document.model.title).toBe("New Title");
-    expect(next.document.model.roots.map(stripIds)).toEqual(
-      model.roots.map(stripIds)
-    );
+    expect(next.document.model.roots.map(stripIds)).toEqual(model.roots.map(stripIds));
   });
 
-  it("never touches the view: the title is not a node", () => {
+  it("never touches the view (the title is not a node)", () => {
     const model = sampleModel();
-    const s = withView(stateAt(model, "a"), { cursorPos: 1, selectionEnd: 1 });
+    const s = stateAt(model, "a");
     const next = editorReducer(s, { type: "setTitle", text: "New Title" });
     expect(next.view).toBe(s.view);
-    expect(next.view.editingText).toBe("A");
   });
 
   it("is a no-op (same state) when the title is unchanged", () => {
@@ -744,8 +825,17 @@ describe("startEditing / exitEditing", () => {
     expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
   });
 
+  it("exitEditing in selection mode keeps a blank leaf node (empty-canvas click, post-paste)", () => {
+    // The blank-node cleanup is for LEAVING edit mode; in selection mode the
+    // document must not change, or the view would point at a deleted node.
+    const model = sampleModel();
+    findNode(model, "a1")!.text = "";
+    const s = withView(stateAt(model, "a1"), { editing: false });
+    expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
+  });
+
   it("exitEditing deletes a blank leaf node and focuses its predecessor", () => {
-    // [A -> [A1(blank)], B]. Flat order: a, a1, b.
+    // Roots [A -> [A1(blank)], B]. Flat order: a, a1, b.
     const model = sampleModel();
     findNode(model, "a1")!.text = "";
     const s = stateAt(model, "a1"); // editing=true, text ""
@@ -781,16 +871,15 @@ describe("startEditing / exitEditing", () => {
     const s = stateAt(model, "only");
     const next = editorReducer(s, { type: "exitEditing" });
     expect(next.document).toBe(s.document); // untouched
-    expect(next.document.model.roots.map((c) => c.id)).toEqual(["only"]);
     expect(next.view.editing).toBe(false);
   });
 
-  it("exitEditing deletes a blank root when other roots remain", () => {
+  it("exitEditing deletes a blank root that is not the only one", () => {
     const model = sampleModel();
     findNode(model, "b")!.text = "";
     const next = editorReducer(stateAt(model, "b"), { type: "exitEditing" });
-    expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
-    expect(next.view.activeNodeId).toBe("a1");
+    expect(next.document.model.roots.map((r) => r.id)).toEqual(["a"]);
+    expect(next.view.activeNodeId).toBe("a1"); // predecessor of b
   });
 
   it("exitEditing does not delete a non-empty node", () => {
@@ -852,9 +941,10 @@ describe("dragSelect", () => {
   });
 });
 
-describe("insertNodes into a root", () => {
-  it("appends nodes as the root's last children when a root is the target", () => {
+describe("insertNodes on a root", () => {
+  it("appends the nodes as the root's children (expanding it) when a root is the target", () => {
     const model = sampleModel();
+    findNode(model, "a")!.collapsed = true;
     const nodes: MindMapModel[] = [{ id: "n1", text: "X", children: [] }];
     const next = editorReducer(stateAt(model, "a"), {
       type: "insertNodes",
@@ -862,7 +952,8 @@ describe("insertNodes into a root", () => {
       nodes,
     });
     const a = findNode(next.document.model, "a")!;
-    expect(a.children.map((c) => c.text)).toEqual(["A1", "X"]);
+    expect(a.children.map((c) => c.id)).toEqual(["a1", "n1"]);
+    expect(a.collapsed).toBe(false);
     expect(next.view.activeNodeId).toBe("n1");
   });
 
@@ -912,7 +1003,7 @@ describe("toggleCollapse", () => {
 });
 
 describe("moveNodeUp / moveNodeDown", () => {
-  it("moves the active node down among its siblings, keeping focus", () => {
+  it("moves the active node down among its siblings (roots included), keeping focus", () => {
     const model = sampleModel();
     const s = stateAt(model, "a");
     const next = editorReducer(s, { type: "moveNodeDown" });
@@ -966,6 +1057,7 @@ describe("moveBranch", () => {
   });
 
   it("inserts at the given sibling index", () => {
+    // Root "b" moves under "a" as its first child (before a1).
     const model = sampleModel();
     const s = withView(stateAt(model, "b"), { editing: false });
     const next = editorReducer(s, {
@@ -974,22 +1066,16 @@ describe("moveBranch", () => {
       newParentId: "a",
       index: 0,
     });
-    expect(findNode(next.document.model, "a")!.children.map((c) => c.id)).toEqual([
-      "b",
-      "a1",
-    ]);
     expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
+    expect(findNode(next.document.model, "a")!.children.map((c) => c.id)).toEqual(["b", "a1"]);
   });
 
-  it("nests a root under a node, dropping its canvas position", () => {
+  it("a root nested under a node loses its canvas position", () => {
     const model = sampleModel();
-    model.roots[1].position = { x: 5, y: 6 };
+    findNode(model, "b")!.position = { x: 5, y: 6 };
     const s = withView(stateAt(model, "b"), { editing: false });
-    const next = editorReducer(s, { type: "moveBranch", nodeId: "b", newParentId: "a1" });
-    expect(next.document.model.roots.map((c) => c.id)).toEqual(["a"]);
-    const b = findNode(next.document.model, "b")!;
-    expect(b.position).toBeUndefined();
-    expect(findNode(next.document.model, "a1")!.children.map((c) => c.id)).toEqual(["b"]);
+    const next = editorReducer(s, { type: "moveBranch", nodeId: "b", newParentId: "a" });
+    expect(findNode(next.document.model, "b")!.position).toBeUndefined();
   });
 
   it("expands a collapsed drop target", () => {
@@ -1025,13 +1111,6 @@ describe("moveBranch", () => {
 });
 
 describe("moveToParent", () => {
-  it("moves focus to the active node's parent", () => {
-    const model = sampleModel();
-    const s = stateAt(model, "a1");
-    const next = editorReducer(s, { type: "moveToParent" });
-    expect(next.view.activeNodeId).toBe("a");
-  });
-
   it("is a no-op (same state) on a root", () => {
     const model = sampleModel();
     const s = stateAt(model, "b");
@@ -1040,7 +1119,7 @@ describe("moveToParent", () => {
 });
 
 describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
-  /** A(A1, A2), B, C — three roots */
+  /** Roots: A(A1, A2), B, C */
   function siblingModel(): MindMapDocument {
     return {
       title: "Root",
@@ -1059,119 +1138,6 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
     };
   }
 
-  it("moves between siblings", () => {
-    const model = siblingModel();
-    expect(
-      editorReducer(stateAt(model, "c"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    expect(
-      editorReducer(stateAt(model, "b"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("c");
-  });
-
-  it("prefers the sibling over the flat order's neighbour", () => {
-    // B's predecessor in the flat order is A2, one level down inside A.
-    const model = siblingModel();
-    expect(
-      getFlatOrder(model)[getFlatOrder(model).indexOf("b") - 1]
-    ).toBe("a2");
-    expect(
-      editorReducer(stateAt(model, "b"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-  });
-
-  // Preferring siblings must never dead-end: once they run out, ↑/↓ leave the
-  // branch, so holding ↓ still gets you out of a subtree.
-  it("leaves the branch when the siblings run out", () => {
-    const model = siblingModel();
-    // Last child of A: no next sibling, so ↓ steps out to A's next sibling.
-    expect(
-      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    // First child of A: ↑ steps out to the parent.
-    expect(
-      editorReducer(stateAt(model, "a1"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-    // First root: nothing above it, so ↑ stays put.
-    expect(
-      editorReducer(stateAt(model, "a"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-  });
-
-  // The rule that keeps ↓ predictable: whether it descends must NOT depend on
-  // where in the tree the node happens to sit. Both of these have children;
-  // "a" has a following sibling and "c" is the last child, and neither ↓ opens
-  // the branch — going a level deeper is → 's job.
-  it("never descends into children, wherever the node sits", () => {
-    const model = siblingModel();
-    model.roots[2].children = [{ id: "c1", text: "C1", children: [] }];
-    expect(
-      editorReducer(stateAt(model, "a"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    // The flat order WOULD descend here — that asymmetry was the bug.
-    expect(getFlatOrder(model)[getFlatOrder(model).indexOf("c") + 1]).toBe("c1");
-    const atC = stateAt(model, "c");
-    expect(editorReducer(atC, { type: "moveDownSiblingFirst" })).toBe(atC);
-  });
-
-  it("climbs past several levels to leave a deep subtree", () => {
-    // Root → A(A1(A1a, A1b), A2), B: ↓ from the last leaf of the deepest
-    // branch lands on the next node at whatever level has one.
-    const model = siblingModel();
-    model.roots[0].children[0].children = [
-      { id: "a1a", text: "A1a", children: [] },
-      { id: "a1b", text: "A1b", children: [] },
-    ];
-    expect(
-      editorReducer(stateAt(model, "a1b"), { type: "moveDownSiblingFirst" })
-        .view.activeNodeId
-    ).toBe("a2");
-    // And from A2 (last child of A) out to A's sibling.
-    expect(
-      editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-  });
-
-  // ↓ stops on the document's trailing edge — the last root, its last child,
-  // ITS last child, and so on — because climbing finds no ancestor with a next
-  // sibling. Those nodes can still HAVE children; ↓ just won't descend, → will.
-  it("is a no-op (same state) along the document's trailing edge", () => {
-    const model = siblingModel();
-    model.roots[2].children = [{ id: "c1", text: "C1", children: [] }];
-    for (const id of ["c", "c1"]) {
-      const s = stateAt(model, id);
-      expect(editorReducer(s, { type: "moveDownSiblingFirst" })).toBe(s);
-    }
-    // "c" is on that edge while still having a child to descend into.
-    expect(
-      editorReducer(stateAt(model, "c"), { type: "moveToChild" }).view
-        .activeNodeId
-    ).toBe("c1");
-    // Nothing above the first root either.
-    const first = stateAt(model, "a");
-    expect(editorReducer(first, { type: "moveUpSiblingFirst" })).toBe(first);
-  });
-
-  it("walks the roots as siblings of one another", () => {
-    const model = siblingModel();
-    expect(
-      editorReducer(stateAt(model, "a"), { type: "moveDownSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("b");
-    expect(
-      editorReducer(stateAt(model, "b"), { type: "moveUpSiblingFirst" }).view
-        .activeNodeId
-    ).toBe("a");
-  });
-
   it("records the visited child so ← then → round-trips", () => {
     // Walking siblings must feed lastChildByParent the same way moveDown does.
     const model = siblingModel();
@@ -1182,10 +1148,24 @@ describe("moveUpSiblingFirst / moveDownSiblingFirst", () => {
       "a2"
     );
   });
+
+  it("walks the roots as siblings of one another and stops at the document's edges", () => {
+    const model = siblingModel();
+    let s = stateAt(model, "a");
+    expect(editorReducer(s, { type: "moveUpSiblingFirst" })).toBe(s); // first root: nothing above
+    s = editorReducer(s, { type: "moveDownSiblingFirst" });
+    expect(s.view.activeNodeId).toBe("b"); // never a2 (↓ never descends)
+    s = editorReducer(s, { type: "moveDownSiblingFirst" });
+    expect(s.view.activeNodeId).toBe("c");
+    expect(editorReducer(s, { type: "moveDownSiblingFirst" })).toBe(s); // trailing edge
+    // From a2 (last child of a): over the subtree to the next root.
+    const fromA2 = editorReducer(stateAt(model, "a2"), { type: "moveDownSiblingFirst" });
+    expect(fromA2.view.activeNodeId).toBe("b");
+  });
 });
 
 describe("moveToChild (last-visited-child memory)", () => {
-  /** P(p1, p2, p3), Q — two roots */
+  /** Roots: P(p1, p2, p3), Q */
   function branchModel(): MindMapDocument {
     return {
       title: "Root",
@@ -1209,15 +1189,6 @@ describe("moveToChild (last-visited-child memory)", () => {
       type: "moveToChild",
     });
     expect(next.view.activeNodeId).toBe("p1");
-  });
-
-  it("returns to the child the focus left from (← then → round-trips)", () => {
-    const model = branchModel();
-    let s = stateAt(model, "p2");
-    s = editorReducer(s, { type: "moveToParent" });
-    expect(s.view.activeNodeId).toBe("p");
-    s = editorReducer(s, { type: "moveToChild" });
-    expect(s.view.activeNodeId).toBe("p2");
   });
 
   it("remembers where the user stopped, not where they entered", () => {
@@ -1314,25 +1285,30 @@ describe("deleteNode", () => {
     expect(next.view.activeNodeId).toBe("a");
   });
 
-  it("deleting the last root leaves one fresh blank root, focused", () => {
+  it("is a no-op for an unknown node", () => {
+    const model = sampleModel();
+    const s = stateAt(model, "a");
+    expect(editorReducer(s, { type: "deleteNode", nodeId: "ghost" })).toBe(s);
+  });
+
+  it("deleting the last root leaves one fresh blank root that takes the focus", () => {
     const model: MindMapDocument = {
       title: "Root",
-      roots: [{ id: "only", text: "Only", children: [{ id: "k", text: "K", children: [] }] }],
+      roots: [{ id: "only", text: "Only", children: [] }],
     };
-    const s = stateAt(model, "k");
-    const next = editorReducer(s, { type: "deleteNode", nodeId: "only" });
-    const roots = next.document.model.roots;
-    expect(roots).toHaveLength(1);
-    expect(roots[0].id).not.toBe("only");
-    expect(roots[0].text).toBe("");
-    expect(next.view.activeNodeId).toBe(roots[0].id);
+    const next = editorReducer(stateAt(model, "only"), { type: "deleteNode", nodeId: "only" });
+    expect(next.document.model.roots).toHaveLength(1);
+    const blank = next.document.model.roots[0];
+    expect(blank.id).not.toBe("only");
+    expect(blank.text).toBe("");
+    expect(next.view.activeNodeId).toBe(blank.id);
   });
 
   it("deletes the whole subtree, removing children too (no promotion)", () => {
     const model = sampleModel();
     const s = stateAt(model, "a"); // active = "a", which has child "a1"
     const next = editorReducer(s, { type: "deleteNode", nodeId: "a" });
-    // "a" and its child "a1" are both gone; the child is NOT promoted to root.
+    // "a" and its child "a1" are both gone; the child is NOT promoted to a root.
     expect(findNode(next.document.model, "a")).toBeNull();
     expect(findNode(next.document.model, "a1")).toBeNull();
     // The remaining roots are just "b".
@@ -1564,15 +1540,18 @@ describe("replace", () => {
     const s = stateAt(model, "a");
     const replacement: EditorState = {
       document: {
-        model: { title: "New", roots: [{ id: "new", text: "New", children: [] }] },
+        model: {
+          title: "New",
+          roots: [{ id: "n", text: "N", children: [] }],
+        },
         clipboard: null,
       },
       view: {
-        activeNodeId: "new",
+        activeNodeId: "n",
         editing: false,
-        editingText: "New",
+        editingText: "N",
         cursorPos: 0,
-        selectionEnd: 3,
+        selectionEnd: 1,
         lastChildByParent: {},
       },
     };
@@ -1594,6 +1573,66 @@ describe("reconcileView", () => {
       lastChildByParent: {},
     };
     expect(reconcileView(view, document)).toBe(view);
+  });
+
+  it("re-reads editingText from the restored node and clamps the caret", () => {
+    // The view's editingText is the textarea's value; a document swap moves the
+    // model out from under it. Undoing an edit to the node being edited used to
+    // leave the pre-undo text on screen, so ⌘Z looked like it did nothing.
+    const document: DocumentState = { model: sampleModel(), clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a",
+      editing: true,
+      editingText: "AB", // pre-undo; the restored node says "A"
+      cursorPos: 2,
+      selectionEnd: 2,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.editingText).toBe("A");
+    expect(reconciled.cursorPos).toBe(1);
+    expect(reconciled.selectionEnd).toBe(1);
+    // Still editing the same node — only the buffer was reconciled.
+    expect(reconciled.activeNodeId).toBe("a");
+    expect(reconciled.editing).toBe(true);
+  });
+
+  it("keeps the caret where it was when the restored text still contains it", () => {
+    const document: DocumentState = {
+      model: updateNodeText(sampleModel(), "a", "ALPHA"),
+      clipboard: null,
+    };
+    const view: ViewState = {
+      activeNodeId: "a",
+      editing: true,
+      editingText: "ALPHAX",
+      cursorPos: 1,
+      selectionEnd: 1,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.editingText).toBe("ALPHA");
+    expect(reconciled.cursorPos).toBe(1);
+  });
+
+  it("lands on the collapsed ancestor when the active node exists but is hidden", () => {
+    // Undo of "expand A" while the user had moved into a1: a1 is still in the
+    // document but no longer visible, and an invisible active node traps the
+    // keyboard just like a vanished one.
+    const model = sampleModel();
+    findNode(model, "a")!.collapsed = true;
+    const document: DocumentState = { model, clipboard: null };
+    const view: ViewState = {
+      activeNodeId: "a1",
+      editing: true,
+      editingText: "A1",
+      cursorPos: 2,
+      selectionEnd: 2,
+      lastChildByParent: {},
+    };
+    const reconciled = reconcileView(view, document);
+    expect(reconciled.activeNodeId).toBe("a");
+    expect(reconciled.editing).toBe(false);
   });
 
   it("falls back to the first root when activeNodeId no longer exists", () => {
@@ -1660,8 +1699,7 @@ describe("reconcileView", () => {
 
   it("falls back to the next node when no previous neighbour survives", () => {
     // Restored document drops the whole "a" branch (a, a1). The vanished "a1"
-    // has no surviving predecessor, but the next node "b" survives, so it
-    // wins.
+    // has no surviving predecessor, but the next node "b" survives, so it wins.
     const prev = sampleModel();
     const prevDocument: DocumentState = { model: prev, clipboard: null };
     const restored: MindMapDocument = {

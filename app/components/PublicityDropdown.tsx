@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useAnchoredPopover } from "./useAnchoredPopover";
+import ConfirmDialog from "./ConfirmDialog";
 import { GlobeIcon, LinkIcon, LockIcon } from "./icons";
 import { privateNoteCopyReason } from "../application/publicNoteLink";
 import { t } from "../application/i18n";
@@ -14,6 +16,12 @@ interface Props {
    * 無効化して理由を見せる（{@link privateNoteCopyReason}）。
    */
   onCopyLink?: () => void;
+  /**
+   * 「公開ページを開く」を押したときのハンドラ（新しいタブで閲覧ページを開く）。
+   * onCopyLink と同じ条件で並び、非公開の間は無効化する。共有した相手に
+   * どう見えるかを自分で確かめる導線（usertest #6）。
+   */
+  onOpenPublicPage?: () => void;
 }
 
 // label はカタログキー（描画時に t() で解決 — 言語切り替えに追従する）。
@@ -28,16 +36,26 @@ const OPTIONS = [
  * with a check next to the active one. The top-layer popover + anchor
  * positioning mechanics live in {@link useAnchoredPopover}.
  *
- * `onCopyLink` を渡すと、公開状態の下に「リンクをコピー」が並ぶ。共有できるか
- * どうかは公開状態そのものなので、共有動線もこのメニューに同居させている。
+ * Switching to public asks for confirmation first — it is the one choice here
+ * that exposes the note to anyone with the link (usertest #14). Switching
+ * back to private is immediate.
+ *
+ * `onCopyLink` / `onOpenPublicPage` を渡すと、公開状態の下に「リンクをコピー」
+ * 「公開ページを開く」が並ぶ。共有できるかどうかは公開状態そのものなので、
+ * 共有動線もこのメニューに同居させている。
  */
 export default function PublicityDropdown({
   isPublic,
   onChange,
   onCopyLink,
+  onOpenPublicPage,
 }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const menu = useAnchoredPopover("down");
+  const [confirmPublic, setConfirmPublic] = useState(false);
+
+  const shareItem =
+    "flex w-full items-start gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent";
 
   return (
     <>
@@ -70,15 +88,18 @@ export default function PublicityDropdown({
         popover="auto"
         onToggle={menu.handleToggle}
         style={menu.popoverStyle}
-        className="min-w-[140px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+        className="min-w-[160px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
       >
         {OPTIONS.map((opt) => (
           <button
             key={String(opt.value)}
             type="button"
+            data-testid={opt.value ? "publicity-public" : "publicity-private"}
             onClick={() => {
               menu.popoverRef.current?.hidePopover();
-              if (opt.value !== isPublic) onChange(opt.value);
+              if (opt.value === isPublic) return;
+              if (opt.value) setConfirmPublic(true);
+              else onChange(false);
             }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100"
           >
@@ -87,34 +108,62 @@ export default function PublicityDropdown({
             {opt.value === isPublic && <span className="text-slate-900">✓</span>}
           </button>
         ))}
+        {(onCopyLink || onOpenPublicPage) && (
+          <div className="my-1 border-t border-slate-200" role="separator" />
+        )}
         {onCopyLink && (
-          <>
-            <div className="my-1 border-t border-slate-200" role="separator" />
-            <button
-              type="button"
-              disabled={!isPublic}
-              data-testid="copy-link"
-              onClick={() => {
-                menu.popoverRef.current?.hidePopover();
-                onCopyLink();
-              }}
-              className="flex w-full items-start gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent"
-            >
-              <span className="mt-px text-slate-500">
-                <LinkIcon width="15" height="15" />
-              </span>
-              <span className="flex-1">
-                {t("copyLinkLabel")}
-                {!isPublic && (
-                  <span className="mt-0.5 block text-[11px] text-slate-400">
-                    {privateNoteCopyReason()}
-                  </span>
-                )}
-              </span>
-            </button>
-          </>
+          <button
+            type="button"
+            disabled={!isPublic}
+            data-testid="copy-link"
+            onClick={() => {
+              menu.popoverRef.current?.hidePopover();
+              onCopyLink();
+            }}
+            className={shareItem}
+          >
+            <span className="mt-px text-slate-500">
+              <LinkIcon width="15" height="15" />
+            </span>
+            <span className="flex-1">
+              {t("copyLinkLabel")}
+              {!isPublic && (
+                <span className="mt-0.5 block text-[11px] text-slate-400">
+                  {privateNoteCopyReason()}
+                </span>
+              )}
+            </span>
+          </button>
+        )}
+        {onOpenPublicPage && (
+          <button
+            type="button"
+            disabled={!isPublic}
+            data-testid="open-public-page"
+            onClick={() => {
+              menu.popoverRef.current?.hidePopover();
+              onOpenPublicPage();
+            }}
+            className={shareItem}
+          >
+            <span className="mt-px text-slate-500">
+              <GlobeIcon width="15" height="15" />
+            </span>
+            <span className="flex-1">{t("openPublicPage")}</span>
+          </button>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmPublic}
+        title={t("publishConfirmTitle")}
+        message={t("publishConfirmMessage")}
+        confirmLabel={t("publishConfirmLabel")}
+        onConfirm={() => {
+          setConfirmPublic(false);
+          onChange(true);
+        }}
+        onCancel={() => setConfirmPublic(false)}
+      />
     </>
   );
 }

@@ -17,6 +17,8 @@ import {
   nodeBoxHeight,
 } from "../lib/measureText";
 import { assertNever } from "../lib/assertNever";
+import { measureEmptyWidth } from "../lib/textGeometry";
+import { t } from "./i18n";
 import { markdownTitle } from "./markdownCard";
 import { imageDisplaySize, IMAGE_V_PAD } from "../lib/imageCache";
 
@@ -303,7 +305,14 @@ export function measureModelNode(
         bold: m.bold,
         maxWidth: nodeContentMaxWidth(m),
       });
-      return { width: box.width + checkboxOffset(m), height: box.height };
+      // An empty node paints the italic placeholder instead of its (zero-width)
+      // text, so its box must be sized for the placeholder or the glyphs spill
+      // past the padding.
+      const width =
+        m.text === ""
+          ? Math.max(box.width, measureEmptyWidth(t("nodeEmptyPlaceholder")))
+          : box.width;
+      return { width: width + checkboxOffset(m), height: box.height };
     }
     default:
       return assertNever(type);

@@ -14,3 +14,16 @@ export type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"
 export function defaultLocalStorage(): KeyValueStorage | undefined {
   return typeof localStorage === "undefined" ? undefined : localStorage;
 }
+
+/**
+ * An in-memory {@link KeyValueStorage}, for tests and any headless caller
+ * that wants the storage-backed APIs without a browser.
+ */
+export function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, v),
+    removeItem: (k) => void map.delete(k),
+  };
+}

@@ -5,14 +5,11 @@ import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
 import { siteEditPath } from "../application/siteTemplate";
 import { copyText } from "../lib/clipboard";
-import {
-  LOCALE_LABELS,
-  setLocale,
-  t,
-  type Locale,
-} from "../application/i18n";
+import { formatBytes } from "../lib/formatBytes";
+import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
 import { useLocale } from "../components/useLocale";
 import type { MessageKey } from "../application/messages";
+import ServiceSwitcher from "../components/ServiceSwitcher";
 
 type User = SessionUser | null;
 
@@ -54,12 +51,6 @@ const INACTIVE_LABEL: Record<
   "note-private": "inactiveNotePrivate",
   "node-missing": "inactiveNodeMissing",
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
 
 export default function Settings({ user }: { user: User }) {
   const locale = useLocale(); // 言語切り替えで再レンダー（t() の購読）
@@ -191,6 +182,7 @@ export default function Settings({ user }: { user: User }) {
         </Link>
         <div className="h-6 w-px bg-slate-200" />
         <h1 className="text-lg font-bold tracking-tight">{t("projectSettings")}</h1>
+        <ServiceSwitcher className="ml-auto text-slate-500 hover:text-slate-900" />
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-8 md:px-6">
@@ -211,7 +203,7 @@ export default function Settings({ user }: { user: User }) {
             {t("languageHeading")}
           </h2>
           <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-3">
-            {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+            {LOCALES.map((l) => (
               <label
                 key={l}
                 className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${

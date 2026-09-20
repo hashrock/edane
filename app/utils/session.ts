@@ -56,22 +56,32 @@ async function verify(
   return valid ? payload : null;
 }
 
-export async function setSession(c: Context, user: SessionUser) {
+/**
+ * A `SessionUser` in an HMAC-signed cookie (SESSION_SECRET). The session
+ * cookie and the dev-bypass impersonation cookie (auth/bypassAuth.ts) share
+ * this format but use different names, so neither can be read as the other.
+ */
+export async function writeSignedUserCookie(
+  c: Context,
+  name: string,
+  user: SessionUser,
+  maxAge: number
+) {
   // UTF-8 first: a non-Latin1 display name would make a raw btoa() throw.
   const payload = encodeBase64Utf8(JSON.stringify(user));
   const token = await sign(payload, c.env.SESSION_SECRET);
   const isLocalhost = new URL(c.req.url).hostname === "localhost";
-  setCookie(c, SESSION_COOKIE, token, {
+  setCookie(c, name, token, {
     path: "/",
     httpOnly: true,
     secure: !isLocalhost,
     sameSite: "Lax",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge,
   });
 }
 
-export async function getSession(c: Context): Promise<SessionUser | null> {
-  const token = getCookie(c, SESSION_COOKIE);
+export async function readSignedUserCookie(c: Context, name: string): Promise<SessionUser | null> {
+  const token = getCookie(c, name);
   if (!token) return null;
 
   try {
@@ -83,6 +93,18 @@ export async function getSession(c: Context): Promise<SessionUser | null> {
   }
 }
 
+export function deleteSignedUserCookie(c: Context, name: string) {
+  deleteCookie(c, name, { path: "/" });
+}
+
+export async function setSession(c: Context, user: SessionUser) {
+  await writeSignedUserCookie(c, SESSION_COOKIE, user, 60 * 60 * 24 * 30);
+}
+
+export async function getSession(c: Context): Promise<SessionUser | null> {
+  return readSignedUserCookie(c, SESSION_COOKIE);
+}
+
 export function clearSession(c: Context) {
-  deleteCookie(c, SESSION_COOKIE, { path: "/" });
+  deleteSignedUserCookie(c, SESSION_COOKIE);
 }

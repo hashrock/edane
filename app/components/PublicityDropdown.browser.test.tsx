@@ -53,6 +53,16 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
 
 const trigger = () =>
   waitFor(() => document.querySelector<HTMLButtonElement>("button"));
+/** 「公開」を選ぶと出る確認ダイアログ（usertest #14）の確認ボタン。 */
+const confirmDialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
+const confirmPublish = async () => {
+  const btn = await waitFor(() =>
+    Array.from(confirmDialog()?.querySelectorAll<HTMLButtonElement>("button") ?? []).find(
+      (b) => b.textContent?.trim() === "Make public"
+    )
+  );
+  await userEvent.click(btn);
+};
 const popover = () => document.querySelector<HTMLElement>("[popover]");
 const isOpen = () => !!popover()?.matches(":popover-open");
 const menuItems = () =>
@@ -101,12 +111,43 @@ describe("PublicityDropdown (browser e2e)", () => {
     expect(items[1].textContent).not.toContain("✓");
 
     await userEvent.click(items[1]);
-    expect(calls()).toEqual([true]);
-    // Menu closes after selecting.
+    // Menu closes after selecting; going public asks first (usertest #14) and
+    // nothing changes until it is confirmed.
     await waitFor(() => !isOpen());
+    expect(calls()).toEqual([]);
+    await waitFor(confirmDialog);
+    await confirmPublish();
+    expect(calls()).toEqual([true]);
+    await waitFor(() => !confirmDialog());
     const label = (await trigger()).textContent ?? "";
     expect(label).toContain("Public");
     expect(label).not.toContain("Private");
+  });
+
+  it("cancelling the publish confirmation keeps the note private", async () => {
+    calls().length = 0;
+    render(<Harness initial={false} />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+    await userEvent.click(menuItems()[1]);
+    const dialog = await waitFor(confirmDialog);
+    const cancel = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.trim() === "Cancel"
+    )!;
+    await userEvent.click(cancel);
+    await waitFor(() => !confirmDialog());
+    expect(calls()).toEqual([]);
+    expect((await trigger()).textContent).toContain("Private");
+  });
+
+  it("switching back to private needs no confirmation", async () => {
+    calls().length = 0;
+    render(<Harness initial={true} />);
+    await userEvent.click(await trigger());
+    await waitFor(isOpen);
+    await userEvent.click(menuItems()[0]);
+    expect(calls()).toEqual([false]);
+    expect(confirmDialog()).toBeNull();
   });
 
   it("renders above a high z-index overlay (the reported bug)", async () => {
@@ -212,6 +253,8 @@ describe("PublicityDropdown リンクをコピー (browser e2e)", () => {
 
     await userEvent.click(menuItems()[1]); // 公開へ切り替え（メニューは閉じる）
     await waitFor(() => !isOpen());
+    await confirmPublish();
+    await waitFor(() => !confirmDialog());
     await userEvent.click(await trigger());
     await waitFor(isOpen);
 

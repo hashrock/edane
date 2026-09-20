@@ -146,7 +146,7 @@ describe("node rendering (browser e2e)", () => {
   it("paints the italic placeholder for an empty node, inside its box", async () => {
     const r = await rendered("empty");
     const t = only(r);
-    expect(t.text).toBe("empty");
+    expect(t.text).toBe("Type here"); // t("nodeEmptyPlaceholder") in the en test locale
     expect(t.fontStyle).toBe("italic");
     expectFitsBox(r);
   });

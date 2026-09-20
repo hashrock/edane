@@ -4,6 +4,7 @@ import {
   useRef,
   useCallback,
   useMemo,
+  useSyncExternalStore,
   lazy,
   Suspense,
 } from "react";
@@ -13,12 +14,13 @@ import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   firstRootId,
+  isMultiRoot,
   isRoot,
-  cloneWithNewIds,
-  generateId,
+  subtreeIds,
 } from "../domain/model";
-import { markdownToModel, modelToMarkdown } from "../application/markdown";
+import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
+import { pasteCommand, type PasteSource } from "../application/editorCommands";
 import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
@@ -32,11 +34,16 @@ import {
   stageTransform,
   applyStageTransform,
 } from "./stagePanZoom";
-import { zoomAt, panBy } from "../lib/panZoom";
+import { zoomAt, panBy, MIN_SCALE } from "../lib/panZoom";
 import { edgeScrollVelocity } from "../lib/dragAutoScroll";
-import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
+import {
+  useNoteEditor,
+  leaveDialogMessage,
+  type NoteEditorEngine,
+} from "./useNoteEditor";
+import SaveStatus from "./SaveStatus";
 import { useTextInputHandlers } from "./useTextInputHandlers";
-import { layoutMindMap } from "../lib/treeLayout";
+import { layoutMindMap, VERTICAL_GAP } from "../lib/treeLayout";
 import {
   LINE_HEIGHT,
   lineHeightFor,
@@ -52,7 +59,12 @@ import {
   verticalMove,
   type LineData,
 } from "../lib/textGeometry";
-import { subscribeImages, imageDisplaySize, getImageEntry } from "../lib/imageCache";
+import {
+  subscribeImages,
+  imageCacheVersion,
+  imageDisplaySize,
+  getImageEntry,
+} from "../lib/imageCache";
 import {
   flattenToNodes,
   nodeDisplayText,
@@ -79,6 +91,8 @@ import {
   worldViewport,
   centerOffset,
   ensureVisibleOffset,
+  fitTransform,
+  unionRect,
   type Vec,
   type ViewTransform,
 } from "../lib/viewport";
@@ -87,11 +101,11 @@ import ContextMenu, {
   type ContextMenuItem,
 } from "./ContextMenu";
 import PublicityDropdown from "./PublicityDropdown";
+import MultiRootToggle, { multiRootOnChange } from "./MultiRootToggle";
 import {
   serializeDocument,
   modelToText,
   documentToText,
-  textToNodes,
 } from "../application/persistence";
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
@@ -106,6 +120,7 @@ import {
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
+import { applyKeyEffects, type KeyEffectDeps } from "./applyKeyEffects";
 import {
   handleAuxInputKeys,
   isAuxInputSurface,
@@ -117,6 +132,7 @@ import {
   type EditorPreferences,
 } from "../application/editorPreferences";
 import EditorSettingsDialog from "./EditorSettingsDialog";
+import ServiceSwitcher from "./ServiceSwitcher";
 
 // パネルを開くまで markdown レンダラ（marked / dompurify）を読み込まない。
 const MarkdownPanel = lazy(() => import("./MarkdownPanel"));
@@ -164,6 +180,10 @@ const HIDDEN_NODE_TYPES: ReadonlySet<NodeType> = new Set();
 // Zoom factor per click of the floating +/− buttons. Deliberately coarser than
 // WHEEL_ZOOM_STEP (1.05): a button click should make a visible jump.
 const ZOOM_BUTTON_STEP = 1.2;
+/** Screen-space margin kept around the document by 全体表示 (fit-all). */
+const FIT_PADDING = 40;
+/** Width of the markdown side panel (MarkdownPanel's `max-w-[420px]`). */
+const MD_PANEL_MAX_WIDTH = 420;
 
 // Each connector leaves its parent with a short straight stub before the curve
 // begins. The stub's end is the shared junction where all of a parent's edges
@@ -180,6 +200,13 @@ const CONNECTOR_STUB = 6;
 const TOGGLE_GAP = 4;
 const TOGGLE_R = 9;
 const TOGGLE_HIT_R = 12;
+
+// The toggle button's center-x, hugging the right edge of the node's box.
+// SSoT for this offset — draw pass, morph tween, and the test-hook API all
+// place the same button and must agree on where it is.
+function toggleCenterX(nodeX: number, width: number, depth: number): number {
+  return nodeX + nodeBoxWidth(width, depth === 0) + TOGGLE_GAP + TOGGLE_R;
+}
 
 /**
  * In-flight pointer drag. Two kinds share the click-vs-drag threshold logic:
@@ -240,16 +267,10 @@ type DragState =
 /** The "move" half of {@link DragState}, once narrowed. */
 type MoveDragState = Extract<DragState, { mode: "move" }>;
 
-/** Number of descendants (incl. hidden ones) of a node in the document. */
+/** Number of descendants (incl. hidden ones) of a node in the model. */
 function countDescendants(model: MindMapDocument, nodeId: string): number {
   const node = findNode(model, nodeId);
-  if (!node) return 0;
-  let count = -1;
-  (function walk(n: MindMapModel) {
-    count++;
-    for (const child of n.children) walk(child);
-  })(node);
-  return count;
+  return node ? subtreeIds(node).length - 1 : 0;
 }
 
 /** One shape a node painted, as {@link MindmapTestApi.getNodeRender} reports it. */
@@ -398,7 +419,10 @@ export function MindmapEditorView({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    saveFailure,
+    retrySave,
     copyPublicLink,
+    openPublicPage,
     undoManagerRef,
     undo,
     redo,
@@ -459,6 +483,8 @@ export function MindmapEditorView({
   // The markdown node whose full document is open in the side panel (null =
   // closed). Markdown nodes edit/preview here rather than expanding on-canvas.
   const [mdPanelNodeId, setMdPanelNodeId] = useState<string | null>(null);
+  const mdPanelNodeIdRef = useRef<string | null>(null);
+  mdPanelNodeIdRef.current = mdPanelNodeId;
   // True while the markdown panel's textarea owns the keyboard. Same role as
   // `urlEditing` for the URL box: it marks an editing surface outside the
   // canvas, so the focus-sync effects below must leave the focus alone.
@@ -639,12 +665,13 @@ export function MindmapEditorView({
   const commitPlaceRef = useRef(commitPlace);
   commitPlaceRef.current = commitPlace;
 
-  // Re-render when an image-node's image finishes loading (size becomes known).
-  const [imageVersion, setImageVersion] = useState(0);
-  useEffect(
-    () => subscribeImages(() => setImageVersion((v) => v + 1)),
-    []
-  );
+  // Re-render (and re-lay-out) when an image-node's image finishes loading
+  // (size becomes known). Read as an external-store snapshot rather than a
+  // subscribe-in-effect counter: the first layout starts the load during
+  // render, and a fast (data: URL) image can finish before the effect would
+  // have subscribed — the box then kept its placeholder width until an
+  // unrelated edit re-laid the tree out (usertest #8).
+  const imageVersion = useSyncExternalStore(subscribeImages, imageCacheVersion, () => 0);
 
   // Derived: flat nodes with layout. Only while a caret is active on a TEXT
   // node is it sized from the live buffer. Image/link nodes keep their real
@@ -666,7 +693,7 @@ export function MindmapEditorView({
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
-  // The title is the document's own (edited in the header, not a canvas node).
+  // Title = root node text (the root is the header title, not a canvas node)
   const title = model.title;
 
   // --- Cursor blink ---
@@ -899,34 +926,21 @@ export function MindmapEditorView({
   }, []);
 
   // --- Clipboard ---
+  // Every node paste is the same effect list (insert → leave edit mode →
+  // flash → save); see application/editorCommands.ts for why it is a value.
+  const runPaste = useCallback(
+    (source: PasteSource, targetId?: string) => {
+      const st = stateRef.current;
+      const effects = pasteCommand(st, source, { targetId });
+      if (effects) applyKeyEffects(effects, st, { dispatch, saveNote, flashNodes });
+    },
+    [dispatch, saveNote, flashNodes]
+  );
+
   // Insert indented plain text as fresh nodes after the active node.
   const pasteTextAsNodes = useCallback(
-    (clipText: string) => {
-      if (!clipText.trim()) return;
-      const cur = stateRef.current;
-      const targetId =
-        cur.view.activeNodeId || firstRootId(cur.document.model);
-      const freshChildren = textToNodes(clipText).map(cloneWithNewIds);
-      if (freshChildren.length === 0) return;
-      const next = dispatch(
-        { type: "insertNodes", targetId, nodes: freshChildren },
-        "paste"
-      );
-      // Land in selection mode on the pasted subtree rather than leaving the
-      // caret inside a pasted node: if the paste happened while editing, edit
-      // mode would otherwise persist (focusView keeps it), and the next
-      // keystroke would become a separate "text" undo entry — making the paste
-      // feel like it needs two Ctrl+Z to undo. View-only, so no undo entry.
-      dispatch({ type: "exitEditing" });
-      // Flash every inserted node so the paste destination is obvious.
-      const collectIds = (n: MindMapModel): string[] => [
-        n.id,
-        ...n.children.flatMap(collectIds),
-      ];
-      flashNodes(freshChildren.flatMap(collectIds));
-      if (noteId) saveNote(next.document.model);
-    },
-    [dispatch, noteId, saveNote, flashNodes]
+    (clipText: string) => runPaste({ kind: "text", text: clipText }),
+    [runPaste]
   );
 
   // Copy/cut/paste operate on whole branches via the internal clipboard while a
@@ -1019,16 +1033,10 @@ export function MindmapEditorView({
       if (plan === "branch-json" || plan === "branch-clipboard") {
         // `node` present = the clipboard's own subtree; absent = the internal
         // branch clipboard (see the reducer's pasteBranch).
-        const next = dispatch(
-          {
-            type: "pasteBranch",
-            node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
-          },
-          "paste-branch"
-        );
-        flashNodes(next.view.activeNodeId ? [next.view.activeNodeId] : []);
-        if (noteId && next.document.model !== st.document.model)
-          saveNote(next.document.model);
+        runPaste({
+          kind: "branch",
+          node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+        });
         return;
       }
 
@@ -1046,7 +1054,7 @@ export function MindmapEditorView({
       }
       return assertNever(plan);
     },
-    [dispatch, pasteTextAsNodes, flashNodes, noteId, readOnly, saveNote]
+    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage]
   );
 
   // Resolve the Markdown paste dialog with one of the three strategies.
@@ -1056,35 +1064,12 @@ export function MindmapEditorView({
       if (!pending) return;
       const { text, targetId } = pending;
       setMdPaste(null);
-      const collectIds = (n: MindMapModel): string[] => [
-        n.id,
-        ...n.children.flatMap(collectIds),
-      ];
-      const insert = (children: MindMapModel[]) => {
-        const fresh = children.map(cloneWithNewIds);
-        if (fresh.length === 0) return;
-        const next = dispatch(
-          { type: "insertNodes", targetId, nodes: fresh },
-          "paste"
-        );
-        // Land in selection mode so a follow-up keystroke doesn't become a
-        // separate undo step (see pasteTextAsNodes). View-only, no undo entry.
-        dispatch({ type: "exitEditing" });
-        flashNodes(fresh.flatMap(collectIds));
-        if (noteId) saveNote(next.document.model);
-      };
-      if (mode === "decompose") {
-        insert(markdownToModel(text).children);
-      } else if (mode === "node") {
-        insert([
-          { id: generateId(), text: text.trim(), type: "markdown", children: [] },
-        ]);
-      } else {
-        insert(textToNodes(text));
-      }
+      // The target was captured when the dialog opened: the paste must land
+      // where the user pasted, not wherever the selection is by now.
+      runPaste({ kind: "markdown", text, mode }, targetId);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
-    [mdPaste, dispatch, flashNodes, noteId, saveNote]
+    [mdPaste, runPaste]
   );
 
   // --- Link preview: fetch <title> + favicon for a link node's URL ---
@@ -1202,8 +1187,12 @@ export function MindmapEditorView({
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     if (!contextMenu) return [];
     if (contextMenu.nodeId === undefined) {
-      // Empty canvas: the one deliberate way to create a tree root.
+      // Empty canvas: the one deliberate way to create a tree root. Hidden on
+      // a single-root note (MultiRootToggle off) — a display preference only:
+      // addRootAt itself stays unconditional.
       if (readOnly) return [];
+      const current = modelRef.current;
+      if (!isMultiRoot(current)) return [];
       const { at } = contextMenu;
       return [
         {
@@ -1261,6 +1250,24 @@ export function MindmapEditorView({
           focusEditorSoon();
         },
       });
+      // Same as Enter in selection mode (a tree root gets a child instead —
+      // see addSiblingAfter). Offered here for users who don't know the key
+      // (usertest #10). Hidden on tree roots where it would duplicate
+      // "add child".
+      if (!isRoot(modelRef.current, nodeId)) {
+        structureGroup.push({
+          label: t("menuAddSibling"),
+          onSelect: () => {
+            const next = dispatch(
+              { type: "insertSiblingAfter", nodeId },
+              "insert-sibling"
+            );
+            if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
+            if (noteId) saveNote(next.document.model);
+            focusEditorSoon();
+          },
+        });
+      }
     }
     if (hasChildren) {
       structureGroup.push({
@@ -1422,21 +1429,20 @@ export function MindmapEditorView({
   // shortcuts, so bindings stay auditable and the help overlay is generated
   // from the same source.
   const keymap = useMemo<KeyBinding[]>(
-    () =>
-      buildKeymap(
-        {
-          dispatch,
-          saveNote: (m) => saveNote(m),
-          openPalette: () => setCmdPaletteOpen(true),
-          openHelp: () => setHelpOpen(true),
-          undo,
-          redo,
-          verticalMove,
-        },
-        prefs,
-        "canvas"
-      ),
-    [dispatch, saveNote, undo, redo, prefs]
+    () => buildKeymap(prefs, "canvas", verticalMove),
+    [prefs]
+  );
+  // The keymap only describes what a key wants; this carries it out.
+  const keyDeps = useMemo<KeyEffectDeps>(
+    () => ({
+      dispatch,
+      saveNote: (m) => saveNote(m),
+      openPalette: () => setCmdPaletteOpen(true),
+      openHelp: () => setHelpOpen(true),
+      undo,
+      redo,
+    }),
+    [dispatch, saveNote, undo, redo]
   );
 
   const handleKeyDown = useCallback(
@@ -1447,7 +1453,15 @@ export function MindmapEditorView({
       // ignore the rest.
       if (helpOpen || settingsOpen) return;
       const state = stateRef.current;
-      runKeymap(
+      // The markdown side panel: Escape on the canvas closes it (the panel's
+      // own Escape closes it too). Selection mode has no Escape binding of
+      // its own (see editorKeymap), so nothing is shadowed.
+      if (e.key === "Escape" && !state.view.editing && mdPanelNodeIdRef.current) {
+        e.preventDefault();
+        setMdPanelNodeId(null);
+        return;
+      }
+      const outcome = runKeymap(
         keymap,
         {
           e,
@@ -1458,8 +1472,10 @@ export function MindmapEditorView({
         },
         prefs
       );
+      if (outcome.result === "handled") e.preventDefault();
+      applyKeyEffects(outcome.effects, state, keyDeps);
     },
-    [isComposing, keymap, helpOpen, settingsOpen, prefs]
+    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs]
   );
 
   // --- Guest mode: hand the current document off to be saved to an account ---
@@ -1563,7 +1579,7 @@ export function MindmapEditorView({
         );
         const firstLine = node.text.split("\n")[0];
         const label = !firstLine
-          ? "empty"
+          ? t("nodeEmptyPlaceholder")
           : firstLine.length > 24
             ? firstLine.slice(0, 24) + "…"
             : firstLine;
@@ -1637,9 +1653,11 @@ export function MindmapEditorView({
             listening: false,
           });
         } else {
-          // Insertion line in the middle of the sibling gap (VERTICAL_GAP=10).
+          // Insertion line in the middle of the sibling gap.
           const y =
-            drop.position === "before" ? target.y - h / 2 - 5 : target.y + h / 2 + 5;
+            drop.position === "before"
+              ? target.y - h / 2 - VERTICAL_GAP / 2
+              : target.y + h / 2 + VERTICAL_GAP / 2;
           const g = new Konva.Group({ listening: false });
           g.add(
             new Konva.Line({
@@ -1763,9 +1781,9 @@ export function MindmapEditorView({
             worldX <= n.x + nodeBoxWidth(n.width, n.depth === 0) &&
             Math.abs(worldY - n.y) <= nodeBoxHeight(n.height) / 2
         );
-        // Only a root can be dropped on empty canvas (free placement); a
-        // nested branch there would become a new tree, which is reserved for
-        // the explicit "add root" menu — so for it that's a no-drop.
+        // Only a tree root can be dropped on empty canvas (free placement);
+        // a nested branch there would become a new tree, which is reserved
+        // for the explicit "add root" menu — so for it that's a no-drop.
         drag.ghostAt =
           overOwnSubtree || !isRoot(modelRef.current, drag.nodeId)
             ? null
@@ -2125,6 +2143,38 @@ export function MindmapEditorView({
     setZoomPercent(Math.round(t.scale * 100));
   }, []);
 
+  // Apply a whole transform (zoom + pan) from the view controls.
+  const applyView = useCallback((t: ViewTransform) => {
+    const stage = konvaStageRef.current;
+    if (!stage) return;
+    applyStageTransform(stage, t);
+    layerRef.current?.batchDraw();
+    updateGridRef.current();
+    setViewportTick((tick) => tick + 1);
+    setZoomPercent(Math.round(t.scale * 100));
+  }, []);
+
+  // 全体表示: every tree of the document inside the viewport (usertest #1/#2 —
+  // a user who panned the trees off-screen, or doesn't know there are more
+  // trees below the first, needs one button that shows everything).
+  const fitToView = useCallback(() => {
+    const stage = konvaStageRef.current;
+    if (!stage) return;
+    const bounds = unionRect(
+      nodesRef.current.map((n) => nodeRect(n, n.depth === 0))
+    );
+    if (!bounds) return;
+    applyView(
+      fitTransform(
+        bounds,
+        { width: stage.width(), height: stage.height() },
+        FIT_PADDING,
+        1,
+        MIN_SCALE
+      )
+    );
+  }, [applyView]);
+
   // Stable object so the memoized ViewControls skips re-rendering on the
   // per-wheel-tick renders this view does during pan/zoom gestures.
   const zoomControls = useMemo(
@@ -2132,13 +2182,52 @@ export function MindmapEditorView({
       percent: zoomPercent,
       onZoomIn: () => zoomBy(ZOOM_BUTTON_STEP),
       onZoomOut: () => zoomBy(1 / ZOOM_BUTTON_STEP),
+      // "100%" resets the zoom AND brings the selected node back to the
+      // centre — resetting the scale alone left a user who had panned away
+      // staring at an empty canvas (usertest #1).
       onReset: () => {
         const stage = konvaStageRef.current;
-        if (stage) zoomBy(1 / stage.scaleX());
+        if (!stage) return;
+        const flat = nodesRef.current;
+        const activeId = stateRef.current.view.activeNodeId;
+        const target = flat.find((n) => n.id === activeId) ?? flat[0];
+        if (!target) {
+          zoomBy(1 / stage.scaleX());
+          return;
+        }
+        const rect = nodeRect(target, target.depth === 0);
+        const { offsetX, offsetY } = centerOffset(rectCenter(rect), 1, {
+          width: stage.width(),
+          height: stage.height(),
+        });
+        applyView({ scale: 1, offsetX, offsetY });
       },
+      onFit: fitToView,
     }),
-    [zoomPercent, zoomBy]
+    [zoomPercent, zoomBy, applyView, fitToView, stateRef]
   );
+
+  // When the markdown side panel opens it covers the right part of the
+  // canvas — exactly where the (rightmost, leaf) markdown node usually sits.
+  // Pan just enough that the node stays visible in the uncovered area
+  // (usertest #4).
+  useEffect(() => {
+    const stage = konvaStageRef.current;
+    if (!stage || !mdPanelNodeId) return;
+    const node = nodesRef.current.find((n) => n.id === mdPanelNodeId);
+    if (!node) return;
+    const panelWidth = Math.min(MD_PANEL_MAX_WIDTH, stage.width());
+    const visibleWidth = stage.width() - panelWidth;
+    if (visibleWidth <= 0) return;
+    const { offsetX, offsetY, changed } = ensureVisibleOffset(
+      nodeRect(node, node.depth === 0),
+      stageTransform(stage),
+      { width: visibleWidth, height: stage.height() },
+      50
+    );
+    if (!changed) return;
+    applyView({ scale: stage.scaleX(), offsetX, offsetY });
+  }, [mdPanelNodeId, applyView]);
 
   // Re-centre when the note changes (a fresh document should open centred too).
   useEffect(() => {
@@ -2344,7 +2433,9 @@ export function MindmapEditorView({
         : node.width;
       textWidths.set(
         node.id,
-        displayRaw === "" ? Math.max(measured, measureEmptyWidth()) : measured
+        displayRaw === ""
+          ? Math.max(measured, measureEmptyWidth(t("nodeEmptyPlaceholder")))
+          : measured
       );
     });
     lineDataRef.current = lineDataMap;
@@ -2390,8 +2481,8 @@ export function MindmapEditorView({
     // Draw nodes
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
-      // Depth 0 = a document root (see MindMapDocument.roots): each tree's
-      // root gets the root styling.
+      // Top-level nodes are the roots of their trees (the document root is
+      // the title and isn't drawn), so each gets the root styling.
       const isRoot = node.depth === 0;
       // isEditing = caret/text-input active; isSelected = node highlighted but
       // not being edited (single click). A selected node renders like any other
@@ -2431,7 +2522,7 @@ export function MindmapEditorView({
       // Draw the VISUAL lines the box was measured from (hard breaks + soft
       // wraps at the width cap), pre-joined at wrap time so Konva does no
       // wrapping of its own — text, box and caret agree by construction.
-      const drawnText = isEmpty ? "empty" : data.visualText;
+      const drawnText = isEmpty ? t("nodeEmptyPlaceholder") : data.visualText;
       // Favicon only when a non-active link node has one.
       const favEntry =
         asLink && node.favicon ? getImageEntry(node.favicon) : undefined;
@@ -2481,10 +2572,14 @@ export function MindmapEditorView({
                 : "#ffffff",
         // Editing gets the emerald accent so "I'm typing here" reads distinctly
         // from a mere selection (black); everything else keeps its resting edge.
+        // Root's fill is near-black, so its selection stroke goes white instead
+        // of the usual black to stay visible against it.
         stroke: isEditing
           ? "#10b981"
           : isSelected
-            ? "#000000"
+            ? isRoot
+              ? "#ffffff"
+              : "#000000"
             : isRoot
               ? "#0f172a"
               : asMarkdown
@@ -2859,10 +2954,8 @@ export function MindmapEditorView({
       // childCount counts direct children even while collapsed (when the flat
       // `children` array is empty), so it's the true leaf test for both states.
       if (node.childCount === 0) return; // leaves have nothing to toggle
-      const isRoot = node.depth === 0;
       const parentWidth = textWidths.get(node.id) ?? node.width;
-      const rectW = nodeBoxWidth(parentWidth, isRoot);
-      const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+      const cx = toggleCenterX(node.x, parentWidth, node.depth);
       const cy = node.y;
       if (cx < cullLeft || cx > cullRight || cy < cullTop || cy > cullBottom) {
         return;
@@ -3186,9 +3279,7 @@ export function MindmapEditorView({
       return;
     }
 
-    const isRoot = node.depth === 0;
-    const rectW = nodeBoxWidth(node.width, isRoot);
-    const cx = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+    const cx = toggleCenterX(node.x, node.width, node.depth);
     const cy = node.y;
     // toCollapsed: the button is BECOMING the count pill (collapse). Each shape
     // starts in the pre-toggle look and tweens to the post-toggle one.
@@ -3296,9 +3387,7 @@ export function MindmapEditorView({
         if (!node || !stage) return null;
         if (node.childCount === 0) return null;
         const scale = stage.scaleX();
-        const isRoot = node.depth === 0;
-        const rectW = nodeBoxWidth(node.width, isRoot);
-        const worldX = node.x + rectW + TOGGLE_GAP + TOGGLE_R;
+        const worldX = toggleCenterX(node.x, node.width, node.depth);
         const worldY = node.y;
         return { x: worldX * scale + stage.x(), y: worldY * scale + stage.y() };
       },
@@ -3470,7 +3559,7 @@ export function MindmapEditorView({
         open={leaveConfirm !== null}
         variant="danger"
         title={t("saveFailedTitle")}
-        message={t("leaveMessage")}
+        message={leaveDialogMessage(saveFailure)}
         confirmLabel={t("leaveConfirm")}
         cancelLabel={t("leaveCancel")}
         onConfirm={() => {
@@ -3540,7 +3629,7 @@ export function MindmapEditorView({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-2 text-xs md:gap-3">
           <ViewControls
             layout={layout ?? "canvas"}
             onLayoutChange={onLayoutChange}
@@ -3548,11 +3637,19 @@ export function MindmapEditorView({
           />
           {noteId && !readOnly && (
             <>
-              <span
-                ref={saveStatusRef}
-                data-testid="save-status"
-                className="whitespace-nowrap text-slate-500"
+              <SaveStatus
+                statusRef={saveStatusRef}
+                failure={saveFailure}
+                onRetry={retrySave}
               />
+              {/* The multi-tree switch governs a canvas-only gesture (right-click on
+                  empty canvas); on a phone-width header it has no room and no use. */}
+              <span className="hidden md:inline-flex">
+                <MultiRootToggle
+                  multiRoot={isMultiRoot(model)}
+                  onChange={multiRootOnChange(dispatch, saveNote)}
+                />
+              </span>
               <PublicityDropdown
                 isPublic={isPublic}
                 onChange={(next) => {
@@ -3560,6 +3657,7 @@ export function MindmapEditorView({
                   saveNote(model, next);
                 }}
                 onCopyLink={copyPublicLink}
+                onOpenPublicPage={openPublicPage}
               />
             </>
           )}
@@ -3571,6 +3669,8 @@ export function MindmapEditorView({
               {t("saveToAccount")}
             </button>
           )}
+          {/* 埋め込み（iframe）では出さない。埋め込み先のページのメニューではないため */}
+          {!embed && <ServiceSwitcher className="text-slate-500 hover:text-slate-700" />}
         </div>
       </header>
       <div

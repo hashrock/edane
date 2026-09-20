@@ -1,3 +1,5 @@
+import { nodeBoxWidth } from "./measureText";
+
 /** Minimal node contract required by the layout algorithm. */
 export interface LayoutNode {
   id: string;
@@ -24,10 +26,11 @@ interface NodeLayout {
 
 // Slot floor so single-line nodes keep their original vertical rhythm.
 const NODE_MIN_HEIGHT = 40;
-const NODE_MIN_WIDTH = 100;
-const NODE_PADDING = 20;
 const HORIZONTAL_GAP = 120;
-const VERTICAL_GAP = 10;
+// Exported: dragDrop.ts and MindmapEditor.tsx derive their sibling-gap-sized
+// offsets from this so they stay in sync instead of re-typing the gap as an
+// independent constant.
+export const VERTICAL_GAP = 10;
 // Gap between the trees of a multi-root document (larger than the sibling gap
 // so separate trees read as separate).
 const TREE_GAP = 40;
@@ -43,10 +46,14 @@ export function layoutRoots(nodes: LayoutNode[]): LayoutNode[] {
   return nodes.filter((n) => !childIds.has(n.id));
 }
 
-/** Visual box width (measured text width + horizontal padding), with a floor. */
-function effectiveWidth(node: LayoutNode): number {
-  const textWidth = node.width || 0;
-  return Math.max(NODE_MIN_WIDTH, textWidth + NODE_PADDING * 2);
+/**
+ * Visual box width for the horizontal gap this node's children are offset by.
+ * Delegates to {@link nodeBoxWidth} — the same formula the canvas draw and
+ * drag-drop hit test use — so a root's wider floor doesn't leak onto a
+ * non-root node here and disagree with the box actually rendered.
+ */
+function effectiveWidth(node: LayoutNode, isRoot: boolean): number {
+  return nodeBoxWidth(node.width || 0, isRoot);
 }
 
 /** Slot height used for vertical packing (measured box height, with a floor). */
@@ -58,11 +65,13 @@ export function calculateNodeSizes(
   nodes: LayoutNode[]
 ): Map<string, NodeLayout> {
   const layoutMap = new Map<string, NodeLayout>();
+  const roots = layoutRoots(nodes);
+  const rootIds = new Set(roots.map((n) => n.id));
 
   nodes.forEach((node) => {
     layoutMap.set(node.id, {
       node,
-      width: effectiveWidth(node),
+      width: effectiveWidth(node, rootIds.has(node.id)),
       height: slotHeight(node),
       subtreeHeight: slotHeight(node),
     });
@@ -89,7 +98,7 @@ export function calculateNodeSizes(
     return layout.subtreeHeight;
   }
 
-  for (const root of layoutRoots(nodes)) calculateSubtreeHeight(root.id);
+  for (const root of roots) calculateSubtreeHeight(root.id);
 
   return layoutMap;
 }

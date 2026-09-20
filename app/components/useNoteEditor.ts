@@ -14,11 +14,27 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { router } from "@inertiajs/react";
 import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
-  editorReducer,
   type EditorState,
   type EditorAction,
   type UndoType,
 } from "../application/editorReducer";
+import { guardedStep } from "../application/readOnlyGuard";
+import {
+  AUTOSAVE_DELAY_MS,
+  beginSave,
+  classifySaveFailure,
+  initialSaveTracker,
+  isDirty as isTrackerDirty,
+  isRetryableFailure,
+  isUntracked,
+  nextRetryDelay,
+  settleSave,
+  untrackedSave,
+  type SaveDisplay,
+  type SaveFailureReason,
+  type SaveOutcome,
+  type SaveTracker,
+} from "../application/saveTracker";
 import {
   parseContent,
   serializeDocument,
@@ -28,6 +44,8 @@ import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
 import { UndoManager } from "../application/undoManager";
 import { copyText } from "../lib/clipboard";
+import { formatBytes } from "../lib/formatBytes";
+import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 
 /**
  * updateSaveStatus に渡す状態コード。表示文言は描画時に現在のUI言語で解決する
@@ -40,13 +58,31 @@ import { copyText } from "../lib/clipboard";
 export type SaveStatusText =
   | ""
   | "saving"
-  | "saved"
-  | "save-failed"
+  // 保存の結末は saveTracker が決めるので、そちらを単一ソースにする（片方だけ
+  // 改名しても、ここが合わなければコンパイルで気づく）。
+  | NonNullable<SaveDisplay>
   | "uploading"
   | "upload-failed"
   | "storage-limit"
   | "link-copied"
   | "link-copy-failed";
+
+/**
+ * 失敗理由→説明文のカタログキー。ヘッダーの「保存できませんでした」の横と、
+ * 離脱ダイアログの本文で使う（usertest #3: 理由と対処を必ず示す）。
+ */
+export const SAVE_FAILURE_MESSAGE = {
+  auth: "saveFailedAuth",
+  server: "saveFailedServer",
+  network: "saveFailedNetwork",
+  other: "saveFailedOther",
+} as const satisfies Record<SaveFailureReason, MessageKey>;
+
+/** 離脱ダイアログの本文: 失敗理由（あれば）＋未保存の警告。 */
+export function leaveDialogMessage(reason: SaveFailureReason | null): string {
+  const warning = t("leaveMessage");
+  return reason ? `${t(SAVE_FAILURE_MESSAGE[reason])} ${warning}` : warning;
+}
 
 /** コード→カタログキー。網羅は satisfies で強制（キー追加漏れを防ぐ）。 */
 const SAVE_STATUS_MESSAGE = {
@@ -59,6 +95,13 @@ const SAVE_STATUS_MESSAGE = {
   "link-copied": "copyLinkSuccess",
   "link-copy-failed": "copyLinkFailure",
 } as const satisfies Record<Exclude<SaveStatusText, "">, MessageKey>;
+
+/** ステータス→ t() に渡す埋め込みパラメータ（不要なものは省略）。 */
+const SAVE_STATUS_PARAMS: Partial<
+  Record<Exclude<SaveStatusText, "">, Record<string, string>>
+> = {
+  "storage-limit": { limit: formatBytes(IMAGE_STORAGE_LIMIT_BYTES) },
+};
 
 export interface NoteEditorInit {
   noteId?: string;
@@ -88,15 +131,24 @@ export interface NoteEditorEngine {
   modelRef: React.MutableRefObject<MindMapDocument>;
   /** Central dispatch: pure reducer + undo bookkeeping. Returns next state. */
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
-  /** Persist the document (no-op when the note is unsaved / guest mode). */
+  /** Persist the model (no-op when the note is unsaved / guest mode). */
   saveNote: (currentModel: MindMapDocument, pub?: boolean) => Promise<boolean>;
   updateSaveStatus: (status: SaveStatusText) => void;
   saveStatusRef: React.RefObject<HTMLSpanElement | null>;
+  /**
+   * 直近の保存が失敗した理由。成功するか、内容が変わって次の保存が走るまで
+   * 残る。ヘッダーはこれで説明文と「再試行」を出す（null = 失敗していない）。
+   */
+  saveFailure: SaveFailureReason | null;
+  /** 今の内容をすぐ保存し直す（自動再試行を待たない）。 */
+  retrySave: () => void;
   /**
    * 公開ノートの閲覧URLをクリップボードへコピーし、結果をヘッダーの
    * ステータス行に出す。未保存ノート（noteId なし）では何もしない。
    */
   copyPublicLink: () => void;
+  /** 公開ノートの閲覧ページを新しいタブで開く（noteId なしでは何もしない）。 */
+  openPublicPage: () => void;
   isDirty: () => boolean;
   isPublic: boolean;
   setIsPublic: (v: boolean) => void;
@@ -130,7 +182,8 @@ export function useNoteEditor({
   readOnly = false,
 }: NoteEditorInit): NoteEditorEngine {
   // --- Single source of truth: the full editor state ---
-  // Exactly one node is always selected; the first root starts active.
+  // Exactly one node is always selected; the first top-level node starts
+  // active (the root is the title, not a node).
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
     const firstId = firstRootId(model);
@@ -155,31 +208,26 @@ export function useNoteEditor({
 
   const [isPublic, setIsPublic] = useState(initialIsPublic || false);
   const [leaveConfirm, setLeaveConfirm] = useState<LeaveConfirm | null>(null);
+  const [saveFailure, setSaveFailure] = useState<SaveFailureReason | null>(null);
 
   const saveTimerRef = useRef<any>(null);
-  // Snapshot of the document last confirmed persisted (title + content, the
-  // two fields a save sends). The server just handed us the initial document,
-  // so that's our clean baseline; every successful save advances it.
-  // `isDirty()` compares the live document against this. Lazily initialized:
-  // useRef(arg) は毎レンダーで引数を評価するので、素直に書くとレンダー毎に
-  // モデル全体を serialize してしまう（readOnly では丸ごと不要）。
-  const lastSavedContentRef = useRef<string | null>(null);
-  if (lastSavedContentRef.current === null && noteId && !readOnly) {
-    lastSavedContentRef.current = saveSnapshot(model);
+  // Autosave bookkeeping (baseline + out-of-order acks) — the rules live in
+  // application/saveTracker.ts; this ref just holds the value. Lazily
+  // initialized: useRef(arg) は毎レンダーで引数を評価するので、素直に書くと
+  // レンダー毎にモデル全体を serialize してしまう（readOnly では丸ごと不要）。
+  // The server just handed us the initial model, so that's the clean baseline.
+  const saveRef = useRef<SaveTracker>(untrackedSave);
+  if (isUntracked(saveRef.current) && noteId && !readOnly) {
+    saveRef.current = initialSaveTracker(saveSnapshot(model));
   }
-  // Monotonic save-dispatch counter. An edit can arrive while a save is still
-  // in flight, so two saves run concurrently and their responses may land out
-  // of order. Each save takes the next `saveSeqRef` on dispatch; on success we
-  // only advance the baseline when this save is the newest one acknowledged
-  // (`ackedSeqRef`), so a slow older save can never regress the baseline and
-  // resurrect a false "unsaved" state.
-  const saveSeqRef = useRef(0);
-  const ackedSeqRef = useRef(0);
   // Set true just before re-issuing a visit we already flushed, so the
   // navigation guard lets that one visit pass through instead of re-flushing.
   const bypassNavGuardRef = useRef(false);
   const saveStatusRef = useRef<HTMLSpanElement>(null);
   const undoManagerRef = useRef(new UndoManager());
+  // Mirror of `saveFailure` for the timer / effect closures.
+  const saveFailureRef = useRef<SaveFailureReason | null>(null);
+  saveFailureRef.current = saveFailure;
 
   // --- Central dispatch: state -> action -> newState ---
   // Pure reducer computes the complete next state; a no-op returns the same
@@ -187,25 +235,11 @@ export function useNoteEditor({
   const dispatch = useCallback(
     (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
-      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する。
-      // クリックによる選択は活かしたいので、activateNode は編集突入だけ剥がす。
-      if (readOnly && action.type === "activateNode" && action.editing) {
-        action = { ...action, editing: false };
-      }
-      const next = editorReducer(prev, action);
+      // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する
+      // （規則は application/readOnlyGuard.ts）。
+      const next = guardedStep(prev, action, readOnly);
       if (next === prev) return prev;
-      if (readOnly) {
-        // 編集モードに入る遷移は捨てる（startEditing / dragSelect など）。
-        if (next.view.editing) return prev;
-        // モデルを変えるアクションも捨てる。折りたたみだけは閲覧操作として通す
-        // （保存系は readOnly で全部止まっているので永続化はされない）。
-        if (
-          next.document.model !== prev.document.model &&
-          action.type !== "toggleCollapse"
-        ) {
-          return prev;
-        }
-      } else if (undoType && next.document !== prev.document) {
+      if (!readOnly && undoType && next.document !== prev.document) {
         undoManagerRef.current.push(undoType, prev.document, next.document);
       }
       stateRef.current = next;
@@ -219,7 +253,10 @@ export function useNoteEditor({
   const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
-    el.textContent = status === "" ? "" : t(SAVE_STATUS_MESSAGE[status]);
+    el.textContent =
+      status === ""
+        ? ""
+        : t(SAVE_STATUS_MESSAGE[status], SAVE_STATUS_PARAMS[status]);
     el.style.transition = "opacity 300ms ease";
     if (status === "") {
       // Hidden state (e.g. unsaved): drop out immediately, no fade.
@@ -245,13 +282,31 @@ export function useNoteEditor({
     );
   }, [noteId, updateSaveStatus]);
 
+  const openPublicPage = useCallback(() => {
+    if (!noteId) return;
+    window.open(publicNoteUrl(window.location.origin, noteId), "_blank", "noopener");
+  }, [noteId]);
+
   const saveNote = useCallback(
     async (currentModel: MindMapDocument, pub?: boolean): Promise<boolean> => {
       if (!noteId || readOnly) return true;
       const content = serializeDocument(currentModel);
+      // The tracker's baseline is the whole save payload (title + content),
+      // so a title-only edit counts as dirty too.
       const snapshot = saveSnapshot(currentModel);
-      const seq = ++saveSeqRef.current;
+      saveRef.current = beginSave(saveRef.current);
+      const seq = saveRef.current.issued;
       updateSaveStatus("saving");
+      // 結末の反映は一本化する。追い越された応答が表示を動かさない規則は
+      // saveTracker が持っていて、ここは言われたとおり出すだけ。失敗理由も
+      // 同じ規則に従う（追い越された失敗は理由も出さない）。
+      const settle = (outcome: SaveOutcome) => {
+        const { tracker, display } = settleSave(saveRef.current, seq, outcome);
+        saveRef.current = tracker;
+        if (!display) return;
+        updateSaveStatus(display);
+        setSaveFailure(outcome.ok ? null : (outcome.reason ?? "other"));
+      };
       try {
         const res = await fetch(`/api/notes/${noteId}`, {
           method: "PUT",
@@ -263,21 +318,14 @@ export function useNoteEditor({
             isPublic: pub ?? isPublic,
           }),
         });
-        if (res.ok) {
-          // Advance the baseline only if no newer save has already been
-          // acknowledged — an out-of-order older completion must not roll the
-          // baseline (and the "unsaved" state) backwards.
-          if (seq > ackedSeqRef.current) {
-            ackedSeqRef.current = seq;
-            lastSavedContentRef.current = snapshot;
-            updateSaveStatus("saved");
-          }
-          return true;
-        }
-        updateSaveStatus("save-failed");
-        return false;
+        settle(
+          res.ok
+            ? { ok: true, content: snapshot }
+            : { ok: false, reason: classifySaveFailure(res.status) }
+        );
+        return res.ok;
       } catch {
-        updateSaveStatus("save-failed");
+        settle({ ok: false, reason: classifySaveFailure(null) });
         return false;
       }
     },
@@ -285,35 +333,48 @@ export function useNoteEditor({
   );
 
   // Are there edits not yet confirmed persisted? Only meaningful with a noteId
-  // (guest/embed mode has no autosave and nothing to guard).
+  // (guest/embed mode has no autosave and nothing to guard — the tracker has
+  // no baseline there, so this is false).
   const isDirty = useCallback(
-    () =>
-      !!noteId &&
-      !readOnly &&
-      saveSnapshot(modelRef.current) !== lastSavedContentRef.current,
-    [noteId, readOnly]
+    () => isTrackerDirty(saveRef.current, saveSnapshot(modelRef.current)),
+    []
   );
+
+  // 手動の再試行: 自動再試行のタイマーを待たず、今の内容を保存し直す。
+  // 失敗が auth（ログイン切れ）だと自動再試行は止まるので、ログインし直した
+  // あとの復帰手段はこれだけ。
+  const retrySave = useCallback(() => {
+    if (!noteId || readOnly) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    void saveNote(modelRef.current);
+  }, [noteId, readOnly, saveNote]);
 
   // Debounced auto-save (with retry-on-failure).
   useEffect(() => {
     if (!noteId || readOnly) return;
     // Don't surface the "unsaved" state as visible text — it's visual noise.
     // Clear the status so the header stays quiet until the save itself flips
-    // this to saving → saved.
-    if (isDirty()) updateSaveStatus("");
+    // this to saving → saved. A standing failure stays visible: the reason and
+    // the retry button must not vanish just because the user kept typing.
+    if (isDirty() && !saveFailureRef.current) updateSaveStatus("");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     let cancelled = false;
     // A failed autosave used to sit unsaved until the next edit or navigation.
     // Re-arm with exponential backoff (capped) so a transient failure recovers
     // on its own; stop once the save lands or the model changes (this effect
-    // re-runs and resets the chain).
+    // re-runs and resets the chain). A failure that can't heal by itself
+    // (auth / rejected content) is not retried on a timer — it would only
+    // pile up identical errors — the header offers a manual retry instead.
     const arm = (delay: number) => {
       saveTimerRef.current = setTimeout(async () => {
         const ok = await saveNote(modelRef.current);
-        if (!cancelled && !ok && isDirty()) arm(Math.min(delay * 2, 15000));
+        if (cancelled || ok || !isDirty()) return;
+        const reason = saveFailureRef.current;
+        if (reason && !isRetryableFailure(reason)) return;
+        arm(nextRetryDelay(delay));
       }, delay);
     };
-    arm(1500);
+    arm(AUTOSAVE_DELAY_MS);
     return () => {
       cancelled = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -389,7 +450,7 @@ export function useNoteEditor({
   // Undo/redo restore only the document; the current selection/caret (view
   // state) is carried over as-is. The `replace` reducer reconciles it against
   // the restored document, so if the active node no longer exists there it
-  // falls back to the first root instead of dangling.
+  // falls back to the first top-level node instead of dangling.
   const restoreDocument = useCallback(
     (restored: EditorState["document"] | null) => {
       if (!restored) return;
@@ -418,7 +479,10 @@ export function useNoteEditor({
     saveNote,
     updateSaveStatus,
     saveStatusRef,
+    saveFailure,
+    retrySave,
     copyPublicLink,
+    openPublicPage,
     isDirty,
     isPublic,
     setIsPublic,

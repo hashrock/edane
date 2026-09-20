@@ -2,19 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type { MindmapTestApi } from "./MindmapEditor";
 
 /**
  * Tree roots are created only on purpose: right-click on empty canvas offers
  * "Add root here", and nothing else (Enter on a tree root, paste, drop) makes
- * one. See `isTopLevel` in domain/model.ts.
+ * one. See `isRoot` in domain/model.ts.
  */
 
-const MODEL: MindMapModel = {
-  id: "root",
-  text: "Root",
-  children: [
+const MODEL: MindMapDocument = {
+  title: "Root",
+  roots: [
     {
       id: "a",
       text: "Alpha",
@@ -53,15 +52,15 @@ beforeEach(() => {
   document.head.appendChild(style);
 });
 
-async function setup(readOnly = false) {
+async function setup(readOnly = false, model: MindMapDocument = MODEL) {
   render(
     <MindmapEditor
-      initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
+      initialContent={JSON.stringify({ version: 2, ...model })}
       initialTitle="Root"
       readOnly={readOnly}
     />
   );
-  await waitFor(() => api().getActiveNodeId() === "a");
+  await waitFor(() => api().getActiveNodeId() === model.roots[0].id);
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
   const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
   const target = canvas.querySelector("canvas") ?? canvas;
@@ -117,6 +116,16 @@ describe("adding a tree root", () => {
 
   it("offers nothing in read-only mode", async () => {
     const { rightClick } = await setup(true);
+    rightClick(60, 100);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(menuButton("Add root here")).toBeUndefined();
+  });
+
+  it("offers nothing when the note is single-root and already has its one tree", async () => {
+    // A display preference only (MultiRootToggle / MindMapDocument.multiRoot):
+    // it hides this menu item, but doesn't stop addRootAt from working if
+    // reached another way — there's no invariant to enforce here.
+    const { rightClick } = await setup(false, { ...MODEL, multiRoot: false });
     rightClick(60, 100);
     await new Promise((r) => setTimeout(r, 200));
     expect(menuButton("Add root here")).toBeUndefined();

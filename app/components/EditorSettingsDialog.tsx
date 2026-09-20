@@ -1,11 +1,6 @@
 import { useEffect } from "react";
 import type { EditorPreferences } from "../application/editorPreferences";
-import {
-  LOCALE_LABELS,
-  setLocale,
-  t,
-  type Locale,
-} from "../application/i18n";
+import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 
 interface Props {
@@ -103,7 +98,7 @@ export default function EditorSettingsDialog({
               {t("languageHeading")}
             </h3>
             <div className="flex gap-1.5">
-              {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+              {LOCALES.map((l) => (
                 <label
                   key={l}
                   className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${

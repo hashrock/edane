@@ -28,7 +28,7 @@ describe("measureOffsets (fallback)", () => {
 
 describe("measureEmptyWidth (fallback)", () => {
   it("is the placeholder estimate", () => {
-    expect(measureEmptyWidth()).toBe(40);
+    expect(measureEmptyWidth("empty")).toBe(40);
   });
 });
 

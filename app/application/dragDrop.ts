@@ -9,6 +9,7 @@
 
 import type { MindMapNode } from "./nodeUtils";
 import { nodeBoxWidth, nodeBoxHeight } from "./nodeUtils";
+import { VERTICAL_GAP } from "../lib/treeLayout";
 
 /** Where a dragged branch would land if dropped at the current pointer. */
 export type DropTarget =
@@ -33,9 +34,11 @@ export type DropTarget =
 // Top/bottom edge band that reads as "insert as sibling here" instead of
 // "drop into". Capped so tall (multi-line/image) nodes keep a large child zone.
 const SIBLING_ZONE_MAX = 12;
-// Vertical slack around each box so the gap between siblings (VERTICAL_GAP=10)
-// is swallowed by the adjacent edge zones instead of being dead space.
-const HIT_SLACK_Y = 5;
+// Vertical slack around each box so the gap between siblings (treeLayout's
+// VERTICAL_GAP) is swallowed by the adjacent edge zones instead of being dead
+// space. Derived from VERTICAL_GAP so a layout tweak can't silently desync
+// drag-and-drop hit-testing from the actual rendered gap.
+const HIT_SLACK_Y = VERTICAL_GAP / 2;
 // Horizontal slack: a slightly generous box is easier to hit while dragging.
 const HIT_SLACK_X = 8;
 

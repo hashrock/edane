@@ -2,6 +2,7 @@ import { Head, Link, useForm } from "@inertiajs/react";
 import type { SessionUser } from "../../user";
 import { t } from "../../application/i18n";
 import { useLocale } from "../../components/useLocale";
+import ServiceSwitcher from "../../components/ServiceSwitcher";
 
 type User = SessionUser | null;
 
@@ -28,14 +29,17 @@ export default function NotesNew({ user }: { user: User }) {
         <h1 className="text-xl font-bold tracking-tight">
           <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
-        {user && (
-          <Link
-            href="/notes"
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
-          >
-            {t("settingsBackToList")}
-          </Link>
-        )}
+        <div className="flex items-center gap-3">
+          {user && (
+            <Link
+              href="/notes"
+              className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
+            >
+              {t("settingsBackToList")}
+            </Link>
+          )}
+          <ServiceSwitcher className="text-slate-500 hover:text-slate-900" />
+        </div>
       </header>
 
       <section className="anim-item">

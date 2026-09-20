@@ -7,6 +7,10 @@
  * reaching into application) even though nothing throws at runtime; nothing
  * else catches that shape of bug.
  *
+ * Server-side buckets (db, utils, auth, scenarios) sit beside that chain:
+ * they may use the pure layers and each other as listed, but no UI layer may
+ * reach into them.
+ *
  * The layering check only resolves relative specifiers, so it can't see a
  * bare `from "react"` — a separate check below guards domain/lib/application
  * against that blind spot specifically.
@@ -43,6 +47,17 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   pages: ["domain", "lib", "application", "components"],
   db: [],
   utils: ["db"],
+  // auth = who is signed in (session cookie vs dev bypass). Server
+  // infrastructure like utils, so it may reach db/utils but never the UI
+  // layers, and nothing below server.ts may reach into it.
+  auth: ["db", "utils"],
+  // scenarios = the UI-test seeding route: server infrastructure built on
+  // the pure layers (fixtures) plus the write repositories in utils. Only
+  // server.ts mounts it; no layer may import it.
+  scenarios: ["domain", "lib", "application", "db", "utils", "auth"],
+  // stats = GET /api/stats (signup counts, Bearer STATS_TOKEN). Server
+  // infrastructure on the user repository; deliberately independent of auth.
+  stats: ["db", "utils"],
 };
 
 const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));

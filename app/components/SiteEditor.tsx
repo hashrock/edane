@@ -13,6 +13,7 @@ import { t } from "../application/i18n";
 import { copyText } from "../lib/clipboard";
 import { useLocale } from "./useLocale";
 import type { CompileRequest, CompileResponse } from "./siteCompiler.worker";
+import ServiceSwitcher from "./ServiceSwitcher";
 
 export interface SiteEditorProps {
   publicationId: string;
@@ -156,6 +157,8 @@ export default function SiteEditor({
     setAi({ kind: "done" });
   }, [apiBase, aiInstruction, template, schemaText]);
 
+  // `undefined` はパスセグメントにできない id のときだけ（実際の pubId は
+  // UUID なので来ない）。リンクとコピーが無効になるだけ。
   const publicUrl = siteUrl(window.location.origin, publicationId);
 
   const onTemplateKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -187,7 +190,7 @@ export default function SiteEditor({
               </a>
               <button
                 type="button"
-                onClick={() => void copyText(publicUrl).then((ok) => setCopied(ok))}
+                onClick={() => publicUrl && void copyText(publicUrl).then((ok) => setCopied(ok))}
                 className="rounded border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-100"
               >
                 {copied ? t("copied") : t("copy")}
@@ -207,6 +210,7 @@ export default function SiteEditor({
           >
             {publish.kind === "busy" ? t("sitePublishing") : t("sitePublish")}
           </button>
+          <ServiceSwitcher className="text-slate-500 hover:text-slate-700" />
         </div>
       </header>
       <p className="border-b border-slate-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">

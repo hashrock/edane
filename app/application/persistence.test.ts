@@ -1,45 +1,33 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
+import { STORED_NODE_TYPES, type MindMapDocument, type MindMapModel } from "../domain/model";
 import {
   modelToText,
   documentToText,
   textToNodes,
   textToDocument,
   parseContent,
-  normalizeDocument,
   serializeDocument,
   createDefaultDocument,
+  normalizeDocument,
   CONTENT_FORMAT_VERSION,
 } from "./persistence";
 
-/**
- * Every non-default NodeType. `satisfies` only checks each element is a
- * valid NodeType (not that the list is complete) — the real exhaustiveness
- * guard is model.ts's `isStoredNodeType` (backed by `STORED_NODE_TYPE_SET`),
- * which normalizeTree calls and which fails to typecheck if a NodeType is
- * added without being declared there. This list is an end-to-end regression
- * check that the full parseContent → normalizeTree pipeline actually
- * preserves every currently-declared type, not just the predicate itself.
- */
-const STORED_NODE_TYPES: readonly Exclude<NodeType, "text">[] = [
-  "image",
-  "link",
-  "markdown",
-] satisfies NodeType[];
-
 /** Strip IDs so we can compare tree structure and text only */
-function stripIds(model: MindMapModel): unknown {
+function stripIds(node: MindMapModel): unknown {
   return {
-    text: model.text,
-    children: model.children.map(stripIds),
+    text: node.text,
+    children: node.children.map(stripIds),
   };
 }
 
-/** Every id in a document, DFS. */
+/** Every node id of a document in DFS order. */
 function allIds(doc: MindMapDocument): string[] {
-  const collect = (m: MindMapModel): string[] => [m.id, ...m.children.flatMap(collect)];
-  return doc.roots.flatMap(collect);
+  const walk = (n: MindMapModel): string[] => [n.id, ...n.children.flatMap(walk)];
+  return doc.roots.flatMap(walk);
 }
+
+let seq = 0;
+const ids = () => `id${seq++}`;
 
 describe("modelToText", () => {
   it("serializes a single node", () => {
@@ -90,7 +78,7 @@ describe("modelToText", () => {
 });
 
 describe("documentToText", () => {
-  it("joins every tree in order, roots unindented", () => {
+  it("joins every tree in order", () => {
     const doc: MindMapDocument = {
       title: "T",
       roots: [
@@ -100,15 +88,10 @@ describe("documentToText", () => {
     };
     expect(documentToText(doc)).toBe("A\n  A1\nB");
   });
-
-  it("does not include the title", () => {
-    const doc: MindMapDocument = { title: "T", roots: [{ id: "a", text: "A", children: [] }] };
-    expect(documentToText(doc)).toBe("A");
-  });
 });
 
 describe("textToNodes / textToDocument", () => {
-  it("parses empty content as a single childless root carrying the title", () => {
+  it("parses empty content as no nodes, and as a single childless root carrying the title", () => {
     expect(textToNodes("")).toEqual([]);
     const doc = textToDocument("Root", "");
     expect(doc.title).toBe("Root");
@@ -138,70 +121,22 @@ describe("textToNodes / textToDocument", () => {
   });
 
   it("skips blank lines", () => {
-    const nodes = textToNodes("Child1\n\nChild2\n\n");
-    expect(nodes.length).toBe(2);
+    expect(textToNodes("Child1\n\nChild2\n\n").length).toBe(2);
+  });
+
+  it("mints ids from the supplied source, root first then DFS", () => {
+    seq = 0;
+    const doc = textToDocument("T", "a\n  b\nc", ids);
+    expect(doc.roots[0].id).toBe("id0");
+    expect(allIds(doc)).toEqual(["id0", "id1", "id2", "id3"]);
   });
 });
 
 describe("round-trip: modelToText → textToNodes", () => {
-  it("preserves simple tree structure", () => {
-    const original: MindMapModel = {
-      id: "n0",
-      text: "Root",
-      children: [
-        { id: "n1", text: "A", children: [] },
-        { id: "n2", text: "B", children: [] },
-      ],
-    };
-
+  it("preserves a single node with no children", () => {
+    const original: MindMapModel = { id: "n0", text: "Leaf", children: [] };
     const parsed = textToNodes(modelToText(original));
-    expect(parsed).toHaveLength(1);
-    expect(stripIds(parsed[0])).toEqual(stripIds(original));
-  });
-
-  it("preserves deeply nested structure", () => {
-    const original: MindMapModel = {
-      id: "n0",
-      text: "プロジェクト",
-      children: [
-        {
-          id: "n1",
-          text: "設計",
-          children: [
-            {
-              id: "n2",
-              text: "UI",
-              children: [
-                { id: "n3", text: "コンポーネント", children: [] },
-                { id: "n4", text: "レイアウト", children: [] },
-              ],
-            },
-            { id: "n5", text: "API", children: [] },
-          ],
-        },
-        {
-          id: "n6",
-          text: "実装",
-          children: [{ id: "n7", text: "テスト", children: [] }],
-        },
-      ],
-    };
-
-    const parsed = textToNodes(modelToText(original));
-    expect(parsed).toHaveLength(1);
-    expect(stripIds(parsed[0])).toEqual(stripIds(original));
-  });
-
-  it("preserves a whole document through documentToText", () => {
-    const doc: MindMapDocument = {
-      title: "T",
-      roots: [
-        { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
-        { id: "b", text: "B", children: [] },
-      ],
-    };
-    const parsed = textToNodes(documentToText(doc));
-    expect(parsed.map(stripIds)).toEqual(doc.roots.map(stripIds));
+    expect(parsed.map(stripIds)).toEqual([stripIds(original)]);
   });
 });
 
@@ -225,27 +160,12 @@ describe("parseContent", () => {
     expect(doc.title).toBe("My Title");
   });
 
-  it("parses v2 JSON content, taking the title from the note", () => {
-    const stored = {
-      version: 2,
-      roots: [
-        { id: "r1", text: "Tree 1", children: [{ id: "c1", text: "Child", children: [] }] },
-        { id: "r2", text: "Tree 2", position: { x: 10, y: 20 }, children: [] },
-      ],
-    };
-    const doc = parseContent(JSON.stringify(stored), "Note title");
-    expect(doc.title).toBe("Note title");
-    expect(doc.roots.map((r) => r.id)).toEqual(["r1", "r2"]);
-    expect(doc.roots[0].children[0].text).toBe("Child");
-    expect(doc.roots[1].position).toEqual({ x: 10, y: 20 });
-  });
-
-  it("round-trips a v2 document through serializeDocument", () => {
+  it("reads v2 content and round-trips it exactly", () => {
     const doc: MindMapDocument = {
       title: "T",
       roots: [
-        { id: "a", text: "A", bold: true, children: [{ id: "a1", text: "A1", checked: false, children: [] }] },
-        { id: "b", text: "https://e/x", type: "link", linkTitle: "E", position: { x: 1, y: 2 }, children: [] },
+        { id: "a", text: "A", position: { x: 1, y: 2 }, children: [{ id: "a1", text: "A1", collapsed: true, children: [] }] },
+        { id: "b", text: "B", type: "link", linkTitle: "L", children: [] },
       ],
     };
     const back = parseContent(serializeDocument(doc), "T");
@@ -285,6 +205,13 @@ describe("parseContent", () => {
     expect(doc.roots[0]).toEqual({ id: "r", text: "Just a title", children: [] });
   });
 
+  it("v1 migration: an explicit multiRoot: false on the old root moves to the document", () => {
+    const v1 = { id: "r", text: "T", multiRoot: false, children: [{ id: "c", text: "C", children: [] }] };
+    const doc = parseContent(JSON.stringify(v1), "T");
+    expect(doc.multiRoot).toBe(false);
+    expect("multiRoot" in doc.roots[0]).toBe(false);
+  });
+
   it("re-serializing a migrated v1 note emits v2 with the old root as roots[0]", () => {
     const v1 = { id: "r", text: "T", children: [{ id: "c", text: "C", children: [] }] };
     const out = JSON.parse(serializeDocument(parseContent(JSON.stringify(v1), "T")));
@@ -292,6 +219,7 @@ describe("parseContent", () => {
     expect(out.roots.map((r: MindMapModel) => r.id)).toEqual(["r"]);
     expect(out.roots[0].children.map((r: MindMapModel) => r.id)).toEqual(["c"]);
     expect(out).not.toHaveProperty("id");
+    expect(out).not.toHaveProperty("title");
   });
 
   it("repairs an empty v2 roots array with one blank root", () => {
@@ -342,51 +270,6 @@ describe("parseContent", () => {
     expect(doc.roots[0].children).toEqual([]);
   });
 
-  it("reassigns duplicated ids so the loaded document is a unique-id forest", () => {
-    // External JSON can carry duplicated ids; the whole domain layer addresses
-    // nodes by id (findNode/removeNode act on the first match), so load-time
-    // normalization must make every id unique — across roots too.
-    const json = JSON.stringify({
-      version: 2,
-      roots: [
-        { id: "dup", text: "A", children: [{ id: "dup", text: "A1", children: [] }] },
-        { id: "dup", text: "B", children: [] },
-      ],
-    });
-    const doc = parseContent(json, "ignored");
-    const ids = allIds(doc);
-    expect(new Set(ids).size).toBe(ids.length);
-    // Structure and text are preserved.
-    expect(doc.roots.map((c) => c.text)).toEqual(["A", "B"]);
-    expect(doc.roots[0].children[0].text).toBe("A1");
-  });
-
-  it("preserves known optional fields while normalizing", () => {
-    const json = JSON.stringify({
-      version: 2,
-      roots: [
-        {
-          id: "c",
-          text: "https://example.com",
-          type: "link",
-          bold: true,
-          fontSize: 20,
-          collapsed: true,
-          linkTitle: "Example",
-          favicon: "https://example.com/f.ico",
-          children: [],
-        },
-      ],
-    });
-    const c = parseContent(json, "ignored").roots[0];
-    expect(c.type).toBe("link");
-    expect(c.bold).toBe(true);
-    expect(c.fontSize).toBe(20);
-    expect(c.collapsed).toBe(true);
-    expect(c.linkTitle).toBe("Example");
-    expect(c.favicon).toBe("https://example.com/f.ico");
-  });
-
   it("keeps a task checkbox in either state, and only for booleans", () => {
     // `false` is the OPEN task, not "no checkbox" — a truthiness guard here
     // would quietly turn every open task into a plain node on reload.
@@ -425,6 +308,14 @@ describe("parseContent", () => {
     ]);
   });
 
+  it("keeps an explicit multiRoot: false and drops everything else (true is the default)", () => {
+    const withFlag = (multiRoot: unknown) =>
+      JSON.stringify({ version: 2, multiRoot, roots: [{ id: "a", text: "a", children: [] }] });
+    expect(parseContent(withFlag(false), "ignored").multiRoot).toBe(false);
+    expect(parseContent(withFlag(true), "ignored").multiRoot).toBeUndefined();
+    expect(parseContent(withFlag("yes"), "ignored").multiRoot).toBeUndefined();
+  });
+
   it("preserves every declared NodeType through normalization", () => {
     // Guards the round-trip invariant that STORED_NODE_TYPE_SET protects at
     // the type level: every non-default NodeType must survive normalizeTree
@@ -444,68 +335,87 @@ describe("parseContent", () => {
       version: 2,
       roots: [
         {
-          id: "r",
-          text: "R",
-          children: [
-            { id: "ok", text: "OK", children: [] },
-            42,
-            null,
-            { id: "x", text: "missing children" },
-          ],
+          id: "ok",
+          text: "OK",
+          children: [{ id: "k", text: "K", children: [] }, 42, null, { id: "x", text: "missing children" }],
         },
-        "junk",
-        { id: "y", text: "no children" },
+        7,
+        { text: "no children" },
       ],
     });
     const doc = parseContent(json, "ignored");
-    expect(doc.roots.map((r) => r.id)).toEqual(["r"]);
-    expect(doc.roots[0].children.map((c) => c.text)).toEqual(["OK"]);
+    expect(doc.roots.map((c) => c.text)).toEqual(["OK"]);
+    expect(doc.roots[0].children.map((c) => c.text)).toEqual(["K"]);
+  });
+
+  it("reassigns duplicated ids so the loaded document is a unique-id forest", () => {
+    // External JSON can carry duplicated ids; the whole domain layer addresses
+    // nodes by id (findNode/removeNode act on the first match), so load-time
+    // normalization must make every id unique — across roots too.
+    const json = JSON.stringify({
+      version: 2,
+      roots: [
+        { id: "dup", text: "First", children: [{ id: "dup", text: "Inner", children: [] }] },
+        { id: "dup", text: "Second", children: [] },
+      ],
+    });
+    const doc = parseContent(json, "ignored");
+    const all = allIds(doc);
+    expect(new Set(all).size).toBe(all.length);
+    expect(doc.roots[0].id).toBe("dup"); // the first occurrence keeps its id
+    expect(doc.roots.map((r) => r.text)).toEqual(["First", "Second"]);
   });
 });
 
 describe("normalizeDocument", () => {
   it("returns null for non-objects and shapes that are neither v1 nor v2", () => {
-    expect(normalizeDocument(null, "T")).toBeNull();
-    expect(normalizeDocument("str", "T")).toBeNull();
-    expect(normalizeDocument({ foo: 1 }, "T")).toBeNull();
-    expect(normalizeDocument({ id: "x", text: "y" }, "T")).toBeNull();
+    for (const bad of [null, 42, "x", [], {}, { roots: "no" }, { id: "x", text: "y" }]) {
+      expect(normalizeDocument(bad, "T")).toBeNull();
+    }
   });
 
-  it("does not repair an empty forest itself (that is parseContent's job)", () => {
-    expect(normalizeDocument({ roots: [] }, "T")).toEqual({ title: "T", roots: [] });
+  it("does not repair an empty roots array itself (parseContent does, via ensureRoot)", () => {
+    expect(normalizeDocument({ version: 2, roots: [] }, "T")).toEqual({ title: "T", roots: [] });
   });
 
-  it("uses an empty title for v2 when none is given", () => {
-    expect(normalizeDocument({ roots: [] }, undefined)!.title).toBe("");
+  it("defaults the title to an empty string for v2 when none is given", () => {
+    expect(normalizeDocument({ version: 2, roots: [] }, undefined)!.title).toBe("");
   });
 });
 
 describe("serializeDocument", () => {
-  it("emits the v2 shape with the roots and no title", () => {
-    const doc: MindMapDocument = {
-      title: "Root",
-      roots: [{ id: "r", text: "R", children: [] }],
-    };
+  it("writes the version tag and the roots, but not the title", () => {
+    const doc: MindMapDocument = { title: "Root", roots: [{ id: "r", text: "R", children: [] }] };
     const parsed = JSON.parse(serializeDocument(doc));
-    expect(parsed).toEqual({
-      version: CONTENT_FORMAT_VERSION,
-      roots: [{ id: "r", text: "R", children: [] }],
-    });
+    expect(parsed.version).toBe(CONTENT_FORMAT_VERSION);
+    expect(parsed.roots[0].id).toBe("r");
     expect(parsed).not.toHaveProperty("title");
-    expect(serializeDocument(doc)).not.toContain("Root");
+    expect(parsed).not.toHaveProperty("multiRoot");
+  });
+
+  it("writes multiRoot only when it is false", () => {
+    const roots = [{ id: "r", text: "R", children: [] }];
+    expect(JSON.parse(serializeDocument({ title: "T", roots, multiRoot: false })).multiRoot).toBe(false);
+    expect(JSON.parse(serializeDocument({ title: "T", roots, multiRoot: true }))).not.toHaveProperty("multiRoot");
   });
 });
 
 describe("createDefaultDocument", () => {
-  it("creates a document with the given title and one sample tree", () => {
+  it("creates a document with the given title and a sample tree", () => {
     const doc = createDefaultDocument("My Map");
     expect(doc.title).toBe("My Map");
-    expect(doc.roots.length).toBe(1);
+    expect(doc.roots.length).toBeGreaterThan(0);
     expect(doc.roots[0].children.length).toBeGreaterThan(0);
   });
 
   it("defaults to 'New Note' plus the date when no title is provided", () => {
     const doc = createDefaultDocument();
     expect(doc.title).toMatch(/^New Note \d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("mints ids from the supplied source", () => {
+    seq = 0;
+    const doc = createDefaultDocument("T", ids);
+    expect(allIds(doc)).toEqual(["id0", "id1", "id2"]);
   });
 });

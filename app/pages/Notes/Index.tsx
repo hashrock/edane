@@ -2,6 +2,7 @@ import { Head, Link, router } from "@inertiajs/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ContextMenu from "../../components/ContextMenu";
 import {
+  GlobeIcon,
   LinkIcon,
   MoreVerticalIcon,
   PencilIcon,
@@ -19,6 +20,7 @@ import { dateLocale, t } from "../../application/i18n";
 import { useLocale } from "../../components/useLocale";
 import { copyText } from "../../lib/clipboard";
 import type { SessionUser } from "../../user";
+import ServiceSwitcher from "../../components/ServiceSwitcher";
 
 /** コピー結果を出しておく時間（ms）。 */
 const FLASH_MS = 2500;
@@ -111,11 +113,13 @@ export default function NotesIndex({
       className={`mx-auto px-6 py-7 md:py-9 ${user ? "max-w-3xl" : "max-w-5xl"}`}
     >
       <Head title="Edane" />
-      <header className="anim-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-10">
+      {/* サービス切り替えは常にヘッダ右上の角に置く。狭い画面ではナビを 2 段目に回し、
+          切り替えはロゴと同じ 1 段目の右端に残す（order で並べ替える） */}
+      <header className="anim-header flex flex-wrap items-center gap-3 mb-10">
         <h1 className="text-xl font-bold tracking-tight">
           <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <div className="order-3 w-full flex items-center gap-2 sm:gap-3 flex-wrap sm:order-2 sm:w-auto sm:ml-auto">
           {user ? (
             <div className="flex items-center gap-3 text-sm text-slate-700">
               {user.avatarUrl && (
@@ -154,6 +158,8 @@ export default function NotesIndex({
             </a>
           )}
         </div>
+        {/* ログアウトと押し間違えないよう少し離す */}
+        <ServiceSwitcher className="order-2 ml-auto sm:order-3 sm:ml-2 text-slate-500 hover:text-slate-900" />
       </header>
 
       {!user && (
@@ -290,6 +296,19 @@ export default function NotesIndex({
               disabled: !menu.note.isPublic,
               disabledReason: privateNoteCopyReason(),
               onSelect: () => copyLink(menu.note),
+            },
+            {
+              // 公開した相手にどう見えるかを自分で確かめる導線（usertest #6）。
+              label: t("openPublicPage"),
+              icon: <GlobeIcon />,
+              disabled: !menu.note.isPublic,
+              disabledReason: privateNoteCopyReason(),
+              onSelect: () =>
+                window.open(
+                  publicNoteUrl(window.location.origin, menu.note.id),
+                  "_blank",
+                  "noopener"
+                ),
             },
             {
               label: menu.note.pinned ? t("menuUnpin") : t("menuPin"),

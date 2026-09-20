@@ -6,11 +6,11 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
-import { getSession, setSession, clearSession } from "./utils/session";
-import { getUserByToken } from "./utils/apiToken";
+import { authMiddleware, selectAuth } from "./auth";
+import { findUserByEmail, insertUser } from "./utils/userRepository";
+import { insertNote, insertPublication, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "./utils/crypto";
-import { resolveDevGuestPreference } from "./utils/devAuthBypass";
+import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
@@ -37,53 +37,24 @@ import {
 } from "./application/siteAi";
 import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
+import { scenarioRoutes } from "./scenarios";
+import { statsRoutes } from "./stats";
+import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
-
-const DEV_USER = {
-  id: "dev-user",
-  email: "dev@localhost",
-  name: "Dev User",
-  avatarUrl: "",
-};
 
 const app = new Hono<Env>();
 
-// --- Session middleware (with dev bypass) ---
-app.use("*", async (c, next) => {
-  if (c.env.DEV_BYPASS_AUTH) {
-    // Dev-only: preview the logged-out landing page while auth is bypassed.
-    // `?guest=1` flips into guest mode (persisted in a cookie so the LP's
-    // embedded /guest iframe is guest too); `?guest=0` flips back to Dev User.
-    const { guest, setCookieHeader } = resolveDevGuestPreference(
-      c.req.header("Cookie") || "",
-      new URL(c.req.url).searchParams.get("guest")
-    );
-    if (setCookieHeader) c.header("Set-Cookie", setCookieHeader);
-    if (guest) {
-      c.set("user", null);
-      return next();
-    }
-    const db = drizzle(c.env.DB);
-    const existing = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, DEV_USER.id))
-      .get();
-    if (!existing) {
-      await db.insert(users).values({
-        id: DEV_USER.id,
-        email: DEV_USER.email,
-        name: DEV_USER.name,
-        avatarUrl: DEV_USER.avatarUrl,
-      });
-    }
-    c.set("user", DEV_USER);
-    return next();
-  }
-  // Session cookie first, then Bearer token (used by the desktop app)
-  c.set("user", (await getSession(c)) || (await getUserByToken(c)));
-  return next();
-});
+// --- Signup stats for the repos.hashrock.info admin (Bearer STATS_TOKEN) ---
+// Mounted before the session middleware on purpose: it must not depend on
+// cookies or the AuthProvider at all. Everything lives in app/stats/.
+app.route("/api/stats", statsRoutes());
+
+// --- Session middleware ---
+// Who is signed in is decided by the AuthProvider selected from env (auth/):
+// the real session cookie in production, the dev bypass (Dev User /
+// impersonation) only when DEV_BYPASS_AUTH is set. Nothing here branches on
+// the request itself.
+app.use("*", authMiddleware(selectAuth));
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
@@ -97,11 +68,7 @@ app.get(
     if (!googleUser?.email) return c.redirect("/?error=auth");
 
     const db = drizzle(c.env.DB);
-    const existing = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, googleUser.email))
-      .get();
+    const existing = await findUserByEmail(db, googleUser.email);
 
     let userId: string;
     if (existing) {
@@ -115,16 +82,15 @@ app.get(
         .where(eq(users.id, existing.id));
     } else {
       userId = crypto.randomUUID();
-      await db.insert(users).values({
+      await insertUser(db, {
         id: userId,
         email: googleUser.email,
-        name: googleUser.name || null,
-        avatarUrl: googleUser.picture || null,
-        createdAt: new Date().toISOString(),
+        name: googleUser.name || "",
+        avatarUrl: googleUser.picture || "",
       });
     }
 
-    await setSession(c, {
+    await c.get("auth").signIn(c, {
       id: userId,
       email: googleUser.email,
       name: googleUser.name || "",
@@ -135,8 +101,8 @@ app.get(
   }
 );
 
-app.get("/auth/logout", (c) => {
-  clearSession(c);
+app.get("/auth/logout", async (c) => {
+  await c.get("auth").signOut(c);
   return c.redirect("/");
 });
 
@@ -491,13 +457,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await db.insert(nodePublications).values({
-    id,
-    userId: user.id,
-    noteId: note.id,
-    nodeId: body.nodeId,
-    createdAt,
-  });
+  await insertPublication(db, { id, userId: user.id, noteId: note.id, nodeId: body.nodeId, createdAt });
   return c.json({ id, nodeId: body.nodeId, createdAt }, 201);
 });
 
@@ -609,17 +569,15 @@ app.put("/api/sites/:pubId", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
 
   const updatedAt = new Date().toISOString();
-  const row = {
+  await upsertSite(db, {
+    publicationId: pubId,
+    userId: user.id,
     template: parsed.template,
     schema: parsed.schema,
     html: parsed.build.html,
     css: parsed.build.css,
     updatedAt,
-  };
-  await db
-    .insert(sites)
-    .values({ publicationId: pubId, userId: user.id, ...row })
-    .onConflictDoUpdate({ target: sites.publicationId, set: row });
+  });
   return c.json({ ok: true, updatedAt });
 });
 
@@ -661,6 +619,23 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
   } catch (e) {
     return c.json({ error: "AI request failed", detail: String(e) }, 502);
   }
+});
+
+// --- UI test scenarios: seed an isolated initial state and redirect to it ---
+// Public-safe (insert-only, current user's own data, no auth bypass); see
+// docs/ui-test-scenarios.md. Everything lives in app/scenarios/.
+app.route("/__scenarios", scenarioRoutes());
+
+// --- 404: a real page with a way back, not Hono's bare text (usertest #13) ---
+// Every `c.notFound()` in the routes above lands here.
+app.notFound((c) => {
+  const path = new URL(c.req.url).pathname;
+  // NotFoundHandler is typed as a text response; both bodies below are real
+  // Responses with status 404, the cast only satisfies that nominal type.
+  const res = wantsJsonNotFound(path, c.req.header("accept"))
+    ? c.json({ error: "Not found" }, 404)
+    : c.html(notFoundHtml(), 404);
+  return res as unknown as ReturnType<typeof c.notFound>;
 });
 
 // --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
@@ -760,23 +735,21 @@ const routes = app
       .json<{ title?: string; isPublic?: boolean; content?: string }>()
       .catch(() => ({}) as { title?: string; isPublic?: boolean; content?: string });
     const isPublic = body.isPublic ?? false;
-    const db = drizzle(c.env.DB);
     const id = crypto.randomUUID();
-    const now = new Date().toISOString();
     // Guest-mode imports arrive with their own serialized content; a plain
     // "new note" falls back to the starter topics.
-    const plain = body.content ?? "トピック1\nトピック2";
-    const content = await encodeNoteContentForStorage(plain, noteStorageMode(isPublic), c.env.ENCRYPTION_KEY);
-
-    await db.insert(notes).values({
-      id,
-      userId: user.id,
-      title: body.title || "Untitled",
-      content,
-      isPublic,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await insertNote(
+      drizzle(c.env.DB),
+      {
+        id,
+        userId: user.id,
+        title: body.title || "Untitled",
+        plainContent: body.content ?? "トピック1\nトピック2",
+        isPublic,
+        now: new Date().toISOString(),
+      },
+      c.env.ENCRYPTION_KEY
+    );
 
     return c.redirect(`/notes/${id}/edit`, 303);
   })

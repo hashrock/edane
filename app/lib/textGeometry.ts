@@ -21,7 +21,7 @@ import {
 const NODE_FONT_ITALIC = `italic ${NODE_FONT}`;
 let _measureCtx: CanvasRenderingContext2D | null | undefined;
 const _offsetCache = new Map<string, number[]>();
-let _emptyWidth = -1;
+const _emptyWidthCache = new Map<string, number>();
 
 function getMeasureCtx(): CanvasRenderingContext2D | null {
   if (_measureCtx === undefined) {
@@ -60,18 +60,25 @@ export function measureOffsets(text: string, font: string = NODE_FONT): number[]
   return offsets;
 }
 
-/** Width of the italic "empty" placeholder (measured once). */
-export function measureEmptyWidth(): number {
-  if (_emptyWidth >= 0) return _emptyWidth;
+/**
+ * Width of the italic placeholder an empty node paints (measured once per
+ * placeholder string — the string is the caller's, localized, so this layer
+ * stays free of the message catalog).
+ */
+export function measureEmptyWidth(placeholder: string): number {
+  const cached = _emptyWidthCache.get(placeholder);
+  if (cached !== undefined) return cached;
   const ctx = getMeasureCtx();
+  let width: number;
   if (ctx) {
     ctx.font = NODE_FONT_ITALIC;
-    _emptyWidth = ctx.measureText("empty").width;
+    width = ctx.measureText(placeholder).width;
     ctx.font = NODE_FONT;
   } else {
-    _emptyWidth = 40;
+    width = 40;
   }
-  return _emptyWidth;
+  _emptyWidthCache.set(placeholder, width);
+  return width;
 }
 
 export interface LineData {

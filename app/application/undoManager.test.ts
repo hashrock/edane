@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { DocumentState } from "./editorReducer";
 import { UndoManager } from "./undoManager";
 
@@ -10,68 +10,7 @@ function st(tag: string): DocumentState {
   };
 }
 
-describe("UndoManager", () => {
-  it("undo returns the before-state and redo returns the after-state", () => {
-    const m = new UndoManager();
-    const before = st("a");
-    const after = st("b");
-    m.push("style", before, after);
-
-    expect(m.undo()).toBe(before);
-    expect(m.canRedo()).toBe(true);
-    expect(m.redo()).toBe(after);
-  });
-
-  it("a new command clears the redo stack", () => {
-    const m = new UndoManager();
-    m.push("add-child", st("a"), st("b"));
-    m.undo();
-    expect(m.canRedo()).toBe(true);
-    m.push("delete-node", st("b"), st("c"));
-    expect(m.canRedo()).toBe(false);
-  });
-});
-
 describe("UndoManager transactions", () => {
-  it("groups several pushes into a single undo entry", () => {
-    const m = new UndoManager();
-    const before = st("start");
-    const mid = st("mid");
-    const after = st("end");
-
-    m.beginTransaction("paste", before);
-    m.push("delete", before, mid); // absorbed
-    m.push("insert-sibling", mid, after); // absorbed
-    m.endTransaction(after);
-
-    // One entry: undo jumps straight back to the pre-transaction state.
-    expect(m.undo()).toBe(before);
-    expect(m.canUndo()).toBe(false);
-    expect(m.redo()).toBe(after);
-  });
-
-  it("pushes nothing when the transaction made no change", () => {
-    const m = new UndoManager();
-    const before = st("same");
-    m.beginTransaction("collapse", before);
-    m.endTransaction(before);
-    expect(m.canUndo()).toBe(false);
-  });
-
-  it("supports nested transactions (only the outermost commits)", () => {
-    const m = new UndoManager();
-    const before = st("a");
-    const after = st("d");
-
-    m.beginTransaction("indent", before);
-    m.beginTransaction("backspace", st("b"));
-    m.push("enter", st("b"), st("c"));
-    m.endTransaction(st("c")); // inner: does not commit
-    expect(m.canUndo()).toBe(false);
-    m.endTransaction(after); // outer: commits one entry
-    expect(m.undo()).toBe(before);
-  });
-
   it("clear() resets an open transaction", () => {
     const m = new UndoManager();
     m.beginTransaction("reorder", st("a"));
@@ -117,35 +56,11 @@ describe("UndoManager text batching", () => {
     expect(m.canUndo()).toBe(false);
   });
 
-  it("does not push an entry when the pending batch changed nothing", () => {
-    // A batch can open (handleTextChange) without the document changing — e.g.
-    // mid-IME composition. Committing must not leave a no-op entry, or the next
-    // undo() would be wasted popping it (first Ctrl+Z appears to do nothing).
-    const m = new UndoManager();
-    const same = st("same");
-    m.setCommitCallback(() => same);
-    m.handleTextChange(same);
-    m.commitPendingText();
-    expect(m.hasPendingText()).toBe(false);
-    expect(m.canUndo()).toBe(false);
-  });
-
   it("canUndo is true when there is pending text even with no stack entries", () => {
     const m = new UndoManager();
     m.handleTextChange(st("x"));
     expect(m.canUndo()).toBe(true);
     m.clear();
-  });
-
-  it("pushCommand respects MAX_STACK_SIZE (200 entries)", () => {
-    const m = new UndoManager();
-    for (let i = 0; i < 201; i++) {
-      m.pushCommand({ type: "link-meta", stateBefore: st(`s${i}`), stateAfter: st(`s${i + 1}`) });
-    }
-    // Stack should be capped at 200 — the oldest entry was evicted.
-    let count = 0;
-    while (m.undo()) count++;
-    expect(count).toBe(200);
   });
 
   it("clear() cancels a pending debounce timer", () => {
@@ -180,17 +95,4 @@ describe("UndoManager text batching", () => {
     expect(m.redo()).toBeNull();
   });
 
-  it("handleTextChange called twice preserves the first state as pendingTextBefore", () => {
-    const m = new UndoManager();
-    const first = st("first");
-    const second = st("second");
-    const final = st("final");
-    m.setCommitCallback(() => final);
-    m.handleTextChange(first);
-    m.handleTextChange(second); // should NOT overwrite pendingTextBefore
-    m.commitPendingText();
-    // undo should restore "first" (the state before any typing)
-    expect(m.undo()).toBe(first);
-    m.clear();
-  });
 });

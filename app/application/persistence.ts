@@ -9,9 +9,11 @@
  *    single-root mind map, whose root text doubled as the note title (and
  *    which #135 briefly displayed as if its children were separate trees).
  *  - **v2 JSON** (current, see {@link CONTENT_FORMAT_VERSION}):
- *    `{ "version": 2, "roots": [node, …] }` — an honest forest. The title is
- *    NOT in the content: it is the note's own `title` column (sent alongside
- *    the content on every save), and {@link parseContent} joins the two.
+ *    `{ "version": 2, "roots": [node, …], "multiRoot"?: false }` — an honest
+ *    forest plus the note-level display preference (written only when
+ *    `false`). The title is NOT in the content: it is the note's own `title`
+ *    column (sent alongside the content on every save), and
+ *    {@link parseContent} joins the two.
  *
  * Reading accepts all three and always yields a `MindMapDocument`; writing
  * ({@link serializeDocument}) always emits v2. That is the whole migration:
@@ -24,7 +26,7 @@
  * written in; extra trees appear only when the user adds a root.
  */
 
-import type { MindMapDocument, MindMapModel } from "../domain/model";
+import type { IdSource, MindMapDocument, MindMapModel } from "../domain/model";
 import { ensureRoot, generateId, isStoredNodeType } from "../domain/model";
 import { t } from "./i18n";
 
@@ -32,7 +34,10 @@ import { t } from "./i18n";
 export const CONTENT_FORMAT_VERSION = 2;
 
 /** Convert indented plain text (one node per line) into a forest. */
-export function textToNodes(content: string): MindMapModel[] {
+export function textToNodes(
+  content: string,
+  nextId: IdSource = generateId
+): MindMapModel[] {
   const roots: MindMapModel[] = [];
   if (!content || content.trim() === "") return roots;
 
@@ -46,7 +51,7 @@ export function textToNodes(content: string): MindMapModel[] {
     const depth = line.search(/\S/);
     const text = line.trim();
     const newNode: MindMapModel = {
-      id: generateId(),
+      id: nextId(),
       text,
       children: [],
     };
@@ -66,10 +71,14 @@ export function textToNodes(content: string): MindMapModel[] {
  * carrying the title, with the lines as its subtree (the shape this format
  * was written in).
  */
-export function textToDocument(title: string, content: string): MindMapDocument {
+export function textToDocument(
+  title: string,
+  content: string,
+  nextId: IdSource = generateId
+): MindMapDocument {
   return {
     title,
-    roots: [{ id: generateId(), text: title, children: textToNodes(content) }],
+    roots: [{ id: nextId(), text: title, children: textToNodes(content, nextId) }],
   };
 }
 
@@ -98,14 +107,15 @@ export function textToDocument(title: string, content: string): MindMapDocument 
  */
 export function normalizeTree(
   value: unknown,
-  seen: Set<string>
+  seen: Set<string>,
+  nextId: IdSource = generateId
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   if (typeof v.text !== "string" || !Array.isArray(v.children)) return null;
 
   let id = typeof v.id === "string" ? v.id : "";
-  if (id === "" || seen.has(id)) id = generateId();
+  if (id === "" || seen.has(id)) id = nextId();
   seen.add(id);
 
   const node: MindMapModel = { id, text: v.text, children: [] };
@@ -129,7 +139,7 @@ export function normalizeTree(
   }
 
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen);
+    const normalized = normalizeTree(child, seen, nextId);
     if (normalized) node.children.push(normalized);
   }
   return node;
@@ -142,32 +152,36 @@ export function normalizeTree(
  *    root, id and subtree intact (so node publications that point at it keep
  *    resolving); its `text` doubled as the title and is used as such when no
  *    title is given.
+ * `multiRoot` (the per-note display preference) rides on the document in v2
+ * and rode on the v1 root node; only an explicit `false` is kept, either way.
  * Ids are unique across the WHOLE document (one `seen` set spans the roots).
  * Returns null when the value is neither shape.
  */
 export function normalizeDocument(
   value: unknown,
-  title: string | undefined
+  title: string | undefined,
+  nextId: IdSource = generateId
 ): MindMapDocument | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const seen = new Set<string>();
+  const multiRoot = v.multiRoot === false ? { multiRoot: false as const } : {};
 
   if (Array.isArray(v.roots)) {
     const roots: MindMapModel[] = [];
     for (const r of v.roots) {
-      const normalized = normalizeTree(r, seen);
+      const normalized = normalizeTree(r, seen, nextId);
       if (normalized) roots.push(normalized);
     }
-    return { title: title ?? "", roots };
+    return { title: title ?? "", roots, ...multiRoot };
   }
 
-  const legacyRoot = normalizeTree(value, seen);
+  const legacyRoot = normalizeTree(value, seen, nextId);
   if (!legacyRoot) return null;
   // The v1 root's text also served as the title; the note's own title (when
   // known) wins so that a title edited through the notes API isn't undone by
   // stale content. The node itself stays as the single root.
-  return { title: title || legacyRoot.text, roots: [legacyRoot] };
+  return { title: title || legacyRoot.text, roots: [legacyRoot], ...multiRoot };
 }
 
 /**
@@ -177,23 +191,24 @@ export function normalizeDocument(
  */
 export function parseContent(
   content: string | undefined,
-  title: string | undefined
+  title: string | undefined,
+  nextId: IdSource = generateId
 ): MindMapDocument {
   if (!content) {
-    return createDefaultDocument(title);
+    return createDefaultDocument(title, nextId);
   }
 
   try {
     const parsed = JSON.parse(content);
     // Validate the *whole* forest and repair duplicate/malformed ids, rather
     // than trusting a shallow shape check.
-    const normalized = normalizeDocument(parsed, title);
-    if (normalized) return ensureRoot(normalized);
+    const normalized = normalizeDocument(parsed, title, nextId);
+    if (normalized) return ensureRoot(normalized, nextId);
   } catch {
     // Not JSON, try legacy format
   }
 
-  return ensureRoot(textToDocument(title || "Mindmap", content));
+  return ensureRoot(textToDocument(title || "Mindmap", content, nextId), nextId);
 }
 
 /** Convert a node subtree to indented plain text. */
@@ -214,9 +229,14 @@ export function documentToText(doc: MindMapDocument): string {
 /**
  * Serialize the trees for the note's `content` column (v2). The title is
  * deliberately not included — it travels as the note's own `title` field.
+ * `multiRoot` is written only when `false` (absent = the default `true`).
  */
 export function serializeDocument(doc: MindMapDocument): string {
-  return JSON.stringify({ version: CONTENT_FORMAT_VERSION, roots: doc.roots });
+  return JSON.stringify({
+    version: CONTENT_FORMAT_VERSION,
+    ...(doc.multiRoot === false && { multiRoot: false }),
+    roots: doc.roots,
+  });
 }
 
 /** Default note title: "New Note" plus the current date (YYYY-MM-DD) */
@@ -228,21 +248,24 @@ export function defaultNoteTitle(now: Date = new Date()): string {
 }
 
 /** Default note: one tree root with two children. */
-export function createDefaultDocument(title?: string): MindMapDocument {
+export function createDefaultDocument(
+  title?: string,
+  nextId: IdSource = generateId
+): MindMapDocument {
   return {
     title: title || defaultNoteTitle(),
     roots: [
       {
-        id: generateId(),
+        id: nextId(),
         text: t("sampleUsage"),
         children: [
           {
-            id: generateId(),
+            id: nextId(),
             text: t("sampleClickToEdit"),
             children: [],
           },
           {
-            id: generateId(),
+            id: nextId(),
             text: t("sampleEnter"),
             children: [],
           },

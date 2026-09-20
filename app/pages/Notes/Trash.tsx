@@ -5,6 +5,7 @@ import { TrashIcon } from "../../components/icons";
 import type { SessionUser } from "../../user";
 import { dateLocale, t } from "../../application/i18n";
 import { useLocale } from "../../components/useLocale";
+import ServiceSwitcher from "../../components/ServiceSwitcher";
 
 type TrashedNote = {
   id: string;
@@ -41,9 +42,12 @@ export default function NotesTrash({
         <h1 className="text-xl font-bold tracking-tight">
           <img src="/logo.svg" alt="Edane" className="h-7 w-auto" />
         </h1>
-        {user.name && (
-          <span className="text-sm text-slate-500">{user.name}</span>
-        )}
+        <div className="flex items-center gap-3">
+          {user.name && (
+            <span className="text-sm text-slate-500">{user.name}</span>
+          )}
+          <ServiceSwitcher className="text-slate-500 hover:text-slate-900" />
+        </div>
       </header>
 
       <section>
