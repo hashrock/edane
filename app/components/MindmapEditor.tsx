@@ -1261,6 +1261,26 @@ export function MindmapEditorView({
             focusEditorSoon();
           },
         });
+        // Cut the branch out of its tree and make it a tree of its own — the
+        // menu equivalent of dragging it onto empty canvas, for the same
+        // deliberate "trees are only created on purpose" list. It is placed
+        // at its current layout anchor so the branch itself doesn't move;
+        // the old tree reflows around the hole (they may overlap until the
+        // user drags one away — see treeLayout).
+        structureGroup.push({
+          label: t("menuDetachBranch"),
+          onSelect: () => {
+            const laid = nodesRef.current.find((n) => n.id === nodeId);
+            if (!laid) return;
+            const next = dispatch(
+              { type: "placeBranchAt", nodeId, x: laid.x, y: laid.y },
+              "move-branch"
+            );
+            flashNodes([nodeId]);
+            if (noteId) saveNote(next.document.model);
+            focusEditorSoon();
+          },
+        });
       }
     }
     if (hasChildren) {

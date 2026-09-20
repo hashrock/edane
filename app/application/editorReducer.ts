@@ -134,8 +134,10 @@ export type EditorAction =
   // Drag & drop: move a whole subtree under a new parent (index = insertion
   // position among the parent's current children; absent = append).
   | { type: "moveBranch"; nodeId: string; newParentId: string; index?: number }
-  // Drag & drop onto empty canvas: put the node's tree at a free position. A
-  // nested node is detached and becomes a new root there.
+  // Put a tree at a free canvas position: dropping a ROOT on empty canvas
+  // (free placement), or the node menu's "detach as a new tree", which cuts a
+  // nested branch out of its tree and drops it at its current layout anchor.
+  // Dropping a NESTED node on empty canvas is a no-drop — see MindmapEditor.
   | { type: "placeBranchAt"; nodeId: string; x: number; y: number }
   // Context menu on empty canvas: a new blank root at that position, handed
   // straight into edit mode.
