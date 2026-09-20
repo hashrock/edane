@@ -28,7 +28,6 @@
 - **木（ルート）は意図してしか作れない**。作る手段は、空きキャンバスの右クリック →「ここにルートを追加」（`addRootAt`）、ルート直下の子の Shift+Tab（`dedentNode`）、`placeBranchAt`（ドメイン関数。UI からはルートの自由配置にしか使わない）。ルートに対する「兄弟を作る」操作（Enter・分割・ペースト・`insertSiblingAfter`・DnD の兄弟ゾーン）はすべて「子を作る」に読み替える（`addSiblingAfter` / `splitNode` / `insertNodes` が `locateNode` の `parent === null` で分岐。旧単一ルートと同じ扱い）。ネストしたノードを空き領域にドロップしても木にはならない（no-drop）。
 - ルート同士は `doc.roots` 上の兄弟。選択モードの ↑↓（`moveUpSiblingFirst` / `moveDownSiblingFirst`）はルート間を順に辿り、Alt+↑↓（`moveNodeUp` / `moveNodeDown`）はルートの順序を入れ替え、Backspace/Delete の連結（`mergeIntoPredecessor` / `mergeSuccessorInto`）は隣のルートと木を結合する。
 - 各木は canvas 上に自由配置できる。`MindMapModel.position`（ルートのみ有効、箱の左端x・縦中央y）を `treeLayout` が優先し、未配置の木は配置済みの木の縦の帯を避けて自動で縦に積む。ルートを空き領域にドロップすると `placeBranchAt` でそこに固定。自分のサブツリー上で離した場合はキャンセル。ノードをネストする経路（作成・分割・indent・ペースト・DnD）はすべて `nestUnder` を通り、そこで親を展開し `position` を捨てる。
-- **マルチルートはノートごとの表示上の好み**（`MindMapDocument.multiRoot === false`、既定 `true`）。エディタ右上の切り替え（`MultiRootToggle` → `setMultiRoot`）でノートに保存される（v2 `content` JSON の `multiRoot`。`false` のときだけ書く。専用の DB カラムは無い）。**不変条件ではない**: `false` にしても `addRootAt` は変わらず無条件に動く。効果は空きキャンバスの右クリックメニューから「ここにルートを追加」を隠すことだけで、他の経路（Shift+Tab や API 経由）で木が増えるのを止めはしない。既存の複数木を遡って1つにまとめることもしない。
 
 ### 保存形式とマイグレーション
 

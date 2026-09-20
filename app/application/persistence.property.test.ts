@@ -31,7 +31,6 @@ function expectWellFormedNode(node: MindMapModel) {
     if ("linkTitle" in n) expect(typeof n.linkTitle).toBe("string");
     if ("favicon" in n) expect(typeof n.favicon).toBe("string");
     if ("checked" in n) expect(typeof n.checked).toBe("boolean");
-    expect("multiRoot" in n).toBe(false); // lives on the document, never a node
     if ("position" in n) {
       expect(Number.isFinite(n.position!.x)).toBe(true);
       expect(Number.isFinite(n.position!.y)).toBe(true);
@@ -44,7 +43,6 @@ function expectWellFormedNode(node: MindMapModel) {
 function expectWellFormed(doc: MindMapDocument) {
   expectUniqueIds(doc);
   expect(typeof doc.title).toBe("string");
-  if ("multiRoot" in doc) expect(doc.multiRoot).toBe(false);
   doc.roots.forEach(expectWellFormedNode);
 }
 

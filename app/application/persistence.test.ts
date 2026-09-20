@@ -205,10 +205,12 @@ describe("parseContent", () => {
     expect(doc.roots[0]).toEqual({ id: "r", text: "Just a title", children: [] });
   });
 
-  it("v1 migration: an explicit multiRoot: false on the old root moves to the document", () => {
+  it("v1 migration: a legacy multiRoot flag on the old root is dropped", () => {
+    // #149 の単一/複数ツリー切り替えは廃止済み。古い content に残っていても
+    // 読み飛ばすだけで、ノードにも文書にも残さない。
     const v1 = { id: "r", text: "T", multiRoot: false, children: [{ id: "c", text: "C", children: [] }] };
     const doc = parseContent(JSON.stringify(v1), "T");
-    expect(doc.multiRoot).toBe(false);
+    expect("multiRoot" in doc).toBe(false);
     expect("multiRoot" in doc.roots[0]).toBe(false);
   });
 
@@ -308,12 +310,12 @@ describe("parseContent", () => {
     ]);
   });
 
-  it("keeps an explicit multiRoot: false and drops everything else (true is the default)", () => {
+  it("ignores a stored multiRoot flag (the single/multi-tree switch is gone)", () => {
     const withFlag = (multiRoot: unknown) =>
       JSON.stringify({ version: 2, multiRoot, roots: [{ id: "a", text: "a", children: [] }] });
-    expect(parseContent(withFlag(false), "ignored").multiRoot).toBe(false);
-    expect(parseContent(withFlag(true), "ignored").multiRoot).toBeUndefined();
-    expect(parseContent(withFlag("yes"), "ignored").multiRoot).toBeUndefined();
+    for (const flag of [false, true, "yes"]) {
+      expect("multiRoot" in parseContent(withFlag(flag), "ignored")).toBe(false);
+    }
   });
 
   it("preserves every declared NodeType through normalization", () => {
@@ -391,12 +393,6 @@ describe("serializeDocument", () => {
     expect(parsed.roots[0].id).toBe("r");
     expect(parsed).not.toHaveProperty("title");
     expect(parsed).not.toHaveProperty("multiRoot");
-  });
-
-  it("writes multiRoot only when it is false", () => {
-    const roots = [{ id: "r", text: "R", children: [] }];
-    expect(JSON.parse(serializeDocument({ title: "T", roots, multiRoot: false })).multiRoot).toBe(false);
-    expect(JSON.parse(serializeDocument({ title: "T", roots, multiRoot: true }))).not.toHaveProperty("multiRoot");
   });
 });
 

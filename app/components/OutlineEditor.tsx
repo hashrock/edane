@@ -7,7 +7,7 @@ import {
   useLayoutEffect,
 } from "react";
 import { Link, router } from "@inertiajs/react";
-import { findNode, isMultiRoot } from "../domain/model";
+import { findNode } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
 import { pasteCommand } from "../application/editorCommands";
 import { serializeDocument } from "../application/persistence";
@@ -32,7 +32,6 @@ import {
 } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
-import MultiRootToggle, { multiRootOnChange } from "./MultiRootToggle";
 import ViewControls from "./ViewControls";
 import SaveStatus from "./SaveStatus";
 import { TrashIcon } from "./icons";
@@ -381,16 +380,6 @@ export default function OutlineEditor({
             failure={saveFailure}
             onRetry={retrySave}
           />
-        )}
-        {/* The multi-tree switch governs a canvas-only gesture (right-click on
-            empty canvas); on a phone-width header it has no room and no use. */}
-        {noteId && !readOnly && (
-          <span className="hidden md:inline-flex">
-            <MultiRootToggle
-              multiRoot={isMultiRoot(model)}
-              onChange={multiRootOnChange(dispatch, saveNote)}
-            />
-          </span>
         )}
         {noteId && !readOnly && (
           <PublicityDropdown

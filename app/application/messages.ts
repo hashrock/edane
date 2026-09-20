@@ -254,10 +254,6 @@ export const MESSAGES_JA = {
   publishConfirmLabel: "公開する",
 
   // --- マルチルート切り替え ---
-  multiRootToggleOn: "複数ツリー",
-  multiRootToggleOff: "1ツリー",
-  multiRootToggleOnDesc: "空きキャンバスの右クリックで複数のツリーを作成できます",
-  multiRootToggleOffDesc: "このノートは1つのツリーとして扱います（右クリックからの追加を隠すだけの表示設定）",
 
   // --- 404 ページ（server.ts が MESSAGES_JA で直接描画） ---
   notFoundTitle: "ページが見つかりません",
@@ -602,10 +598,6 @@ export const MESSAGES_EN = {
   publishConfirmLabel: "Make public",
 
   // --- Multi-root toggle ---
-  multiRootToggleOn: "Multiple trees",
-  multiRootToggleOff: "Single tree",
-  multiRootToggleOnDesc: "Right-click empty canvas to create more than one tree",
-  multiRootToggleOffDesc: "Treats this note as a single tree (just hides the add-root menu)",
 
   // --- 404 page (rendered by server.ts from MESSAGES_JA) ---
   notFoundTitle: "Page not found",

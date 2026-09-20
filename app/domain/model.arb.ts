@@ -76,18 +76,10 @@ export const nodeArb: fc.Arbitrary<MindMapModel> = draftArb.map((d) =>
  * order.
  */
 export const modelArb: fc.Arbitrary<MindMapDocument> = fc
-  .record(
-    {
-      title: nodeTextArb,
-      roots: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
-      // Persistence round-trips only an explicit `false` — `true` is the
-      // implicit default and normalizeDocument drops it on parse (see
-      // persistence.ts), so the generator must never produce a literal
-      // `true` or the roundtrip property would see it vanish.
-      multiRoot: fc.constant(false as const),
-    },
-    { requiredKeys: ["title", "roots"] }
-  )
+  .record({
+    title: nodeTextArb,
+    roots: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
+  })
   .map(({ roots, ...rest }) => {
     const next = sequentialIds("n");
     return { ...rest, roots: roots.map((c) => assignIds(c, next, true)) };
