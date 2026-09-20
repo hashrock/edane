@@ -7,8 +7,9 @@ import type { MindmapTestApi } from "./MindmapEditor";
 
 /**
  * Tree roots are created only on purpose: right-click on empty canvas offers
- * "Add root here", and nothing else (Enter on a tree root, paste, drop) makes
- * one. See `isRoot` in domain/model.ts.
+ * "Add root here", right-click on a nested node offers "Detach as a new tree",
+ * and nothing else (Enter on a tree root, paste, drop) makes one. See `isRoot`
+ * in domain/model.ts.
  */
 
 const MODEL: MindMapDocument = {
@@ -120,14 +121,45 @@ describe("adding a tree root", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(menuButton("Add root here")).toBeUndefined();
   });
+});
 
-  it("offers nothing when the note is single-root and already has its one tree", async () => {
-    // A display preference only (MultiRootToggle / MindMapDocument.multiRoot):
-    // it hides this menu item, but doesn't stop addRootAt from working if
-    // reached another way — there's no invariant to enforce here.
-    const { rightClick } = await setup(false, { ...MODEL, multiRoot: false });
-    rightClick(60, 100);
+describe("detaching a branch", () => {
+  it("right-click on a nested node → 'Detach as a new tree' makes it a root where it already is", async () => {
+    const { rightClick } = await setup();
+    const before = await waitFor(() => api().getNodeRect("a1"));
+    const point = await waitFor(() => api().getNodeClickPoint("a1"));
+    rightClick(Math.round(point.x), Math.round(point.y));
+    const btn = await waitFor(() => menuButton("Detach as a new tree"));
+    btn.click();
+
+    await waitFor(() => api().getModel().roots.length === 2);
+    const model = api().getModel();
+    expect(model.roots[0].children).toEqual([]);
+    expect(model.roots[1].id).toBe("a1");
+    expect(model.roots[1].position).toBeDefined();
+
+    // The branch itself stays put: detaching cuts the link, it doesn't move
+    // the box (the old tree is what reflows).
+    const after = await waitFor(() => api().getNodeRect("a1"));
+    expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+    expect(
+      Math.abs(after.y + after.height / 2 - (before.y + before.height / 2))
+    ).toBeLessThan(2);
+  });
+
+  it("is not offered on a node that is already a tree root", async () => {
+    const { rightClick } = await setup();
+    const point = await waitFor(() => api().getNodeClickPoint("a"));
+    rightClick(Math.round(point.x), Math.round(point.y));
+    await waitFor(() => menuButton("Add child node"));
+    expect(menuButton("Detach as a new tree")).toBeUndefined();
+  });
+
+  it("offers nothing in read-only mode", async () => {
+    const { rightClick } = await setup(true);
+    const point = await waitFor(() => api().getNodeClickPoint("a1"));
+    rightClick(Math.round(point.x), Math.round(point.y));
     await new Promise((r) => setTimeout(r, 200));
-    expect(menuButton("Add root here")).toBeUndefined();
+    expect(menuButton("Detach as a new tree")).toBeUndefined();
   });
 });

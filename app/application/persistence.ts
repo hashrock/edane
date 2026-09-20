@@ -9,11 +9,9 @@
  *    single-root mind map, whose root text doubled as the note title (and
  *    which #135 briefly displayed as if its children were separate trees).
  *  - **v2 JSON** (current, see {@link CONTENT_FORMAT_VERSION}):
- *    `{ "version": 2, "roots": [node, …], "multiRoot"?: false }` — an honest
- *    forest plus the note-level display preference (written only when
- *    `false`). The title is NOT in the content: it is the note's own `title`
- *    column (sent alongside the content on every save), and
- *    {@link parseContent} joins the two.
+ *    `{ "version": 2, "roots": [node, …] }` — an honest forest. The title is
+ *    NOT in the content: it is the note's own `title` column (sent alongside
+ *    the content on every save), and {@link parseContent} joins the two.
  *
  * Reading accepts all three and always yields a `MindMapDocument`; writing
  * ({@link serializeDocument}) always emits v2. That is the whole migration:
@@ -152,8 +150,6 @@ export function normalizeTree(
  *    root, id and subtree intact (so node publications that point at it keep
  *    resolving); its `text` doubled as the title and is used as such when no
  *    title is given.
- * `multiRoot` (the per-note display preference) rides on the document in v2
- * and rode on the v1 root node; only an explicit `false` is kept, either way.
  * Ids are unique across the WHOLE document (one `seen` set spans the roots).
  * Returns null when the value is neither shape.
  */
@@ -165,7 +161,6 @@ export function normalizeDocument(
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const seen = new Set<string>();
-  const multiRoot = v.multiRoot === false ? { multiRoot: false as const } : {};
 
   if (Array.isArray(v.roots)) {
     const roots: MindMapModel[] = [];
@@ -173,7 +168,7 @@ export function normalizeDocument(
       const normalized = normalizeTree(r, seen, nextId);
       if (normalized) roots.push(normalized);
     }
-    return { title: title ?? "", roots, ...multiRoot };
+    return { title: title ?? "", roots };
   }
 
   const legacyRoot = normalizeTree(value, seen, nextId);
@@ -181,7 +176,7 @@ export function normalizeDocument(
   // The v1 root's text also served as the title; the note's own title (when
   // known) wins so that a title edited through the notes API isn't undone by
   // stale content. The node itself stays as the single root.
-  return { title: title || legacyRoot.text, roots: [legacyRoot], ...multiRoot };
+  return { title: title || legacyRoot.text, roots: [legacyRoot] };
 }
 
 /**
@@ -229,12 +224,10 @@ export function documentToText(doc: MindMapDocument): string {
 /**
  * Serialize the trees for the note's `content` column (v2). The title is
  * deliberately not included — it travels as the note's own `title` field.
- * `multiRoot` is written only when `false` (absent = the default `true`).
  */
 export function serializeDocument(doc: MindMapDocument): string {
   return JSON.stringify({
     version: CONTENT_FORMAT_VERSION,
-    ...(doc.multiRoot === false && { multiRoot: false }),
     roots: doc.roots,
   });
 }

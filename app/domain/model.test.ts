@@ -6,7 +6,6 @@ import {
   findInTree,
   locateNode,
   isRoot,
-  isMultiRoot,
   firstRootId,
   ensureRoot,
   setDocumentTitle,
@@ -129,12 +128,6 @@ describe("document helpers", () => {
     expect(next.title).toBe("New");
     expect(next.roots).toBe(model.roots);
     expect(model.title).toBe("Root");
-  });
-
-  it("isMultiRoot resolves absent to true and false to false", () => {
-    expect(isMultiRoot(sampleModel())).toBe(true);
-    expect(isMultiRoot({ ...sampleModel(), multiRoot: true })).toBe(true);
-    expect(isMultiRoot({ ...sampleModel(), multiRoot: false })).toBe(false);
   });
 
   it("addRootAt appends a placed root without touching the original", () => {

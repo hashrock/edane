@@ -187,7 +187,6 @@ const KINDS = {
   setChecked: true,
   insertNodes: true,
   setTitle: true,
-  setMultiRoot: true,
   replace: true,
 } satisfies Record<EditorAction["type"], true>;
 type Kind = keyof typeof KINDS;
@@ -354,8 +353,6 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)] };
     case "setTitle":
       return { type: kind, text };
-    case "setMultiRoot":
-      return { type: kind, value: flag };
     case "replace": {
       // Undo/redo: the document is swapped, the view is whatever it was. Half
       // the time the view points at a node of the SAME document (possibly one

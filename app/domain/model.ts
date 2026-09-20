@@ -113,16 +113,6 @@ export interface MindMapDocument {
   /** Note title. Edited in the header; not a node. */
   title: string;
   roots: MindMapModel[];
-  /**
-   * Per-note display preference — "this note is meant to stay a single
-   * tree" — surfaced by hiding the empty-canvas "add root" menu item
-   * ({@link isMultiRoot}); it is not an invariant, so `addRootAt` stays
-   * unconditional and existing multi-tree notes are never retroactively
-   * merged. Absent = `true` (multi-root, the default), so existing documents
-   * are unaffected and the common case adds no bytes (same trick as
-   * `StoredNodeType`).
-   */
-  multiRoot?: boolean;
 }
 
 // --- ID generation ---
@@ -204,11 +194,6 @@ export function locateNode(doc: MindMapDocument, id: string): NodeLocation | nul
  */
 export function isRoot(doc: MindMapDocument, nodeId: string): boolean {
   return doc.roots.some((r) => r.id === nodeId);
-}
-
-/** Resolves {@link MindMapDocument.multiRoot}'s absent-means-true default. */
-export function isMultiRoot(doc: MindMapDocument): boolean {
-  return doc.multiRoot !== false;
 }
 
 /** Append a blank tree root placed at a canvas position. */
