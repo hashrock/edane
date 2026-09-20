@@ -60,7 +60,7 @@ beforeEach(() => {
 describe("MindmapEditor single-node selection", () => {
   it("starts with the first top-level node selected and moves the single selection with arrows", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
 
     // Exactly one node is always selected; the first top-level node starts
@@ -102,7 +102,7 @@ describe("MindmapEditor single-node selection", () => {
   it("keeps the clicked node selected when the pointer jitters a few pixels", async () => {
     render(
       <MindmapEditor
-        initialContent={JSON.stringify(CHAIN_MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: CHAIN_MODEL.children })}
         initialTitle="Root"
       />
     );

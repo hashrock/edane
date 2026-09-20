@@ -9,14 +9,14 @@
  * - ID はすべて新規（`nextId`）。既存行を更新・削除する計画は存在しない。
  * - タイトルは `scenario-<name>-<tag>` で始まり、一覧で見分けられる。
  */
-import type { IdSource, MindMapModel } from "../domain/model";
+import type { IdSource, MindMapDocument } from "../domain/model";
 
 export interface PlannedNote {
   /** 計画内での役割（JSON 応答のキー。例: "main" / "pinned"） */
   key: string;
   id: string;
   title: string;
-  model: MindMapModel;
+  model: MindMapDocument;
   isPublic: boolean;
   pinned: boolean;
   trashed: boolean;

@@ -166,7 +166,6 @@ export const MESSAGES_JA = {
   outlineItem: "項目",
   imageUrlUnset: "画像URL未設定",
   emptyItem: "空の項目",
-  addFirstItem: "＋ 最初の項目を追加",
   moveUpTitle: "上へ移動",
   moveDownTitle: "下へ移動",
   addItem: "項目を追加",
@@ -345,7 +344,7 @@ export const MESSAGES_JA = {
   privateNotePublishReason:
     "非公開ノートのノードは公開できません。ノートを公開に切り替えてください。",
 
-  // --- 初期サンプルノート（createDefaultModel） ---
+  // --- 初期サンプルノート（createDefaultDocument） ---
   sampleUsage: "使い方",
   sampleClickToEdit: "ノードをクリックして編集",
   sampleEnter: "Enterで兄弟ノード追加",
@@ -516,7 +515,6 @@ export const MESSAGES_EN = {
   outlineItem: "Item",
   imageUrlUnset: "No image URL",
   emptyItem: "Empty item",
-  addFirstItem: "＋ Add the first item",
   moveUpTitle: "Move up",
   moveDownTitle: "Move down",
   addItem: "Add item",
@@ -695,7 +693,7 @@ export const MESSAGES_EN = {
   privateNotePublishReason:
     "Nodes of a private note can't be published. Switch the note to public first.",
 
-  // --- Initial sample note (createDefaultModel) ---
+  // --- Initial sample note (createDefaultDocument) ---
   sampleUsage: "How to use",
   sampleClickToEdit: "Click a node to edit",
   sampleEnter: "Enter adds a sibling node",

@@ -69,13 +69,14 @@ describe("MindmapEditor browser performance", () => {
     it(`char input & cursor movement in a ${SIZE}-node tree`, { timeout: 60000 }, async ({ annotate }) => {
       render(
         <MindmapEditor
-          initialContent={JSON.stringify(buildTree(SIZE))}
+          initialContent={JSON.stringify({ version: 2, roots: buildTree(SIZE).children })}
           initialTitle="Root"
         />
       );
 
-      // Wait until Konva is ready and the first redraw has completed. n0 is
-      // the document root (the title, not a canvas node); n1 is the first tree.
+      // Wait until Konva is ready and the first redraw has completed. n0's
+      // children are the document's roots (n0 itself is not passed), so n1 is
+      // the first tree.
       const point = await waitFor(() => api().getNodeClickPoint("n1"));
       await waitFor(() => api().getRedrawStats().redrawCount > 0);
 

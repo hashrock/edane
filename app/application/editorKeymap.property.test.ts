@@ -19,9 +19,8 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
   findNode,
-  findParentAndIndex,
+  locateNode,
   getFlatOrder,
-  isTopLevel,
   updateNodeText,
 } from "../domain/model";
 import { modelAndVisibleArb, modelArb, pick } from "../domain/model.arb";
@@ -160,11 +159,11 @@ describe("selection mode: arrows navigate or fold, for both arrowBehavior settin
 
           const order = getFlatOrder(model);
           const idx = order.indexOf(nodeId);
-          const info = findParentAndIndex(model, nodeId)!;
+          const loc = locateNode(model, nodeId)!;
           const stuck =
             layout === "canvas"
               ? up
-                ? isTopLevel(model, nodeId) && info.index === 0
+                ? loc.parent === null && loc.index === 0
                 : onTrailingEdge(model, nodeId)
               : up
                 ? idx === 0
@@ -198,7 +197,7 @@ describe("selection mode: arrows navigate or fold, for both arrowBehavior settin
           const nextNode = findNode(next.document.model, nodeId)!;
           const landedOnChild =
             next.view.activeNodeId !== nodeId &&
-            findParentAndIndex(next.document.model, next.view.activeNodeId!)!.parent.id === nodeId;
+            locateNode(next.document.model, next.view.activeNodeId!)!.parent?.id === nodeId;
 
           if (key === "ArrowRight") {
             if (!hasChildren) {
@@ -221,8 +220,8 @@ describe("selection mode: arrows navigate or fold, for both arrowBehavior settin
           }
 
           // ArrowLeft
-          const parentId = findParentAndIndex(model, nodeId)!.parent.id;
-          const climbsTo = isTopLevel(model, nodeId) ? nodeId : parentId;
+          // A root has no parent to climb to: ← leaves it where it is.
+          const climbsTo = locateNode(model, nodeId)!.parent?.id ?? nodeId;
           if (arrowBehavior === "collapse" && hasChildren && !node.collapsed) {
             expect(folded).toBe(true);
             expect(nextNode.collapsed).toBe(true);

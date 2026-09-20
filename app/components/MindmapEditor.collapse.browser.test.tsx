@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 
 // DFS order: a, a1, b (the root is the title, not a node)
 const MODEL: MindMapModel = {
@@ -37,15 +37,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-function findNode(m: MindMapModel, id: string): MindMapModel | null {
-  if (m.id === id) return m;
-  for (const c of m.children) {
-    const f = findNode(c, id);
-    if (f) return f;
-  }
-  return null;
-}
-
 beforeEach(() => {
   const style = document.createElement("style");
   style.textContent = `
@@ -58,7 +49,7 @@ beforeEach(() => {
 
 async function setup(model: MindMapModel = MODEL) {
   render(
-    <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+    <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: model.children })} initialTitle="Root" />
   );
   await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);

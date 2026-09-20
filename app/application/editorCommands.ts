@@ -16,7 +16,7 @@
  * predict the result exactly.
  */
 import {
-  firstNavigableId,
+  firstRootId,
   generateId,
   subtreeIds,
   type IdSource,
@@ -25,7 +25,7 @@ import {
 import type { EditorState } from "./editorReducer";
 import type { KeyEffect } from "./editorKeymap";
 import { markdownToModel } from "./markdown";
-import { textToModel } from "./persistence";
+import { textToNodes } from "./persistence";
 import { assertNever } from "../lib/assertNever";
 
 /** What is being pasted, after the clipboard has been decoded. */
@@ -48,7 +48,7 @@ interface PasteOptions {
 
 /** The node a paste lands on when nothing more specific is given. */
 function pasteTarget(state: EditorState): string {
-  return state.view.activeNodeId ?? firstNavigableId(state.document.model);
+  return state.view.activeNodeId ?? firstRootId(state.document.model);
 }
 
 /**
@@ -64,7 +64,7 @@ function pasteTarget(state: EditorState): string {
  *
  * Precondition (kept by planPaste): a node paste happens in SELECTION mode —
  * while editing, a paste is plain text at the caret. The outline layout does
- * paste indented text while editing; that is safe because textToModel never
+ * paste indented text while editing; that is safe because textToNodes never
  * yields a blank node, so exitEditing's blank-leaf cleanup has nothing to eat.
  */
 export function pasteCommand(
@@ -104,7 +104,7 @@ function pastedNodes(
 ): MindMapModel[] {
   if (source.kind === "text") {
     if (!source.text.trim()) return [];
-    return textToModel("_", source.text, nextId).children;
+    return textToNodes(source.text, nextId);
   }
   switch (source.mode) {
     case "decompose":
@@ -114,7 +114,7 @@ function pastedNodes(
       return text ? [{ id: nextId(), text, type: "markdown", children: [] }] : [];
     }
     case "plain":
-      return textToModel("_", source.text, nextId).children;
+      return textToNodes(source.text, nextId);
     default:
       return assertNever(source.mode);
   }

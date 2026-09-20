@@ -100,7 +100,7 @@ beforeEach(() => {
 describe("node max width (browser e2e)", () => {
   it("stops widening at the cap and grows downwards instead", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await ready();
 
@@ -124,7 +124,7 @@ describe("node max width (browser e2e)", () => {
 
   it("keeps the box identical between display and edit mode", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await ready();
 
@@ -142,7 +142,7 @@ describe("node max width (browser e2e)", () => {
 
   it("does not widen further as more text is typed", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await ready();
     await edit("long");
@@ -162,7 +162,7 @@ describe("node max width (browser e2e)", () => {
     // click → caret mapping directly.
     seedPrefs({ selectionMode: false });
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await ready();
 

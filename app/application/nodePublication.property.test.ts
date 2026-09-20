@@ -6,8 +6,8 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { findParentAndIndex, type MindMapModel } from "../domain/model";
-import { allIds, modelArb, pick } from "../domain/model.arb";
+import { locateNode, type MindMapModel } from "../domain/model";
+import { allIds, modelArb, nodeArb, pick } from "../domain/model.arb";
 import {
   canServePublication,
   nodePathTexts,
@@ -65,7 +65,7 @@ describe("publication URLs ↔ path", () => {
 describe("publishedNodeJson", () => {
   it("is exactly the allowlisted fields, recursively — no collapsed, no position", () => {
     fc.assert(
-      fc.property(modelArb, (model) => {
+      fc.property(nodeArb, (model) => {
         const expected = (n: MindMapModel): PublishedNode => {
           const out: PublishedNode = { id: n.id, text: n.text, children: n.children.map(expected) };
           for (const k of ["type", "fontSize", "bold", "linkTitle", "favicon", "checked"] as const) {
@@ -87,19 +87,14 @@ describe("publishedNodeJson", () => {
 });
 
 describe("nodePathTexts", () => {
-  it("is the ancestor chain's texts from the root down to the node; null for unknown ids", () => {
+  it("is the ancestor chain's texts from the tree root down to the node (no note title); null for unknown ids", () => {
     fc.assert(
       fc.property(modelArb, fc.nat(), (model, n) => {
         const nodeId = pick(allIds(model), n);
         const chain: string[] = [];
-        let id = nodeId;
-        for (;;) {
-          const info = findParentAndIndex(model, id);
-          if (!info) break;
-          chain.unshift(info.parent.children[info.index].text);
-          id = info.parent.id;
+        for (let loc = locateNode(model, nodeId); loc; loc = loc.parent ? locateNode(model, loc.parent.id) : null) {
+          chain.unshift(loc.siblings[loc.index].text);
         }
-        chain.unshift(model.text);
         expect(nodePathTexts(model, nodeId)).toEqual(chain);
         expect(nodePathTexts(model, "no-such-node")).toBeNull();
       })

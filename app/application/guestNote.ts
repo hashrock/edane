@@ -13,9 +13,9 @@ import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
 export const PENDING_NOTE_KEY = "edane:pending-note";
 
 export type PendingNote = {
-  /** Root-node text (used as the note title). */
+  /** Note title (the document's `title`). */
   title: string;
-  /** Serialized MindMapModel (JSON), stored verbatim as the note content. */
+  /** Serialized document content (see persistence.ts), stored verbatim. */
   content: string;
 };
 

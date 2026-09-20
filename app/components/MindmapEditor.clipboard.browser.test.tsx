@@ -53,7 +53,7 @@ beforeEach(() => {
 describe("MindmapEditor clipboard", () => {
   it("pastes multiline text as a node subtree", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getNodeClickPoint("a"));
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -75,18 +75,18 @@ describe("MindmapEditor clipboard", () => {
     await waitFor(() =>
       api()
         .getModel()
-        .children[0].children.some((c) => c.text === "X")
+        .roots[0].children.some((c) => c.text === "X")
     );
-    const a = api().getModel().children[0];
+    const a = api().getModel().roots[0];
     const x = a.children.find((c) => c.text === "X")!;
     expect(x.children[0]?.text).toBe("Y"); // indentation → child
     expect(a.children.some((c) => c.text === "Z")).toBe(true);
-    expect(api().getModel().children.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(api().getModel().roots.map((c) => c.id)).toEqual(["a", "b"]);
   });
 
   it("cuts a branch and pastes it as a child of the selected node", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     // The first top-level node "a" is selected on load (selection mode).
     await waitFor(() => api().getActiveNodeId() === "a");
@@ -105,7 +105,7 @@ describe("MindmapEditor clipboard", () => {
     await waitFor(() =>
       api()
         .getModel()
-        .children.every((c) => c.text !== "Alpha")
+        .roots.every((c) => c.text !== "Alpha")
     );
     await waitFor(() => api().getActiveNodeId() === "b");
 
@@ -117,7 +117,7 @@ describe("MindmapEditor clipboard", () => {
         cancelable: true,
       })
     );
-    const bNode = () => api().getModel().children.find((c) => c.id === "b")!;
+    const bNode = () => api().getModel().roots.find((c) => c.id === "b")!;
     await waitFor(() => bNode().children.some((c) => c.text === "Alpha"));
     const pasted = bNode().children.find((c) => c.text === "Alpha")!;
     expect(pasted.id).not.toBe("a"); // fresh id on paste
@@ -146,7 +146,7 @@ describe("MindmapEditor clipboard", () => {
       ],
     };
     render(
-      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: model.children })} initialTitle="Root" />
     );
     // The first top-level node "p" is selected on load.
     await waitFor(() => api().getActiveNodeId() === "p");
@@ -181,7 +181,7 @@ describe("MindmapEditor clipboard", () => {
     const pastedRoot = await waitFor(() =>
       api()
         .getModel()
-        .children.find((c) => c.id === "p")!
+        .roots.find((c) => c.id === "p")!
         .children.find((c) => c.text === "Parent")
     );
     expect(pastedRoot.id).not.toBe("p"); // fresh id
@@ -205,7 +205,7 @@ describe("MindmapEditor clipboard", () => {
       ],
     };
     render(
-      <MindmapEditor initialContent={JSON.stringify(model)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: model.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);

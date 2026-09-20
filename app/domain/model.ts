@@ -1,6 +1,16 @@
 /**
  * Domain layer: pure tree model and operations.
  * No framework or rendering dependencies.
+ *
+ * Two shapes live here:
+ *  - {@link MindMapModel} — a NODE (with its subtree). Every editable thing on
+ *    the canvas / in the outline is one of these.
+ *  - {@link MindMapDocument} — the DOCUMENT: an ordered forest of nodes
+ *    (`roots`) plus the note title. The title is not a node; it is edited in
+ *    the header and persisted as the note's own title, never as a tree entry.
+ *
+ * All mutations take a document and return a NEW document (or the same
+ * reference when the operation is a no-op, where documented).
  */
 import { closedStringSet } from "./isKeyOf";
 
@@ -47,7 +57,7 @@ export { STORED_NODE_TYPES };
 /** Every `NodeType`, the default first. */
 export const NODE_TYPES: NodeType[] = ["text", ...STORED_NODE_TYPES];
 
-/** Tree node model (stored as JSON) */
+/** Tree node (stored as JSON). */
 export interface MindMapModel {
   id: string;
   text: string;
@@ -77,28 +87,42 @@ export interface MindMapModel {
   /**
    * Canvas position of this node's tree, world coordinates of the box's left
    * edge (x) and vertical centre (y) — the same point the layout assigns.
-   * Only meaningful on a top-level node (see {@link topLevelNodes}): a placed
+   * Only meaningful on a ROOT (see {@link MindMapDocument.roots}): a placed
    * tree stays where the user dropped it, an unplaced one is auto-stacked
-   * below the others. Ignored (and dropped by `moveBranch`) once the node is
-   * nested under another.
+   * below the others. Dropped by every operation that nests the node under
+   * another (`moveBranch`, `indentNode`, …).
    */
   position?: NodePosition;
-  /**
-   * Meaningful only on the root (the invisible note-level container, see
-   * {@link topLevelNodes}). A per-note display preference — "this note is
-   * meant to stay a single tree" — surfaced by hiding the empty-canvas
-   * "add root" menu item ({@link isMultiRoot}); it is not an invariant, so
-   * `addRootAt` stays unconditional and existing multi-tree notes are never
-   * retroactively merged. Absent = `true` (multi-root, the default), so
-   * existing documents are unaffected and the common case adds no bytes
-   * (same trick as `StoredNodeType`).
-   */
-  multiRoot?: boolean;
 }
 
 export interface NodePosition {
   x: number;
   y: number;
+}
+
+/**
+ * The document: an ordered forest. Each root is an independent tree drawn on
+ * the canvas (freely placeable, see {@link MindMapModel.position}) and listed
+ * at depth 0 in the outline.
+ *
+ * Invariant: `roots` is never empty — there would be nothing to select and no
+ * way to start typing. `parseContent` and the editor reducer restore it with
+ * {@link ensureRoot} after any operation that could empty it.
+ */
+export interface MindMapDocument {
+  /** Note title. Edited in the header; not a node. */
+  title: string;
+  roots: MindMapModel[];
+  /**
+   * Per-note display preference — "this note is meant to stay a single
+   * tree" — surfaced by hiding the empty-canvas "add root" menu item
+   * ({@link isMultiRoot}); it is not an invariant, so `addRootAt` stays
+   * unconditional and existing multi-tree notes are never retroactively
+   * merged. Absent = `true` (multi-root, the default), so existing documents
+   * are unaffected and the common case adds no bytes (same trick as
+   * `StoredNodeType`).
+   */
+  multiRoot?: boolean;
 }
 
 // --- ID generation ---
@@ -113,36 +137,114 @@ export function generateId(): string {
   return crypto.randomUUID();
 }
 
+// --- Cloning ---
+
+/** Deep-copy a node subtree. */
+export function cloneModel(node: MindMapModel): MindMapModel {
+  return JSON.parse(JSON.stringify(node));
+}
+
+/** Deep-copy a document. */
+export function cloneDocument(doc: MindMapDocument): MindMapDocument {
+  return JSON.parse(JSON.stringify(doc));
+}
+
 // --- Tree queries ---
 
-export function cloneModel(model: MindMapModel): MindMapModel {
-  return JSON.parse(JSON.stringify(model));
-}
-
-export function findNode(
-  model: MindMapModel,
-  id: string
-): MindMapModel | null {
-  if (model.id === id) return model;
-  for (const child of model.children) {
-    const found = findNode(child, id);
+/** Find a node by id inside ONE subtree (the given node included). */
+export function findInTree(node: MindMapModel, id: string): MindMapModel | null {
+  if (node.id === id) return node;
+  for (const child of node.children) {
+    const found = findInTree(child, id);
     if (found) return found;
   }
   return null;
 }
 
-export function findParentAndIndex(
-  model: MindMapModel,
-  id: string
-): { parent: MindMapModel; index: number } | null {
-  for (let i = 0; i < model.children.length; i++) {
-    if (model.children[i].id === id) {
-      return { parent: model, index: i };
+/** Find a node by id anywhere in the document (any root, any depth). */
+export function findNode(doc: MindMapDocument, id: string): MindMapModel | null {
+  for (const root of doc.roots) {
+    const found = findInTree(root, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Where a node sits: its parent (null for a root), the array it is an element
+ * of (`parent.children`, or `doc.roots` for a root) and its index there.
+ * `siblings` is the live array of the document passed in, so a caller holding
+ * a clone can splice it directly.
+ */
+export interface NodeLocation {
+  parent: MindMapModel | null;
+  siblings: MindMapModel[];
+  index: number;
+}
+
+export function locateNode(doc: MindMapDocument, id: string): NodeLocation | null {
+  function walk(parent: MindMapModel | null, siblings: MindMapModel[]): NodeLocation | null {
+    for (let i = 0; i < siblings.length; i++) {
+      if (siblings[i].id === id) return { parent, siblings, index: i };
+      const found = walk(siblings[i], siblings[i].children);
+      if (found) return found;
     }
-    const found = findParentAndIndex(model.children[i], id);
-    if (found) return found;
+    return null;
   }
-  return null;
+  return walk(null, doc.roots);
+}
+
+/**
+ * Is `nodeId` one of the document's roots? Roots are created only on purpose
+ * (context menu on empty canvas → {@link addRootAt}, or an explicit outdent /
+ * drag out of a tree); every "add a sibling" path that ordinary typing hits
+ * (Enter, split, paste) treats a root like the classic single mind-map root —
+ * the new node becomes its child — so a tree never appears as a side effect
+ * of typing.
+ */
+export function isRoot(doc: MindMapDocument, nodeId: string): boolean {
+  return doc.roots.some((r) => r.id === nodeId);
+}
+
+/** Resolves {@link MindMapDocument.multiRoot}'s absent-means-true default. */
+export function isMultiRoot(doc: MindMapDocument): boolean {
+  return doc.multiRoot !== false;
+}
+
+/** Append a blank tree root placed at a canvas position. */
+export function addRootAt(
+  doc: MindMapDocument,
+  newNode: MindMapModel,
+  position: NodePosition
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  cloned.roots.push({ ...newNode, position: { ...position } });
+  return cloned;
+}
+
+/**
+ * Id every "nothing else to focus on" fallback lands on: the first root.
+ * Relies on the non-empty `roots` invariant (see {@link MindMapDocument}).
+ */
+export function firstRootId(doc: MindMapDocument): string {
+  return doc.roots[0].id;
+}
+
+/**
+ * Restore the non-empty `roots` invariant. Returns the document unchanged
+ * when it already has a root, otherwise a copy with one blank root.
+ */
+export function ensureRoot(
+  doc: MindMapDocument,
+  nextId: IdSource = generateId
+): MindMapDocument {
+  if (doc.roots.length > 0) return doc;
+  return { ...doc, roots: [{ id: nextId(), text: "", children: [] }] };
+}
+
+/** Replace the title. Returns a new document. */
+export function setDocumentTitle(doc: MindMapDocument, title: string): MindMapDocument {
+  return { ...doc, title };
 }
 
 /**
@@ -163,74 +265,11 @@ export function visibleChildrenOf(node: MindMapModel): VisibleChildren {
 }
 
 /**
- * The root is the note itself, not a node: it holds the title (edited in the
- * header) and its children are the top-level nodes, which the canvas and the
- * outline present as independent trees ("multi-root"). The root is never
- * visible, navigable or editable as a node — every traversal that produces a
- * visible/navigable set ({@link getFlatOrder}, `flattenToNodes`,
- * `outlineRows`) starts from `topLevelNodes` instead of the root.
+ * DFS order of node IDs (navigation order): root by root, each with its
+ * visible descendants. Descendants of a collapsed node are skipped so
+ * keyboard navigation never lands on a hidden node.
  */
-export function topLevelNodes(model: MindMapModel): MindMapModel[] {
-  return model.children;
-}
-
-/**
- * Is `nodeId` a top-level node (a tree root)? Tree roots are created only on
- * purpose (context menu on empty canvas → {@link addRootAt}); every "add a
- * sibling" path (Enter, split, paste) treats a top-level node the way the old
- * single root was treated — the new node becomes its child — so a root never
- * appears as a side effect of ordinary typing.
- */
-export function isTopLevel(model: MindMapModel, nodeId: string): boolean {
-  return model.children.some((c) => c.id === nodeId);
-}
-
-/** Resolves {@link MindMapModel.multiRoot}'s absent-means-true default. */
-export function isMultiRoot(model: MindMapModel): boolean {
-  return model.multiRoot !== false;
-}
-
-/** Add a blank tree root placed at a canvas position. */
-export function addRootAt(
-  model: MindMapModel,
-  newNode: MindMapModel,
-  position: NodePosition
-): MindMapModel {
-  const cloned = cloneModel(model);
-  cloned.children.push({ ...newNode, position: { ...position } });
-  return cloned;
-}
-
-/**
- * Id every "nothing else to focus on" fallback lands on: the first top-level
- * node. Falls back to the root id only for a childless root (which the editor
- * never produces — see `ensureTopLevelNode`), so callers never get an id that
- * doesn't exist.
- */
-export function firstNavigableId(model: MindMapModel): string {
-  return model.children[0]?.id ?? model.id;
-}
-
-/**
- * A document must always have at least one top-level node, or there would be
- * nothing to select and no way to start typing. Returns the model unchanged
- * when it already has one, otherwise a copy with a blank top-level node.
- */
-export function ensureTopLevelNode(
-  model: MindMapModel,
-  nextId: IdSource = generateId
-): MindMapModel {
-  if (model.children.length > 0) return model;
-  return { ...model, children: [{ id: nextId(), text: "", children: [] }] };
-}
-
-/**
- * DFS order of node IDs (navigation order), starting at the top-level nodes —
- * the root is not part of it (see {@link topLevelNodes}). Descendants of a
- * collapsed node are skipped so keyboard navigation never lands on a hidden
- * node.
- */
-export function getFlatOrder(model: MindMapModel): string[] {
+export function getFlatOrder(doc: MindMapDocument): string[] {
   const result: string[] = [];
   function walk(node: MindMapModel) {
     result.push(node.id);
@@ -238,56 +277,41 @@ export function getFlatOrder(model: MindMapModel): string[] {
     if (vis.kind === "none") return;
     for (const child of vis.children) walk(child);
   }
-  for (const top of topLevelNodes(model)) walk(top);
+  for (const root of doc.roots) walk(root);
   return result;
 }
 
-/** Map of node id → depth (root = 0). */
-export function getNodeDepths(model: MindMapModel): Map<string, number> {
+/** Map of node id → depth (roots = 0). */
+export function getNodeDepths(doc: MindMapDocument): Map<string, number> {
   const depths = new Map<string, number>();
   function walk(node: MindMapModel, depth: number) {
     depths.set(node.id, depth);
     for (const child of node.children) walk(child, depth + 1);
   }
-  walk(model, 0);
+  for (const root of doc.roots) walk(root, 0);
   return depths;
 }
 
-// --- Tree mutations (all return new model) ---
-
-export function updateNodeText(
-  model: MindMapModel,
-  nodeId: string,
-  text: string
-): MindMapModel {
-  const cloned = cloneModel(model);
-  const node = findNode(cloned, nodeId);
-  if (node) node.text = text;
-  return cloned;
-}
+// --- Tree mutations (all return a new document) ---
 
 /**
  * Attach `node` under `parent` at `index` (default: last), IN PLACE on an
  * already-cloned tree. The one place the two rules of nesting live:
- *  - the destination is expanded (unless it is the invisible root): content
- *    must never be created or moved into a hidden slot, or the focus would
- *    land on a node nobody can see (see visibleChildrenOf);
- *  - the node's canvas `position` (which only a top-level tree has) is
- *    dropped, so a stale one can't resurface when it is later dedented back
- *    to the top level.
+ *  - the destination is expanded: content must never be created or moved
+ *    into a hidden slot, or the focus would land on a node nobody can see
+ *    (see visibleChildrenOf);
+ *  - the node's canvas `position` (which only a root has) is dropped, so a
+ *    stale one can't resurface when it is later dedented back to a root.
  * Every path that nests a node — creation, split, indent, paste, drag & drop
  * — goes through this, so a new path can't forget either rule.
  */
 export function nestUnder(
   parent: MindMapModel,
   node: MindMapModel,
-  index: number = parent.children.length,
-  rootId?: string
+  index: number = parent.children.length
 ): void {
-  if (parent.id !== rootId) {
-    parent.collapsed = false;
-    delete node.position;
-  }
+  parent.collapsed = false;
+  delete node.position;
   parent.children.splice(index, 0, node);
 }
 
@@ -296,44 +320,58 @@ export function subtreeIds(node: MindMapModel): string[] {
   return [node.id, ...node.children.flatMap(subtreeIds)];
 }
 
-export function addSiblingAfter(
-  model: MindMapModel,
-  afterId: string,
-  newNode: MindMapModel
-): MindMapModel {
-  const cloned = cloneModel(model);
-  // The root and the tree roots take the new node as a child instead (see
-  // isTopLevel): siblings of a tree root would be new trees.
-  if (cloned.id === afterId || isTopLevel(cloned, afterId)) {
-    nestUnder(findNode(cloned, afterId)!, { ...newNode }, undefined, cloned.id);
-    return cloned;
-  }
-  const result = findParentAndIndex(cloned, afterId);
-  if (!result) return cloned;
-  nestUnder(result.parent, { ...newNode }, result.index + 1, cloned.id);
+export function updateNodeText(
+  doc: MindMapDocument,
+  nodeId: string,
+  text: string
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const node = findNode(cloned, nodeId);
+  if (node) node.text = text;
   return cloned;
 }
 
-/** Set a node's kind. Returns a new model. `text` is stored as absent. */
+/**
+ * Insert `newNode` right after `afterId` among its siblings. A root takes the
+ * new node as its LAST CHILD instead (see {@link isRoot}): a sibling of a root
+ * would be a new tree.
+ */
+export function addSiblingAfter(
+  doc: MindMapDocument,
+  afterId: string,
+  newNode: MindMapModel
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, afterId);
+  if (!loc) return cloned;
+  if (loc.parent === null) {
+    nestUnder(loc.siblings[loc.index], { ...newNode });
+    return cloned;
+  }
+  nestUnder(loc.parent, { ...newNode }, loc.index + 1);
+  return cloned;
+}
+
+/** Set a node's kind. Returns a new document. `text` is stored as absent. */
 export function setNodeType(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   type: NodeType
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const node = findNode(cloned, nodeId);
   if (!node) return cloned;
   node.type = type === "text" ? undefined : type;
   return cloned;
 }
 
-/** Set a text node's formatting (font size / bold). Returns a new model. */
+/** Set a text node's formatting (font size / bold). Returns a new document. */
 export function setNodeStyle(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   style: { fontSize?: number | null; bold?: boolean }
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const node = findNode(cloned, nodeId);
   if (node) {
     if (style.fontSize !== undefined) {
@@ -348,13 +386,13 @@ export function setNodeStyle(
   return cloned;
 }
 
-/** Set a link node's fetched metadata (title / favicon). Returns a new model. */
+/** Set a link node's fetched metadata (title / favicon). Returns a new document. */
 export function setLinkMeta(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   meta: { linkTitle?: string; favicon?: string | null }
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const node = findNode(cloned, nodeId);
   if (node) {
     if (meta.linkTitle !== undefined) {
@@ -372,14 +410,14 @@ export function setLinkMeta(
 /**
  * Set a node's task checkbox. `null` REMOVES it — the node stops being a task
  * rather than becoming an open one, mirroring how setNodeStyle's `null` clears
- * a font size back to absent. Returns a new model.
+ * a font size back to absent. Returns a new document.
  */
 export function setChecked(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   checked: boolean | null
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const node = findNode(cloned, nodeId);
   if (node) {
     if (checked === null) delete node.checked;
@@ -403,13 +441,13 @@ export function nextCheckedState(checked: boolean | undefined): boolean {
   return checked === false;
 }
 
-/** Toggle (or set) a node's collapsed flag. Returns a new model. */
+/** Toggle (or set) a node's collapsed flag. Returns a new document. */
 export function toggleCollapse(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   collapsed?: boolean
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const node = findNode(cloned, nodeId);
   if (node) node.collapsed = collapsed ?? !node.collapsed;
   return cloned;
@@ -417,66 +455,69 @@ export function toggleCollapse(
 
 /** Append newNode as parent's last child. */
 export function addChildToNode(
-  model: MindMapModel,
+  doc: MindMapDocument,
   parentId: string,
   newNode: MindMapModel
-): MindMapModel {
-  const cloned = cloneModel(model);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
   const parent = findNode(cloned, parentId);
   if (!parent) return cloned;
-  // Under the root it becomes a tree (keeps its position); anywhere else it
-  // is nested (see nestUnder).
-  nestUnder(parent, { ...newNode }, undefined, cloned.id);
+  nestUnder(parent, { ...newNode });
   return cloned;
 }
 
-/** Remove a node. Children are promoted to the parent level. */
+/**
+ * Remove a node. Children are promoted to the node's level (a root's children
+ * become roots in its place).
+ */
 export function removeNode(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): MindMapModel {
-  const cloned = cloneModel(model);
-  if (cloned.id === nodeId) return cloned;
-  const result = findParentAndIndex(cloned, nodeId);
-  if (!result) return cloned;
-  const removed = result.parent.children.splice(result.index, 1)[0];
-  result.parent.children.splice(result.index, 0, ...removed.children);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  if (!loc) return cloned;
+  const removed = loc.siblings.splice(loc.index, 1)[0];
+  loc.siblings.splice(loc.index, 0, ...removed.children);
   return cloned;
 }
 
 /**
  * Detach a node together with its WHOLE subtree (unlike removeNode, children
- * are NOT promoted). Returns the new model and the removed subtree as an
- * independent clone. The root cannot be detached → { model, removed: null }.
+ * are NOT promoted). Returns the new document and the removed subtree as an
+ * independent clone. Unknown id → { doc, removed: null }. Detaching the last
+ * root leaves `roots` empty — callers restore the invariant with
+ * {@link ensureRoot}.
  */
 export function detachBranch(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): { model: MindMapModel; removed: MindMapModel | null } {
-  if (model.id === nodeId) return { model, removed: null };
-  const cloned = cloneModel(model);
-  const result = findParentAndIndex(cloned, nodeId);
-  if (!result) return { model: cloned, removed: null };
-  const [removed] = result.parent.children.splice(result.index, 1);
-  return { model: cloned, removed };
+): { doc: MindMapDocument; removed: MindMapModel | null } {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  if (!loc) return { doc: cloned, removed: null };
+  const [removed] = loc.siblings.splice(loc.index, 1);
+  return { doc: cloned, removed };
 }
 
 /**
- * Where focus should land after `nodeId` (found in `model`, the pre-detach
- * state) is gone from `newModel`: its flat-order predecessor if it still
- * exists there, else the first navigable node.
+ * Where focus should land after `nodeId` (found in `doc`, the pre-detach
+ * state) is gone from `newDoc`: its flat-order predecessor if it still exists
+ * there, else the first root. When the last root was the one detached there
+ * is nothing left to land on: `nodeId` is returned as-is, and the caller's
+ * {@link ensureRoot} step (see editorReducer) supplies the blank root that
+ * takes the focus instead.
  */
 export function landOnPredecessor(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
-  newModel: MindMapModel
+  newDoc: MindMapDocument
 ): string {
-  const order = getFlatOrder(model);
+  const order = getFlatOrder(doc);
   const idx = order.indexOf(nodeId);
   const prevId = idx > 0 ? order[idx - 1] : null;
-  return prevId && findNode(newModel, prevId)
-    ? prevId
-    : firstNavigableId(newModel);
+  if (prevId && findNode(newDoc, prevId)) return prevId;
+  return newDoc.roots.length > 0 ? firstRootId(newDoc) : nodeId;
 }
 
 /**
@@ -497,148 +538,143 @@ export function cloneWithNewIds(
 }
 
 /**
- * Put a tree at a free canvas position. A top-level node just gets the
- * position; a nested node is detached from its parent (with its subtree) and
- * appended as a new top-level tree there — this is how dragging a branch out
- * into empty space creates a new root. Returns the same reference when the
- * node is the root or doesn't exist.
+ * Put a tree at a free canvas position. A root just gets the position; a
+ * nested node is detached from its parent (with its subtree) and appended as a
+ * new root there — this is how dragging a branch out into empty space would
+ * create a new tree. Returns the same reference when the node doesn't exist.
  */
 export function placeBranchAt(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   position: NodePosition
-): MindMapModel {
-  if (model.id === nodeId) return model;
-  if (!findNode(model, nodeId)) return model;
-  const cloned = cloneModel(model);
-  const info = findParentAndIndex(cloned, nodeId)!;
-  const node = info.parent.children[info.index];
-  if (info.parent.id !== cloned.id) {
-    info.parent.children.splice(info.index, 1);
-    cloned.children.push(node);
+): MindMapDocument {
+  if (!findNode(doc, nodeId)) return doc;
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId)!;
+  const node = loc.siblings[loc.index];
+  if (loc.parent !== null) {
+    loc.siblings.splice(loc.index, 1);
+    cloned.roots.push(node);
   }
   node.position = { x: position.x, y: position.y };
   return cloned;
 }
 
 /**
- * Indent: make node the last child of its previous sibling. Expands the
- * sibling first if it was collapsed — like addChildToNode/moveBranch's
- * callers, this must never move content into a hidden destination (see
+ * Indent: make node the last child of its previous sibling (for a root: of
+ * the previous root, which merges the two trees). Expands the sibling first
+ * if it was collapsed — like addChildToNode/moveBranch's callers, this must
+ * never move content into a hidden destination (see
  * {@link visibleChildrenOf}); the sibling being collapsed doesn't hide
  * itself, so the node being indented could otherwise vanish from
  * `getFlatOrder` while still being the active node.
  */
 export function indentNode(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): MindMapModel {
-  const cloned = cloneModel(model);
-  if (cloned.id === nodeId) return cloned;
-  const result = findParentAndIndex(cloned, nodeId);
-  if (!result || result.index === 0) return cloned;
-  const node = result.parent.children[result.index];
-  const prevSibling = result.parent.children[result.index - 1];
-  result.parent.children.splice(result.index, 1);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  if (!loc || loc.index === 0) return cloned;
+  const node = loc.siblings[loc.index];
+  const prevSibling = loc.siblings[loc.index - 1];
+  loc.siblings.splice(loc.index, 1);
   nestUnder(prevSibling, node);
   return cloned;
 }
 
-/** Dedent: move node to parent's level, after parent. */
+/**
+ * Dedent: move node to its parent's level, right after the parent. A child of
+ * a root therefore becomes a new root (an explicit outdent is one of the
+ * deliberate ways to create a tree). A root itself has nowhere to go → no-op.
+ */
 export function dedentNode(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): MindMapModel {
-  const cloned = cloneModel(model);
-  if (cloned.id === nodeId) return cloned;
-  const result = findParentAndIndex(cloned, nodeId);
-  if (!result) return cloned;
-  const grandResult = findParentAndIndex(cloned, result.parent.id);
-  if (!grandResult) return cloned;
-  const node = result.parent.children[result.index];
-  result.parent.children.splice(result.index, 1);
-  grandResult.parent.children.splice(grandResult.index + 1, 0, node);
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  if (!loc || loc.parent === null) return cloned;
+  const grand = locateNode(cloned, loc.parent.id)!;
+  const node = loc.siblings[loc.index];
+  loc.siblings.splice(loc.index, 1);
+  grand.siblings.splice(grand.index + 1, 0, node);
   return cloned;
 }
 
 /**
- * Reorder: swap a node with its previous sibling (moves it up among siblings).
- * Depth is unchanged — only sibling order changes. Returns the SAME model
- * reference when the move is impossible (root, or already the first child), so
+ * Reorder: swap a node with its previous sibling (moves it up among siblings;
+ * for a root, among the roots). Depth is unchanged. Returns the SAME document
+ * reference when the move is impossible (unknown id, or already first), so
  * callers can treat identity as "no-op" and skip undo/save bookkeeping.
  */
-export function moveNodeUp(model: MindMapModel, nodeId: string): MindMapModel {
-  if (model.id === nodeId) return model;
-  const result = findParentAndIndex(model, nodeId);
-  if (!result || result.index === 0) return model;
-  const cloned = cloneModel(model);
-  const { parent, index } = findParentAndIndex(cloned, nodeId)!;
-  const arr = parent.children;
-  [arr[index - 1], arr[index]] = [arr[index], arr[index - 1]];
+export function moveNodeUp(doc: MindMapDocument, nodeId: string): MindMapDocument {
+  const loc = locateNode(doc, nodeId);
+  if (!loc || loc.index === 0) return doc;
+  const cloned = cloneDocument(doc);
+  const { siblings, index } = locateNode(cloned, nodeId)!;
+  [siblings[index - 1], siblings[index]] = [siblings[index], siblings[index - 1]];
   return cloned;
 }
 
 /**
  * Reorder: swap a node with its next sibling (moves it down among siblings).
- * Mirror of moveNodeUp; returns the SAME reference when it's the last child or
- * the root.
+ * Mirror of moveNodeUp; returns the SAME reference when it's already last.
  */
-export function moveNodeDown(model: MindMapModel, nodeId: string): MindMapModel {
-  if (model.id === nodeId) return model;
-  const result = findParentAndIndex(model, nodeId);
-  if (!result || result.index >= result.parent.children.length - 1) return model;
-  const cloned = cloneModel(model);
-  const { parent, index } = findParentAndIndex(cloned, nodeId)!;
-  const arr = parent.children;
-  [arr[index + 1], arr[index]] = [arr[index], arr[index + 1]];
+export function moveNodeDown(doc: MindMapDocument, nodeId: string): MindMapDocument {
+  const loc = locateNode(doc, nodeId);
+  if (!loc || loc.index >= loc.siblings.length - 1) return doc;
+  const cloned = cloneDocument(doc);
+  const { siblings, index } = locateNode(cloned, nodeId)!;
+  [siblings[index + 1], siblings[index]] = [siblings[index], siblings[index + 1]];
   return cloned;
 }
 
 /**
  * Reparent/reorder: move a node together with its WHOLE subtree under a new
- * parent. `index` is the insertion position in the new parent's children as
- * they are BEFORE the move (undefined = append); a same-parent move compensates
- * for the slot freed by the removal. Returns the SAME model reference when the
- * move is impossible or a no-op — root move, dropping on itself or one of its
- * own descendants, unknown ids, or a position identical to the current one —
- * so callers can treat identity as "skip undo/save".
+ * parent node. `index` is the insertion position in the new parent's children
+ * as they are BEFORE the move (undefined = append); a same-parent move
+ * compensates for the slot freed by the removal. A root moved this way stops
+ * being a tree (its canvas position is dropped). Returns the SAME document
+ * reference when the move is impossible or a no-op — dropping on itself or
+ * one of its own descendants, unknown ids, or a position identical to the
+ * current one — so callers can treat identity as "skip undo/save".
  */
 export function moveBranch(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   newParentId: string,
   index?: number
-): MindMapModel {
-  if (model.id === nodeId || nodeId === newParentId) return model;
-  const node = findNode(model, nodeId);
-  if (!node) return model;
+): MindMapDocument {
+  if (nodeId === newParentId) return doc;
+  const node = findNode(doc, nodeId);
+  if (!node) return doc;
   // The new parent must not live inside the moved subtree (cycle guard).
-  if (findNode(node, newParentId)) return model;
-  const newParent = findNode(model, newParentId);
-  if (!newParent) return model;
-  const cur = findParentAndIndex(model, nodeId);
-  if (!cur) return model;
+  if (findInTree(node, newParentId)) return doc;
+  const newParent = findNode(doc, newParentId);
+  if (!newParent) return doc;
+  const cur = locateNode(doc, nodeId)!;
 
   // No-op positions: already the last child on an append, or an index that
   // resolves to the node's current slot.
-  if (cur.parent.id === newParentId) {
-    const last = cur.parent.children.length - 1;
-    if (index === undefined && cur.index === last) return model;
+  if (cur.parent?.id === newParentId) {
+    const last = cur.siblings.length - 1;
+    if (index === undefined && cur.index === last) return doc;
     if (index !== undefined && (index === cur.index || index === cur.index + 1))
-      return model;
+      return doc;
   }
 
-  const cloned = cloneModel(model);
-  const { parent, index: removedIndex } = findParentAndIndex(cloned, nodeId)!;
-  const [moved] = parent.children.splice(removedIndex, 1);
+  const cloned = cloneDocument(doc);
+  const from = locateNode(cloned, nodeId)!;
+  const [moved] = from.siblings.splice(from.index, 1);
   const target = findNode(cloned, newParentId)!;
   if (index === undefined) {
-    nestUnder(target, moved, undefined, cloned.id);
+    nestUnder(target, moved);
   } else {
     // Same-parent move: the removal shifted later slots down by one.
-    const shift = parent.id === newParentId && removedIndex < index ? 1 : 0;
+    const shift = from.parent?.id === newParentId && from.index < index ? 1 : 0;
     const at = Math.max(0, Math.min(index - shift, target.children.length));
-    nestUnder(target, moved, at, cloned.id);
+    nestUnder(target, moved, at);
   }
   return cloned;
 }
@@ -649,50 +685,49 @@ export function moveBranch(
  * is often the deepest leaf of an unrelated sibling subtree, so the text would
  * splice into a foreign branch and the node's children would be orphaned up to
  * the grandparent). The predecessor is:
- *   - the node's previous sibling if it has one — the node's text is appended
- *     to that sibling and the node's children become the sibling's trailing
- *     children (expanding the sibling first if it was collapsed, so the
- *     merged-in children stay visible — see {@link indentNode}); or
+ *   - the node's previous sibling if it has one (for a root: the previous
+ *     root, joining the two trees) — the node's text is appended to that
+ *     sibling and the node's children become the sibling's trailing children
+ *     (expanding the sibling first if it was collapsed, so the merged-in
+ *     children stay visible — see {@link indentNode}); or
  *   - otherwise the node's parent — the text is appended to the parent and the
  *     node's children take the node's former slot (as `removeNode` would). The
  *     parent can't be collapsed here: a collapsed node hides its own
  *     descendants (including `node`, which is being merged), so `node`
  *     couldn't have been reachable/active in the first place.
- * The root is not a node (it's the title), so neither the root itself nor the
- * first top-level node has a predecessor → returns null (caller treats as
- * no-op).
+ * The first root has neither → returns null (caller treats as no-op).
  *
- * Returns the new model, the id the caret should land on (the merge target) and
- * the caret offset (the target's text length *before* the merge).
+ * Returns the new document, the id the caret should land on (the merge target)
+ * and the caret offset (the target's text length *before* the merge).
  */
 export function mergeIntoPredecessor(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): { model: MindMapModel; targetId: string; caretPos: number } | null {
-  if (model.id === nodeId) return null;
-  const cloned = cloneModel(model);
-  const info = findParentAndIndex(cloned, nodeId);
-  if (!info) return null;
-  if (info.parent.id === cloned.id && info.index === 0) return null;
-  const node = info.parent.children[info.index];
+): { doc: MindMapDocument; targetId: string; caretPos: number } | null {
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  if (!loc) return null;
+  const node = loc.siblings[loc.index];
 
-  if (info.index > 0) {
+  if (loc.index > 0) {
     // Merge into the previous sibling; children trail the sibling's own.
-    const target = info.parent.children[info.index - 1];
+    const target = loc.siblings[loc.index - 1];
     target.collapsed = false;
     const caretPos = target.text.length;
     target.text += node.text;
     target.children.push(...node.children);
-    info.parent.children.splice(info.index, 1);
-    return { model: cloned, targetId: target.id, caretPos };
+    loc.siblings.splice(loc.index, 1);
+    return { doc: cloned, targetId: target.id, caretPos };
   }
 
+  if (loc.parent === null) return null; // the first root: nothing before it
+
   // First child: merge into the parent; the node's children take its slot.
-  const target = info.parent;
+  const target = loc.parent;
   const caretPos = target.text.length;
   target.text += node.text;
-  info.parent.children.splice(info.index, 1, ...node.children);
-  return { model: cloned, targetId: target.id, caretPos };
+  loc.siblings.splice(loc.index, 1, ...node.children);
+  return { doc: cloned, targetId: target.id, caretPos };
 }
 
 /**
@@ -700,19 +735,20 @@ export function mergeIntoPredecessor(
  * successor up into it. Mirror of {@link mergeIntoPredecessor}. The successor
  * is the node's first *visible* child if it has one (its grandchildren then
  * take that child's slot), otherwise the node's next sibling (whose children
- * are appended to the node). When the node has neither — its DFS-successor
- * would live in an unrelated, shallower subtree — the SAME model reference is
- * returned so callers can treat identity as "no-op".
+ * are appended to the node; for a root that is the next root, joining the two
+ * trees). When the node has neither — its DFS-successor would live in an
+ * unrelated, shallower subtree — the SAME document reference is returned so
+ * callers can treat identity as "no-op".
  */
 export function mergeSuccessorInto(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
-): MindMapModel {
-  const node = findNode(model, nodeId);
-  if (!node || !hasStructuralSuccessor(model, nodeId)) return model;
+): MindMapDocument {
+  const node = findNode(doc, nodeId);
+  if (!node || !hasStructuralSuccessor(doc, nodeId)) return doc;
 
   if (!node.collapsed && node.children.length > 0) {
-    const cloned = cloneModel(model);
+    const cloned = cloneDocument(doc);
     const target = findNode(cloned, nodeId)!;
     const clonedChild = target.children[0];
     target.text += clonedChild.text;
@@ -720,19 +756,19 @@ export function mergeSuccessorInto(
     return cloned;
   }
 
-  const info = findParentAndIndex(model, nodeId);
-  if (info && info.index < info.parent.children.length - 1) {
-    const cloned = cloneModel(model);
-    const ci = findParentAndIndex(cloned, nodeId)!;
-    const target = ci.parent.children[ci.index];
-    const clonedSibling = ci.parent.children[ci.index + 1];
+  const loc = locateNode(doc, nodeId)!;
+  if (loc.index < loc.siblings.length - 1) {
+    const cloned = cloneDocument(doc);
+    const cl = locateNode(cloned, nodeId)!;
+    const target = cl.siblings[cl.index];
+    const clonedSibling = cl.siblings[cl.index + 1];
     target.text += clonedSibling.text;
     target.children.push(...clonedSibling.children);
-    ci.parent.children.splice(ci.index + 1, 1);
+    cl.siblings.splice(cl.index + 1, 1);
     return cloned;
   }
 
-  return model;
+  return doc;
 }
 
 /**
@@ -740,27 +776,32 @@ export function mergeSuccessorInto(
  * visible child or a next sibling (see {@link mergeSuccessorInto})? Cheap
  * (no clone), so the keymap can ask before deciding to handle the key.
  */
-export function hasStructuralSuccessor(model: MindMapModel, nodeId: string): boolean {
-  const node = findNode(model, nodeId);
+export function hasStructuralSuccessor(doc: MindMapDocument, nodeId: string): boolean {
+  const node = findNode(doc, nodeId);
   if (!node) return false;
   if (!node.collapsed && node.children.length > 0) return true;
-  const info = findParentAndIndex(model, nodeId);
-  return !!info && info.index < info.parent.children.length - 1;
+  const loc = locateNode(doc, nodeId);
+  return !!loc && loc.index < loc.siblings.length - 1;
 }
 
-/** Split a node at cursor position */
+/**
+ * Split a node at cursor position. The suffix becomes a following sibling —
+ * for a root, its FIRST CHILD instead (a sibling of a root would be a new
+ * tree; see {@link isRoot}).
+ */
 export function splitNode(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string,
   atPos: number,
   nextId: IdSource = generateId
-): { model: MindMapModel; newNodeId: string } {
+): { doc: MindMapDocument; newNodeId: string } {
   const newNodeId = nextId();
-  const cloned = cloneModel(model);
-  const node = findNode(cloned, nodeId);
-  // Fall back to root id (always exists) so the postcondition holds:
-  // newNodeId must identify a node present in the returned model.
-  if (!node) return { model: cloned, newNodeId: cloned.id };
+  const cloned = cloneDocument(doc);
+  const loc = locateNode(cloned, nodeId);
+  // Fall back to the first root (always exists) so the postcondition holds:
+  // newNodeId must identify a node present in the returned document.
+  if (!loc) return { doc: cloned, newNodeId: firstRootId(cloned) };
+  const node = loc.siblings[loc.index];
 
   if (atPos <= 0) {
     // Splitting at the very start inserts an empty sibling *before* the node
@@ -768,15 +809,13 @@ export function splitNode(
     // identity (referenced by image/link/publish URLs) must never migrate to a
     // new id just because a blank line was inserted above it.
     const newNode: MindMapModel = { id: newNodeId, text: "", children: [] };
-    if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
-      // Root / tree root: no sibling (that would be a new tree); prepend an
-      // empty child instead.
-      nestUnder(node, newNode, 0, cloned.id);
+    if (loc.parent === null) {
+      // Root: no sibling (that would be a new tree); prepend an empty child.
+      nestUnder(node, newNode, 0);
     } else {
-      const result = findParentAndIndex(cloned, nodeId);
-      if (result) result.parent.children.splice(result.index, 0, newNode);
+      loc.siblings.splice(loc.index, 0, newNode);
     }
-    return { model: cloned, newNodeId };
+    return { doc: cloned, newNodeId };
   }
 
   const textAfter = node.text.substring(atPos);
@@ -784,13 +823,10 @@ export function splitNode(
   // The suffix becomes a following sibling; the node keeps its id and children.
   const newNode: MindMapModel = { id: newNodeId, text: textAfter, children: [] };
 
-  if (cloned.id === nodeId || isTopLevel(cloned, nodeId)) {
-    nestUnder(node, newNode, 0, cloned.id);
+  if (loc.parent === null) {
+    nestUnder(node, newNode, 0);
   } else {
-    const result = findParentAndIndex(cloned, nodeId);
-    if (result) {
-      result.parent.children.splice(result.index + 1, 0, newNode);
-    }
+    loc.siblings.splice(loc.index + 1, 0, newNode);
   }
-  return { model: cloned, newNodeId };
+  return { doc: cloned, newNodeId };
 }

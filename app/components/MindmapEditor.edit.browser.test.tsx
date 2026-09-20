@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 import {
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
@@ -51,15 +51,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-/** Depth-first lookup of a node by id in the current model. */
-function findNode(node: MindMapModel, id: string): MindMapModel | null {
-  if (node.id === id) return node;
-  for (const child of node.children) {
-    const hit = findNode(child, id);
-    if (hit) return hit;
-  }
-  return null;
-}
 
 /**
  * Pin a preference for one test. Built on DEFAULT_PREFERENCES so a case only
@@ -110,11 +101,11 @@ async function edit(nodeId: string) {
 }
 
 describe("MindmapEditor edit operations (browser e2e)", () => {
-  const tree = () => api().getModel().children[0];
+  const tree = () => api().getModel().roots[0];
 
   it("Enter at end of a node adds an empty sibling and focuses it", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: NESTED.children })} initialTitle="Root" />
     );
     await edit("a");
 
@@ -133,7 +124,7 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
 
   it("Enter mid-text splits the node into two", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: NESTED.children })} initialTitle="Root" />
     );
     await edit("a");
 
@@ -149,18 +140,18 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
 
   it("Enter on a tree root adds a child, never a sibling tree", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await edit("a");
 
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("{Enter}");
 
-    await waitFor(() => api().getModel().children[0].children.length === 1);
+    await waitFor(() => api().getModel().roots[0].children.length === 1);
     const model = api().getModel();
-    expect(model.children.map((c) => c.id)).toEqual(["a", "b"]);
-    expect(model.children[0].children[0].text).toBe("");
-    expect(api().getActiveNodeId()).toBe(model.children[0].children[0].id);
+    expect(model.roots.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(model.roots[0].children[0].text).toBe("");
+    expect(api().getActiveNodeId()).toBe(model.roots[0].children[0].id);
   });
 
   it("Tab indents a node under its previous sibling; Shift+Tab outdents it", async () => {
@@ -168,7 +159,7 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
     // here. The default ("insert-child") is covered in the prefs test file.
     seedPrefs({ tabBehavior: "indent" });
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await edit("b");
 
@@ -179,20 +170,20 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
       return alpha != null && alpha.children.length === 1;
     });
     let model = api().getModel();
-    expect(model.children.length).toBe(1); // only "Alpha" left at top level
+    expect(model.roots.length).toBe(1); // only "Alpha" left as a root
     expect(findNode(model, "a")!.children[0].id).toBe("b");
 
     // Shift+Tab: "Bravo" goes back up to the top level.
     await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
-    await waitFor(() => api().getModel().children.length === 2);
+    await waitFor(() => api().getModel().roots.length === 2);
     model = api().getModel();
     expect(findNode(model, "a")!.children.length).toBe(0);
-    expect(model.children.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(model.roots.map((c) => c.id)).toEqual(["a", "b"]);
   });
 
   it("typing replaces a fully-selected node's text (select-then-type rename)", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await edit("a");
 
@@ -207,47 +198,47 @@ describe("MindmapEditor edit operations (browser e2e)", () => {
 
   it("Backspace at the start of an empty node deletes it", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(NESTED)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: NESTED.children })} initialTitle="Root" />
     );
     await edit("a");
 
     // Add an empty sibling after "Alpha", landing inside it.
     await userEvent.keyboard("{End}{Enter}");
-    await waitFor(() => api().getModel().children[0].children.length === 3);
+    await waitFor(() => api().getModel().roots[0].children.length === 3);
 
     // Backspace at pos 0 of the empty node removes it and lands on "Alpha".
     await userEvent.keyboard("{Backspace}");
-    await waitFor(() => api().getModel().children[0].children.length === 2);
+    await waitFor(() => api().getModel().roots[0].children.length === 2);
     expect(api().getActiveNodeId()).toBe("a");
   });
 
   it("Backspace at start of a non-empty node merges it into the previous node", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await edit("b");
 
     // Caret at the very start of "Bravo", then Backspace merges into "Alpha".
     await userEvent.keyboard("{Home}");
     await userEvent.keyboard("{Backspace}");
-    await waitFor(() => api().getModel().children.length === 1);
+    await waitFor(() => api().getModel().roots.length === 1);
     const model = api().getModel();
-    expect(model.children[0].text).toBe("AlphaBravo");
+    expect(model.roots[0].text).toBe("AlphaBravo");
     expect(api().getActiveNodeId()).toBe("a");
   });
 
   it("Delete at the end of a node merges the next node into it", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await edit("a");
 
     // Caret at end of "Alpha", then Delete pulls "Bravo" in.
     await userEvent.keyboard("{End}");
     await userEvent.keyboard("{Delete}");
-    await waitFor(() => api().getModel().children.length === 1);
+    await waitFor(() => api().getModel().roots.length === 1);
     const model = api().getModel();
-    expect(model.children[0].text).toBe("AlphaBravo");
+    expect(model.roots[0].text).toBe("AlphaBravo");
     expect(api().getActiveNodeId()).toBe("a");
   });
 });

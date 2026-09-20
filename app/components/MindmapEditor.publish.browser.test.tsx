@@ -112,7 +112,7 @@ describe("node web publication (browser e2e)", () => {
     render(
       <MindmapEditor
         noteId="note-1"
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={true}
       />
@@ -155,7 +155,7 @@ describe("node web publication (browser e2e)", () => {
     render(
       <MindmapEditor
         noteId="note-1"
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={false}
       />
@@ -175,7 +175,7 @@ describe("node web publication (browser e2e)", () => {
 
   it("guest editor (no noteId): the menu item is absent", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
 

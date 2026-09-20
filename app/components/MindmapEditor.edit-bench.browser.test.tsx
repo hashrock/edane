@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 
 /**
  * Large-tree edit-operation benchmark (headless Chromium).
@@ -94,14 +94,15 @@ describe("MindmapEditor large-tree edit benchmark", () => {
     it(`edit operations in a ${SIZE}-node tree`, { timeout: 120000 }, async ({ annotate }) => {
       render(
         <MindmapEditor
-          initialContent={JSON.stringify(buildTree(SIZE))}
+          initialContent={JSON.stringify({ version: 2, roots: buildTree(SIZE).children })}
           initialTitle="Root"
         />
       );
 
-      // Wait until Konva is ready and the first redraw has completed. n0 is
-      // the document root (the title, not a canvas node); n1 is the first tree
-      // and is already selected on load, so Space drops straight into edit mode.
+      // Wait until Konva is ready and the first redraw has completed. n0's
+      // children are the document's roots (n0 itself is not passed), so n1 is
+      // the first tree and is already selected on load — Space drops straight
+      // into edit mode.
       await waitFor(() => api().getNodeClickPoint("n1"));
       await waitFor(() => api().getRedrawStats().redrawCount > 0);
       await waitFor(() => api().getActiveNodeId() === "n1");
@@ -172,9 +173,12 @@ describe("MindmapEditor large-tree edit benchmark", () => {
   }
 });
 
-/** Total node count in the tree. */
-function countNodes(node: MindMapModel): number {
-  let n = 1;
-  for (const c of node.children) n += countNodes(c);
-  return n;
+/** Total node count in the document. */
+function countNodes(doc: MindMapDocument): number {
+  const inTree = (node: MindMapModel): number => {
+    let n = 1;
+    for (const c of node.children) n += inTree(c);
+    return n;
+  };
+  return doc.roots.reduce((n, r) => n + inTree(r), 0);
 }

@@ -1,10 +1,10 @@
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type { EditorAction, EditorState, UndoType } from "../application/editorReducer";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 
 interface Props {
-  /** Current `MindMapModel.multiRoot` (absent counts as `true`). */
+  /** Current `MindMapDocument.multiRoot` (absent counts as `true`). */
   multiRoot: boolean;
   onChange: (next: boolean) => void;
 }
@@ -16,7 +16,7 @@ interface Props {
  */
 export function multiRootOnChange(
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState,
-  saveNote: (model: MindMapModel) => void
+  saveNote: (model: MindMapDocument) => void
 ): (next: boolean) => void {
   return (next) => {
     const state = dispatch({ type: "setMultiRoot", value: next });

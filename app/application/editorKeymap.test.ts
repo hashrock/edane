@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type { EditorState } from "./editorReducer";
 import {
   buildKeymap,
@@ -15,12 +15,11 @@ import {
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
 
-/** Root → A(children: A1) , B */
-function model(): MindMapModel {
+/** Roots: A(children: A1) , B */
+function model(): MindMapDocument {
   return {
-    id: "root",
-    text: "Root",
-    children: [
+    title: "Root",
+    roots: [
       { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
       { id: "b", text: "B", children: [] },
     ],
@@ -28,7 +27,7 @@ function model(): MindMapModel {
 }
 
 function state(
-  m: MindMapModel,
+  m: MindMapDocument,
   activeNodeId: string | null,
   editing: boolean,
   editingText = ""
@@ -122,7 +121,7 @@ describe("preference: arrowBehavior = collapse", () => {
 
   it("Right expands a collapsed parent (and saves)", () => {
     const m = model();
-    m.children[0].collapsed = true;
+    m.roots[0].collapsed = true;
     const r = run(state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(r.dispatched).toEqual([{ type: "toggleCollapse", nodeId: "a" }]);
     expect(r.kinds).toEqual(["dispatch", "save"]);
@@ -232,7 +231,7 @@ describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
   it("flips an open task done, and a done task back open", () => {
     const withTask = (checked: boolean) => {
       const m = model();
-      m.children[0].checked = checked;
+      m.roots[0].checked = checked;
       return m;
     };
     const open = run(state(withTask(false), "a", false), {
@@ -268,7 +267,7 @@ describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
 
   it("does nothing on a kind that shows no checkbox", () => {
     const m = model();
-    m.children[0].type = "image";
+    m.roots[0].type = "image";
     const r = run(state(m, "a", false), {
       key: "d",
       metaKey: true,
@@ -357,7 +356,7 @@ describe("reorder and bold (cross-mode)", () => {
 
   it("Cmd+B has no effect on a non-text node", () => {
     const m = model();
-    m.children[0].type = "image";
+    m.roots[0].type = "image";
     const r = run(state(m, "a", true), { key: "b", metaKey: true });
     expect(r.kinds).toEqual([]);
     expect(r.handled).toBe(true); // still swallowed
@@ -543,7 +542,7 @@ describe("preference: tabBehavior = insert-child", () => {
 
   it("Tab is swallowed on an empty node (no empty-under-empty)", () => {
     const m = model();
-    m.children[0].text = ""; // "a" is now blank
+    m.roots[0].text = ""; // "a" is now blank
     const r = run(state(m, "a", false), { key: "Tab" }, {}, prefs);
     expect(r.kinds).toEqual([]);
     expect(r.handled).toBe(true);
@@ -589,7 +588,7 @@ describe("preference: arrowBehavior = navigate", () => {
 
   it("Right auto-expands (and saves) a collapsed parent before moving in", () => {
     const m = model();
-    m.children[0].collapsed = true;
+    m.roots[0].collapsed = true;
     const r = run(state(m, "a", false), { key: "ArrowRight" }, {}, prefs);
     expect(r.dispatched).toEqual([
       { type: "toggleCollapse", nodeId: "a" },

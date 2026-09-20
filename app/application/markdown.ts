@@ -58,8 +58,9 @@ function stripInline(s: string): string {
 /**
  * Decompose a Markdown document into a node subtree.
  *
- * Returns a root whose `children` are the top-level nodes (callers paste the
- * children, mirroring {@link textToModel}). Hierarchy is derived from:
+ * Returns a container node whose `children` are the top-level nodes (callers
+ * paste the children; cf. `textToNodes` in persistence.ts). Hierarchy is
+ * derived from:
  *  - heading level (`#`..`######`) — an `h(n)` nests under the nearest heading
  *    of a lower level;
  *  - list indentation — bullets/numbers nest under the current heading and

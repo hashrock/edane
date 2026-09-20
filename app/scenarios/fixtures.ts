@@ -1,10 +1,10 @@
 /**
  * 各シナリオの計画を組み立てる純粋関数。DB・Hono に依存しない。
  *
- * 木はドメインの `MindMapModel` をそのまま組み立て、`ensureTopLevelNode` で
- * 「トップレベルノードを 1 つ以上」の不変条件を守る（CLAUDE.md）。
+ * 木はドメインの `MindMapModel` をそのまま組み立て、`ensureRoot` で
+ * 「ルートを 1 つ以上」の不変条件を守る（CLAUDE.md）。
  */
-import { ensureTopLevelNode, type IdSource, type MindMapModel } from "../domain/model";
+import { ensureRoot, type IdSource, type MindMapDocument, type MindMapModel } from "../domain/model";
 import { toSiteNode } from "../application/siteNode";
 import { inferSchema, defaultTemplate } from "../application/siteSchema";
 import { scenarioTitle, type PlannedNote, type ScenarioContext, type ScenarioPlan } from "./plan";
@@ -18,9 +18,9 @@ function node(nextId: IdSource, text: string, children: MindMapModel[] = [], ext
   return { id: nextId(), text, children, ...extra };
 }
 
-/** ルート＝ノートのタイトル（描画されない。CLAUDE.md「invisible root」）。 */
-function root(nextId: IdSource, title: string, trees: MindMapModel[]): MindMapModel {
-  return ensureTopLevelNode({ id: nextId(), text: title, children: trees }, nextId);
+/** ドキュメント＝タイトル＋木の配列（CLAUDE.md「ドキュメントはルートの配列」）。 */
+function document(nextId: IdSource, title: string, trees: MindMapModel[]): MindMapDocument {
+  return ensureRoot({ title, roots: trees }, nextId);
 }
 
 function plannedNote(
@@ -34,7 +34,7 @@ function plannedNote(
     key,
     id: nextId(),
     title,
-    model: root(nextId, title, trees),
+    model: document(nextId, title, trees),
     isPublic: flags.isPublic ?? false,
     pinned: flags.pinned ?? false,
     trashed: flags.trashed ?? false,
@@ -60,7 +60,7 @@ const answer = 42;
 
 // --- シナリオ ---
 
-/** まっさら：空のトップレベルノード 1 つだけの新規ノート。 */
+/** まっさら：空のルート 1 つだけの新規ノート。 */
 export function buildEmpty({ tag, nextId }: ScenarioContext): ScenarioPlan {
   const main = plannedNote("main", nextId, scenarioTitle("empty", tag), []);
   return { notes: [main], publications: [], sites: [], redirect: `/notes/${main.id}/edit` };
@@ -140,7 +140,7 @@ export function buildLarge({ tag, nextId }: ScenarioContext): ScenarioPlan {
     node(nextId, SAMPLE_MARKDOWN.repeat(6), [], { type: "markdown" }),
   ]);
 
-  const placed = node(nextId, "位置固定の木", [node(nextId, "position を持つトップレベルノード")], {
+  const placed = node(nextId, "位置固定の木", [node(nextId, "position を持つルート")], {
     position: { x: 1200, y: 40 },
   });
 

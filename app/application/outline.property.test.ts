@@ -16,7 +16,7 @@ import { outlineRows } from "./outline";
 import { flattenToNodes } from "./nodeUtils";
 
 describe("getFlatOrder / outlineRows / flattenToNodes", () => {
-  it("list the same ids in the same order, with top-level depth 0 = getNodeDepths − 1", () => {
+  it("list the same ids in the same order, with root depth 0 = getNodeDepths", () => {
     fc.assert(
       fc.property(modelArb, (model) => {
         const order = getFlatOrder(model);
@@ -26,8 +26,8 @@ describe("getFlatOrder / outlineRows / flattenToNodes", () => {
         expect(flat.map((n) => n.id)).toEqual(order);
 
         const depths = getNodeDepths(model);
-        for (const r of rows) expect(r.depth).toBe(depths.get(r.node.id)! - 1);
-        for (const n of flat) expect(n.depth).toBe(depths.get(n.id)! - 1);
+        for (const r of rows) expect(r.depth).toBe(depths.get(r.node.id)!);
+        for (const n of flat) expect(n.depth).toBe(depths.get(n.id)!);
       })
     );
   });

@@ -85,7 +85,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     render(
       <NoteEditor
         noteId={NOTE_ID}
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={true}
       />
@@ -110,7 +110,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     render(
       <NoteEditor
         noteId={NOTE_ID}
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={true}
       />
@@ -133,7 +133,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     render(
       <NoteEditor
         noteId={NOTE_ID}
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={false}
       />
@@ -170,7 +170,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     render(
       <NoteEditor
         noteId={NOTE_ID}
-        initialContent={JSON.stringify(MODEL)}
+        initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
         initialTitle="Root"
         initialIsPublic={true}
       />

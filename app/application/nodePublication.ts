@@ -15,7 +15,7 @@
  * Depends on domain/model only.
  */
 
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 
 /** 非公開ノートでノード公開を断るときの理由（UIとAPIエラーで共用）。 */
 export const PRIVATE_NOTE_PUBLISH_REASON =
@@ -100,17 +100,26 @@ export function publishedNodeJson(node: MindMapModel): PublishedNode {
 }
 
 /**
- * ルートから対象ノードまでのテキストの列（両端を含む）。設定ページの
- * 「どの枝を公開しているか」表示用。ノードが見つからなければ null。
+ * 木のルートから対象ノードまでのテキストの列（両端を含む）。設定ページの
+ * 「どの枝を公開しているか」表示用（ノート名は別途 noteTitle として出す）。
+ * ノードが見つからなければ null。
  */
 export function nodePathTexts(
-  model: MindMapModel,
+  doc: MindMapDocument,
   nodeId: string
 ): string[] | null {
-  if (model.id === nodeId) return [model.text];
-  for (const child of model.children) {
-    const sub = nodePathTexts(child, nodeId);
-    if (sub) return [model.text, ...sub];
+  for (const root of doc.roots) {
+    const path = pathInTree(root, nodeId);
+    if (path) return path;
+  }
+  return null;
+}
+
+function pathInTree(node: MindMapModel, nodeId: string): string[] | null {
+  if (node.id === nodeId) return [node.text];
+  for (const child of node.children) {
+    const sub = pathInTree(child, nodeId);
+    if (sub) return [node.text, ...sub];
   }
   return null;
 }

@@ -1,6 +1,6 @@
 /**
- * Property-based tests for the public-site data pipeline: MindMapModel →
- * SiteNode → (schema) → records → data module. The schema text format must
+ * Property-based tests for the public-site data pipeline: a published branch
+ * (MindMapModel) → SiteNode → (schema) → records → data module. The schema text format must
  * round-trip, parsing must never throw on arbitrary text, an inferred schema
  * must read every record of the very tree it was inferred from, and the
  * generated `data.js` must evaluate to exactly the records it was built from.
@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { NODE_TYPES, type MindMapModel } from "../domain/model";
-import { modelArb } from "../domain/model.arb";
+import { nodeArb } from "../domain/model.arb";
 import { toSiteNode, type SiteNode } from "./siteNode";
 import {
   formatSchema,
@@ -76,7 +76,7 @@ describe("schema text", () => {
 describe("toSiteNode", () => {
   it("keeps id / text / order, defaults type to text and exposes nothing else", () => {
     fc.assert(
-      fc.property(modelArb, (model) => {
+      fc.property(nodeArb, (model) => {
         const expected = (n: MindMapModel): SiteNode => ({
           id: n.id,
           type: n.type ?? "text",
@@ -92,7 +92,7 @@ describe("toSiteNode", () => {
 describe("inferSchema / shapeRecords", () => {
   it("an inferred schema is well-formed, as wide as the widest record, and reads every record without size warnings", () => {
     fc.assert(
-      fc.property(modelArb, (model) => {
+      fc.property(nodeArb, (model) => {
         const root = toSiteNode(model);
         const schema = inferSchema(root);
         expectWellFormedSchema(schema);
@@ -120,7 +120,7 @@ describe("inferSchema / shapeRecords", () => {
 
   it("an untyped schema at least as wide as every record produces no warnings", () => {
     fc.assert(
-      fc.property(modelArb, fc.nat({ max: 3 }), (model, extra) => {
+      fc.property(nodeArb, fc.nat({ max: 3 }), (model, extra) => {
         const root = toSiteNode(model);
         const width = Math.max(0, ...root.children.map((r) => r.children.length)) + extra;
         const schema: SiteSchema = Array.from({ length: width }, (_, i) => ({ key: `f${i}`, list: i % 2 === 0 }));
@@ -131,7 +131,7 @@ describe("inferSchema / shapeRecords", () => {
 
   it("a typed schema warns exactly for the fields whose node kind differs", () => {
     fc.assert(
-      fc.property(modelArb, schemaArb, (model, schema) => {
+      fc.property(nodeArb, schemaArb, (model, schema) => {
         const root = toSiteNode(model);
         const { warnings } = shapeRecords(root, schema);
         let expectedTypeWarnings = 0;
@@ -150,7 +150,7 @@ describe("inferSchema / shapeRecords", () => {
 describe("siteDataModule", () => {
   it("evaluates to the records shapeRecords produced, with no raw '<' left in the source", () => {
     fc.assert(
-      fc.property(modelArb, schemaArb, (model, schema) => {
+      fc.property(nodeArb, schemaArb, (model, schema) => {
         const root = toSiteNode(model);
         const src = siteDataModule(root, schema);
         expect(src).not.toContain("<");

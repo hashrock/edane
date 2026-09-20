@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import type { DocumentState } from "./editorReducer";
 import { UndoManager } from "./undoManager";
 
-/** Minimal DocumentState whose root text doubles as a label for assertions. */
+/** Minimal DocumentState whose title doubles as a label for assertions. */
 function st(tag: string): DocumentState {
   return {
-    model: { id: "r", text: tag, children: [] },
+    model: { title: tag, roots: [{ id: "r", text: tag, children: [] }] },
     clipboard: null,
   };
 }

@@ -18,8 +18,8 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { topLevelNodes, type IdSource, type MindMapModel } from "../domain/model";
-import { modelArb, sequentialIds, uncollapsed } from "../domain/model.arb";
+import type { IdSource, MindMapDocument, MindMapModel } from "../domain/model";
+import { modelArb, sequentialIds, uncollapsedDocument } from "../domain/model.arb";
 import { editorReducer, type EditorAction, type EditorState } from "./editorReducer";
 import { editorStateAt } from "./editorState.arb";
 
@@ -230,13 +230,13 @@ function refStep(ref: Ref, action: RefAction, nextId: IdSource): Ref {
 
 // --- Bridging to the real reducer ---
 
-function toRows(model: MindMapModel): Row[] {
+function toRows(doc: MindMapDocument): Row[] {
   const out: Row[] = [];
   const walk = (n: MindMapModel, depth: number) => {
     out.push({ id: n.id, depth, text: n.text });
     for (const c of n.children) walk(c, depth + 1);
   };
-  for (const top of topLevelNodes(model)) walk(top, 0);
+  for (const root of doc.roots) walk(root, 0);
   return out;
 }
 
@@ -279,13 +279,13 @@ const KINDS: RefAction["kind"][] = [
 ];
 const stepArb = fc.record({ kind: fc.constantFrom(...KINDS), n: fc.nat() });
 
-const openModelArb = modelArb.map(uncollapsed);
+const openModelArb = modelArb.map(uncollapsedDocument);
 
 describe("editorReducer vs. flat-outline reference", () => {
   it("agrees on rows, active node and edit mode after every structural keyboard edit", () => {
     fc.assert(
       fc.property(openModelArb, fc.array(stepArb, { maxLength: 30 }), (model, steps) => {
-        const first = model.children[0];
+        const first = model.roots[0];
         let state: EditorState = editorStateAt(model, first.id);
         let ref: Ref = { rows: toRows(model), active: first.id, editing: false };
         const reducerIds = sequentialIds();

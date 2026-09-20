@@ -17,11 +17,12 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
+  findInTree,
   findNode,
-  findParentAndIndex,
+  locateNode,
   getFlatOrder,
-  isTopLevel,
-  type MindMapModel,
+  isRoot,
+  type MindMapDocument,
 } from "../domain/model";
 import { modelAndVisibleArb, modelArb, nodeArb, sequentialIds } from "../domain/model.arb";
 import { pasteCommand, type PasteSource } from "./editorCommands";
@@ -66,7 +67,7 @@ describe("editorReducer along random action sequences", () => {
   });
 });
 
-function selecting(model: MindMapModel, nodeId: string): EditorState {
+function selecting(model: MindMapDocument, nodeId: string): EditorState {
   const s = initialEditorState(model);
   return editorReducer(s, {
     type: "activateNode",
@@ -185,27 +186,32 @@ describe("selection-mode ↑/↓ (sibling-first) is decided by tree position onl
         if (stuck) return;
         const landed = next.view.activeNodeId!;
         // Never a descendant …
-        expect(findNode(findNode(model, nodeId)!, landed)).toBeNull();
-        // … and exactly the first following sibling found walking up.
+        expect(findInTree(findNode(model, nodeId)!, landed)).toBeNull();
+        // … and exactly the first following sibling found walking up (the
+        // roots being siblings of one another).
         let expected: string | undefined;
-        for (let info = findParentAndIndex(model, nodeId); info && !expected; info = findParentAndIndex(model, info.parent.id)) {
-          expected = info.parent.children[info.index + 1]?.id;
+        for (
+          let loc = locateNode(model, nodeId);
+          loc && !expected;
+          loc = loc.parent ? locateNode(model, loc.parent.id) : null
+        ) {
+          expected = loc.siblings[loc.index + 1]?.id;
         }
         expect(landed).toBe(expected);
       })
     );
   });
 
-  it("↑ dead-ends only on the first top-level node, otherwise lands on the previous sibling or the parent", () => {
+  it("↑ dead-ends only on the first root, otherwise lands on the previous sibling or the parent", () => {
     fc.assert(
       fc.property(modelAndVisibleArb, ({ model, nodeId }) => {
         const state = selecting(model, nodeId);
         const next = editorReducer(state, { type: "moveUpSiblingFirst" });
-        const info = findParentAndIndex(model, nodeId)!;
+        const loc = locateNode(model, nodeId)!;
         const stuck = next.view.activeNodeId === nodeId;
-        expect(stuck).toBe(isTopLevel(model, nodeId) && info.index === 0);
+        expect(stuck).toBe(loc.parent === null && loc.index === 0);
         if (stuck) return;
-        const expected = info.index > 0 ? info.parent.children[info.index - 1].id : info.parent.id;
+        const expected = loc.index > 0 ? loc.siblings[loc.index - 1].id : loc.parent!.id;
         expect(next.view.activeNodeId).toBe(expected);
       })
     );
@@ -214,10 +220,10 @@ describe("selection-mode ↑/↓ (sibling-first) is decided by tree position onl
   it("← then → returns to the node you left (for any nested visible node)", () => {
     fc.assert(
       fc.property(modelAndVisibleArb, ({ model, nodeId }) => {
-        fc.pre(!isTopLevel(model, nodeId));
+        fc.pre(!isRoot(model, nodeId));
         const state = selecting(model, nodeId);
         const up = editorReducer(state, { type: "moveToParent" });
-        expect(up.view.activeNodeId).toBe(findParentAndIndex(model, nodeId)!.parent.id);
+        expect(up.view.activeNodeId).toBe(locateNode(model, nodeId)!.parent!.id);
         const back = editorReducer(up, { type: "moveToChild" });
         expect(back.view.activeNodeId).toBe(nodeId);
       })

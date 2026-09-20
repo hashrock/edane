@@ -4,7 +4,7 @@ import { userEvent, page } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
 import { useNoteEditor } from "./useNoteEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 
 // 閲覧専用モード（readOnly）の検証:
 // - どの操作でも編集モードに入らず、モデルが変わらないこと
@@ -49,15 +49,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-function findNode(node: MindMapModel, id: string): MindMapModel | null {
-  if (node.id === id) return node;
-  for (const child of node.children) {
-    const hit = findNode(child, id);
-    if (hit) return hit;
-  }
-  return null;
-}
-
 // The default 414px-wide test viewport can't reach clicks on the right of the
 // canvas: the first tree is centred on open, so its toggle / second tree sit
 // beyond x=414. Widen it like NoteEditor.browser.test.tsx does.
@@ -75,7 +66,7 @@ beforeEach(async () => {
 async function setupCanvas() {
   render(
     <MindmapEditor
-      initialContent={JSON.stringify(MODEL)}
+      initialContent={JSON.stringify({ version: 2, roots: MODEL.children })}
       initialTitle="Root"
       readOnly
     />
@@ -111,7 +102,7 @@ describe("read-only mindmap view (browser e2e)", () => {
     expect(api().getSelection().editing).toBe(false);
     const model = api().getModel();
     expect(findNode(model, "a")!.text).toBe("Alpha");
-    expect(model.children.length).toBe(3);
+    expect(model.roots.length).toBe(3);
   });
 
   it("double-click does not enter edit mode", async () => {
@@ -166,7 +157,7 @@ describe("read-only mindmap view (browser e2e)", () => {
 /** OutlineEditor は engine を外から受けるので、readOnly エンジンを組んで渡す。 */
 function ReadOnlyOutline() {
   const engine = useNoteEditor({
-    initialContent: JSON.stringify(MODEL),
+    initialContent: JSON.stringify({ version: 2, roots: MODEL.children }),
     initialTitle: "Root",
     readOnly: true,
   });

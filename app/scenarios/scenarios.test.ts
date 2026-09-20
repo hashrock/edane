@@ -10,8 +10,8 @@ import { SCENARIO_NAMES, SCENARIOS, findScenario, listScenarios, type ScenarioNa
 import { LARGE_DEPTH, LARGE_LIST_NOTES, LARGE_WIDE_CHILDREN, SITE_SCENARIO_RECORDS } from "./fixtures";
 import { scenarioTitle, shortTag, type ScenarioContext, type ScenarioPlan } from "./plan";
 import { describePlan, resolveScenarioAccess, throwawayUser, wantsJson } from "./response";
-import { parseContent, serializeModel } from "../application/persistence";
-import { findNode, getNodeDepths, topLevelNodes, type MindMapModel } from "../domain/model";
+import { parseContent, serializeDocument } from "../application/persistence";
+import { findNode, getNodeDepths, type MindMapDocument, type MindMapModel } from "../domain/model";
 import { validateSiteSave } from "../application/siteTemplate";
 
 function sequentialIds(): ScenarioContext["nextId"] {
@@ -25,8 +25,11 @@ function buildAll(tag = "abc123"): Record<ScenarioName, ScenarioPlan> {
   return out;
 }
 
-function allIds(model: MindMapModel): string[] {
-  return [model.id, ...model.children.flatMap(allIds)];
+function subtreeIds(node: MindMapModel): string[] {
+  return [node.id, ...node.children.flatMap(subtreeIds)];
+}
+function allIds(doc: MindMapDocument): string[] {
+  return doc.roots.flatMap(subtreeIds);
 }
 
 const user = { id: "u1", email: "u@example.com", name: "U", avatarUrl: "" };
@@ -83,13 +86,13 @@ describe("every scenario plan", () => {
     }
   });
 
-  it("survives the persistence round trip unchanged (well-formed tree, ≥1 top-level node)", () => {
+  it("survives the persistence round trip unchanged (well-formed forest, ≥1 root)", () => {
     for (const [name, plan] of Object.entries(plans)) {
       for (const n of plan.notes) {
-        const parsed = parseContent(serializeModel(n.model), n.title);
+        const parsed = parseContent(serializeDocument(n.model), n.title);
         expect(parsed, `${name}/${n.key}`).toEqual(n.model);
-        expect(topLevelNodes(parsed).length, `${name}/${n.key}`).toBeGreaterThan(0);
-        expect(parsed.text).toBe(n.title);
+        expect(parsed.roots.length, `${name}/${n.key}`).toBeGreaterThan(0);
+        expect(parsed.title).toBe(n.title);
       }
     }
   });
@@ -113,13 +116,13 @@ describe("every scenario plan", () => {
 describe("individual scenarios", () => {
   const plans = buildAll();
 
-  it("empty: one private note with a single blank top-level node", () => {
+  it("empty: one private note with a single blank root", () => {
     const { notes, publications, sites } = plans.empty;
     expect(notes).toHaveLength(1);
     expect(publications).toEqual([]);
     expect(sites).toEqual([]);
     expect(notes[0].isPublic).toBe(false);
-    expect(topLevelNodes(notes[0].model)).toEqual([{ id: expect.any(String), text: "", children: [] }]);
+    expect(notes[0].model.roots).toEqual([{ id: expect.any(String), text: "", children: [] }]);
   });
 
   it("typical: covers every node kind, a checkbox, a collapsed node, and pinned/public siblings", () => {
@@ -132,16 +135,17 @@ describe("individual scenarios", () => {
     expect(nodes.some((n) => n.checked === false)).toBe(true);
     expect(nodes.some((n) => n.collapsed)).toBe(true);
     expect(nodes.some((n) => n.bold && n.fontSize)).toBe(true);
-    expect(topLevelNodes(main.model).length).toBeGreaterThan(1);
+    expect(main.model.roots.length).toBeGreaterThan(1);
     expect(plans.typical.notes.find((n) => n.key === "pinned")?.pinned).toBe(true);
     expect(plans.typical.notes.find((n) => n.key === "public")?.isPublic).toBe(true);
   });
 
   it("large: wide, deep, long, placed, and many notes in the list", () => {
     const main = plans.large.notes.find((n) => n.key === "main")!;
-    const tops = topLevelNodes(main.model);
+    const tops = main.model.roots;
     expect(Math.max(...tops.map((t) => t.children.length))).toBe(LARGE_WIDE_CHILDREN);
-    expect(Math.max(...getNodeDepths(main.model).values())).toBe(LARGE_DEPTH);
+    // A chain of LARGE_DEPTH nodes: the root is depth 0, so the deepest is one less.
+    expect(Math.max(...getNodeDepths(main.model).values())).toBe(LARGE_DEPTH - 1);
     expect(collect(main.model).some((n) => n.text.length >= 200)).toBe(true);
     expect(tops.some((t) => t.position)).toBe(true);
     expect(plans.large.notes).toHaveLength(1 + LARGE_LIST_NOTES);
@@ -237,6 +241,7 @@ describe("route decisions", () => {
   });
 });
 
-function collect(model: MindMapModel): MindMapModel[] {
-  return [model, ...model.children.flatMap(collect)];
+function collect(doc: MindMapDocument): MindMapModel[] {
+  const walk = (n: MindMapModel): MindMapModel[] => [n, ...n.children.flatMap(walk)];
+  return doc.roots.flatMap(walk);
 }

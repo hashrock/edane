@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { editorReducer, type EditorState } from "./editorReducer";
-import { findNode, type MindMapModel } from "../domain/model";
+import { findNode, type MindMapDocument } from "../domain/model";
 
-function makeModel(): MindMapModel {
+function makeModel(): MindMapDocument {
   return {
-    id: "root",
-    text: "Root",
-    children: [
+    title: "Root",
+    roots: [
       { id: "a", text: "Alpha", children: [] },
       { id: "b", text: "https://example.com", children: [], type: "link" },
     ],
@@ -14,7 +13,7 @@ function makeModel(): MindMapModel {
 }
 
 function makeState(
-  model: MindMapModel,
+  model: MindMapDocument,
   activeNodeId: string | null = null
 ): EditorState {
   return {

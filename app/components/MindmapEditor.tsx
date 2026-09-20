@@ -10,12 +10,12 @@ import {
 } from "react";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
-  firstNavigableId,
+  firstRootId,
   isMultiRoot,
-  isTopLevel,
+  isRoot,
   subtreeIds,
 } from "../domain/model";
 import { modelToMarkdown } from "../application/markdown";
@@ -103,8 +103,9 @@ import ContextMenu, {
 import PublicityDropdown from "./PublicityDropdown";
 import MultiRootToggle, { multiRootOnChange } from "./MultiRootToggle";
 import {
-  serializeModel,
+  serializeDocument,
   modelToText,
+  documentToText,
 } from "../application/persistence";
 import CommandPalette from "./CommandPalette";
 import type { Command } from "./CommandPalette";
@@ -267,7 +268,7 @@ type DragState =
 type MoveDragState = Extract<DragState, { mode: "move" }>;
 
 /** Number of descendants (incl. hidden ones) of a node in the model. */
-function countDescendants(model: MindMapModel, nodeId: string): number {
+function countDescendants(model: MindMapDocument, nodeId: string): number {
   const node = findNode(model, nodeId);
   return node ? subtreeIds(node).length - 1 : 0;
 }
@@ -319,7 +320,7 @@ export interface RedrawStats {
 }
 
 export interface MindmapTestApi {
-  getModel: () => MindMapModel;
+  getModel: () => MindMapDocument;
   getActiveNodeId: () => string | null;
   /** Current selection state (focused node + caret + edit mode). */
   getSelection: () => {
@@ -693,7 +694,7 @@ export function MindmapEditorView({
   nodesRef.current = nodes;
 
   // Title = root node text (the root is the header title, not a canvas node)
-  const title = model.text;
+  const title = model.title;
 
   // --- Cursor blink ---
   useEffect(() => {
@@ -877,7 +878,7 @@ export function MindmapEditorView({
       const targetId =
         nodeIdAtClientPoint(e.clientX, e.clientY) ??
         st.view.activeNodeId ??
-        firstNavigableId(st.document.model);
+        firstRootId(st.document.model);
       // Each image becomes a fresh child of the drop target; upload sequentially
       // so the save-status line and the R2 requests don't stomp each other.
       void (async () => {
@@ -1042,7 +1043,7 @@ export function MindmapEditorView({
       if (plan === "markdown-dialog") {
         // Offer decompose / markdown node / plain text.
         const targetId =
-          st.view.activeNodeId || firstNavigableId(st.document.model);
+          st.view.activeNodeId || firstRootId(st.document.model);
         setMdPaste({ text, targetId });
         return;
       }
@@ -1117,7 +1118,7 @@ export function MindmapEditorView({
   // --- Command palette ---
   const commands = useMemo<Command[]>(() => {
     const copyAllText = () => {
-      const text = modelToText(stateRef.current.document.model);
+      const text = documentToText(stateRef.current.document.model);
       navigator.clipboard.writeText(text);
     };
     const copyBranch = () => {
@@ -1139,10 +1140,9 @@ export function MindmapEditorView({
         document: { model },
         view: { activeNodeId },
       } = stateRef.current;
-      const text = activeNodeId
-        ? modelToText(findNode(model, activeNodeId) || model)
-        : modelToText(model);
-      const prompt = `${t("chatgptPrompt", { title: model.text })}\n\n${text}`;
+      const active = activeNodeId ? findNode(model, activeNodeId) : null;
+      const text = active ? modelToText(active) : documentToText(model);
+      const prompt = `${t("chatgptPrompt", { title: model.title })}\n\n${text}`;
       window.open(
         `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`,
         "_blank"
@@ -1167,7 +1167,7 @@ export function MindmapEditorView({
               action: () => {
                 const id = stateRef.current.view.activeNodeId;
                 const n = id ? findNode(modelRef.current, id) : null;
-                if (!n || n.id === modelRef.current.id) return;
+                if (!n) return;
                 if (!supportsCheckbox(n.type ?? "text")) return;
                 setNodeCheckedRef.current(
                   n.id,
@@ -1187,12 +1187,12 @@ export function MindmapEditorView({
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     if (!contextMenu) return [];
     if (contextMenu.nodeId === undefined) {
-      // Empty canvas: the one deliberate way to create a tree root. Hidden
-      // once a single-root note (MultiRootToggle off) already has its one
-      // tree — a display preference only: addRootAt itself stays unconditional.
+      // Empty canvas: the one deliberate way to create a tree root. Hidden on
+      // a single-root note (MultiRootToggle off) — a display preference only:
+      // addRootAt itself stays unconditional.
       if (readOnly) return [];
       const current = modelRef.current;
-      if (!isMultiRoot(current) && current.children.length > 0) return [];
+      if (!isMultiRoot(current)) return [];
       const { at } = contextMenu;
       return [
         {
@@ -1254,7 +1254,7 @@ export function MindmapEditorView({
       // see addSiblingAfter). Offered here for users who don't know the key
       // (usertest #10). Hidden on tree roots where it would duplicate
       // "add child".
-      if (!isTopLevel(modelRef.current, nodeId)) {
+      if (!isRoot(modelRef.current, nodeId)) {
         structureGroup.push({
           label: t("menuAddSibling"),
           onSelect: () => {
@@ -1481,7 +1481,7 @@ export function MindmapEditorView({
   // --- Guest mode: hand the current document off to be saved to an account ---
   const handleSaveToAccount = useCallback(() => {
     const m = stateRef.current.document.model;
-    onSaveToAccount?.({ title: m.text, content: serializeModel(m) });
+    onSaveToAccount?.({ title: m.title, content: serializeDocument(m) });
   }, [onSaveToAccount]);
 
   // --- Title editing ---
@@ -1753,10 +1753,8 @@ export function MindmapEditorView({
           const flat = nodesRef.current;
           const byId = new Map(flat.map((n) => [n.id, n]));
           const parentOf = new Map<string, string>();
+          // Roots have no parent and therefore no entry.
           for (const n of flat) for (const c of n.children) parentOf.set(c, n.id);
-          // Top-level nodes belong to the invisible document root.
-          const root = modelRef.current;
-          for (const c of root.children) parentOf.set(c.id, root.id);
           const excluded = new Set<string>();
           (function collect(id: string) {
             excluded.add(id);
@@ -1771,10 +1769,6 @@ export function MindmapEditorView({
           drag.nodeId,
           drag.excluded,
           drag.parentOf,
-          {
-            id: modelRef.current.id,
-            children: modelRef.current.children.map((c) => c.id),
-          },
           worldX,
           worldY
         );
@@ -1791,7 +1785,7 @@ export function MindmapEditorView({
         // a nested branch there would become a new tree, which is reserved
         // for the explicit "add root" menu — so for it that's a no-drop.
         drag.ghostAt =
-          overOwnSubtree || !isTopLevel(modelRef.current, drag.nodeId)
+          overOwnSubtree || !isRoot(modelRef.current, drag.nodeId)
             ? null
             : ghostAt;
         updateDropMarker(drag.drop);

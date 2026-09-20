@@ -40,7 +40,7 @@ describe("NoteEditor header view controls", () => {
   it("switches Mindmap → Outline → Mindmap from the layout dropdown", async () => {
     await page.viewport(1280, 800);
     render(
-      <NoteEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <NoteEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => canvas() !== null);
 
@@ -60,7 +60,7 @@ describe("NoteEditor header view controls", () => {
   it("zooms with the +/− buttons and resets from the percentage", async () => {
     await page.viewport(1280, 800);
     render(
-      <NoteEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <NoteEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => canvas() !== null);
     const percent = () =>
@@ -86,7 +86,7 @@ describe("NoteEditor hidden outline shortcut (⌘/Ctrl+Shift+O)", () => {
     // Widen past the 767px breakpoint so the mind map is the default layout.
     await page.viewport(1280, 800);
     render(
-      <NoteEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <NoteEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
     await waitFor(() => canvas() !== null);
     expect(outline()).toBeNull();

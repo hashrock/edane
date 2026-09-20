@@ -36,9 +36,6 @@ function node(
   };
 }
 
-/** The invisible document root: "root" is its only top-level node. */
-const DOC_ROOT = { id: "doc", children: ["root"] };
-
 function sampleNodes(): MindMapNode[] {
   return [
     node("root", 0, 100, 300, ["a", "b"]),
@@ -48,10 +45,10 @@ function sampleNodes(): MindMapNode[] {
   ];
 }
 
+/** child id → parent id; roots (depth 0) have no entry. */
 function parentMap(nodes: MindMapNode[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const n of nodes) for (const c of n.children) m.set(c, n.id);
-  for (const c of DOC_ROOT.children) m.set(c, DOC_ROOT.id);
   return m;
 }
 
@@ -60,15 +57,14 @@ function resolve(
   draggedId: string,
   worldX: number,
   worldY: number,
-  excluded: string[] = [draggedId]
+  excluded: string[] = [draggedId],
+  nodes: MindMapNode[] = sampleNodes()
 ) {
-  const nodes = sampleNodes();
   return resolveDropTarget(
     nodes,
     draggedId,
     new Set(excluded),
     parentMap(nodes),
-    DOC_ROOT,
     worldX,
     worldY
   );
@@ -114,6 +110,22 @@ describe("resolveDropTarget", () => {
       kind: "sibling",
       targetId: "b",
       position: "after",
+    });
+  });
+
+  it("nests a dragged root under a node of another tree (never a no-op)", () => {
+    // Two roots: dropping root "r2" on root "root"'s body is a child drop.
+    const nodes = [...sampleNodes(), node("r2", 0, 100, 600, [])];
+    expect(resolve("r2", 100 + W / 2, 300, ["r2"], nodes)).toEqual({
+      kind: "child",
+      parentId: "root",
+      targetId: "root",
+    });
+    // …and onto a nested node too.
+    expect(resolve("r2", 300 + W / 2, 350, ["r2"], nodes)).toEqual({
+      kind: "child",
+      parentId: "b",
+      targetId: "b",
     });
   });
 

@@ -132,7 +132,7 @@ beforeEach(() => {
   `;
   document.head.appendChild(style);
   render(
-    <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
   );
 });
 

@@ -8,7 +8,7 @@
  */
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { insertNote, insertPublication, upsertSite } from "../utils/noteRepository";
-import { serializeModel } from "../application/persistence";
+import { serializeDocument } from "../application/persistence";
 import type { ScenarioPlan } from "./plan";
 
 export async function applyScenarioPlan(
@@ -25,7 +25,7 @@ export async function applyScenarioPlan(
         id: n.id,
         userId,
         title: n.title,
-        plainContent: serializeModel(n.model),
+        plainContent: serializeDocument(n.model),
         isPublic: n.isPublic,
         pinned: n.pinned,
         deletedAt: n.trashed ? now : null,

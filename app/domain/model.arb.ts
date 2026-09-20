@@ -2,11 +2,11 @@
  * fast-check arbitraries for the domain model, shared by the property-based
  * tests across layers (`*.property.test.ts`). Not imported by production code.
  *
- * Every generated tree is well-formed by construction, so a property test can
- * take "unique ids, valid optional fields, ≥1 top-level node, `position` only
- * on top-level nodes" as its precondition and check that an operation keeps
- * it: ids are assigned deterministically in DFS order (`n0`, `n1`, …) after
- * the shape is generated, which keeps shrunk counterexamples readable.
+ * Every generated document is well-formed by construction, so a property test
+ * can take "unique ids, valid optional fields, ≥1 root, `position` only on
+ * roots" as its precondition and check that an operation keeps it: ids are
+ * assigned deterministically in DFS order (`n0`, `n1`, …) after the shape is
+ * generated, which keeps shrunk counterexamples readable.
  */
 import { expect } from "vitest";
 import fc from "fast-check";
@@ -15,6 +15,7 @@ import {
   STORED_NODE_TYPES,
   subtreeIds,
   type IdSource,
+  type MindMapDocument,
   type MindMapModel,
 } from "./model";
 
@@ -53,15 +54,15 @@ const draftArb: fc.Arbitrary<Draft> = fc.letrec<{ draft: Draft }>((tie) => ({
   ),
 })).draft;
 
-function assignIds(draft: Draft, next: () => string, topLevel: boolean): MindMapModel {
+function assignIds(draft: Draft, next: () => string, isRoot: boolean): MindMapModel {
   const { children, position, ...rest } = draft;
   const node: MindMapModel = {
     id: next(),
     ...rest,
     children: children.map((c) => assignIds(c, next, false)),
   };
-  // A canvas position is only meaningful on a top-level node.
-  if (topLevel && position) node.position = position;
+  // A canvas position is only meaningful on a root.
+  if (isRoot && position) node.position = position;
   return node;
 }
 
@@ -71,38 +72,34 @@ export const nodeArb: fc.Arbitrary<MindMapModel> = draftArb.map((d) =>
 );
 
 /**
- * A whole document: root `root` (the title, never a node) with 1–3 top-level
- * trees, ids `n0`… in DFS order.
+ * A whole document: a title (never a node) with 1–3 roots, ids `n0`… in DFS
+ * order.
  */
-export const modelArb: fc.Arbitrary<MindMapModel> = fc
+export const modelArb: fc.Arbitrary<MindMapDocument> = fc
   .record(
     {
-      text: nodeTextArb,
-      children: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
+      title: nodeTextArb,
+      roots: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
       // Persistence round-trips only an explicit `false` — `true` is the
-      // implicit default and normalizeTree drops it on parse (see
+      // implicit default and normalizeDocument drops it on parse (see
       // persistence.ts), so the generator must never produce a literal
       // `true` or the roundtrip property would see it vanish.
       multiRoot: fc.constant(false as const),
     },
-    { requiredKeys: ["text", "children"] }
+    { requiredKeys: ["title", "roots"] }
   )
-  .map(({ children, ...rest }) => {
+  .map(({ roots, ...rest }) => {
     const next = sequentialIds("n");
-    return {
-      id: "root",
-      ...rest,
-      children: children.map((c) => assignIds(c, next, true)),
-    };
+    return { ...rest, roots: roots.map((c) => assignIds(c, next, true)) };
   });
 
-/** Every id in the tree, root included, in DFS order (collapse ignored). */
-export const allIds = subtreeIds;
-
-/** Every node id except the root's (the ids the UI can ever target). */
-export function nodeIds(model: MindMapModel): string[] {
-  return allIds(model).slice(1);
+/** Every node id in the document, in DFS order (collapse ignored). */
+export function allIds(doc: MindMapDocument): string[] {
+  return doc.roots.flatMap(subtreeIds);
 }
+
+/** Every node id the UI can target — in a document that is every node. */
+export const nodeIds = allIds;
 
 /**
  * `collapsed` を落とした木。折りたたみは表示状態なので、木の中身だけを比べたい
@@ -114,17 +111,22 @@ export function uncollapsed(node: MindMapModel): MindMapModel {
   return { ...rest, children: node.children.map(uncollapsed) };
 }
 
-export function expectUniqueIds(model: MindMapModel): void {
-  const ids = allIds(model);
+/** {@link uncollapsed} over every tree of a document. */
+export function uncollapsedDocument(doc: MindMapDocument): MindMapDocument {
+  return { ...doc, roots: doc.roots.map(uncollapsed) };
+}
+
+export function expectUniqueIds(doc: MindMapDocument): void {
+  const ids = allIds(doc);
   expect(new Set(ids).size).toBe(ids.length);
 }
 
-/** A model together with one non-root node id drawn from it. */
+/** A document together with one node id drawn from it. */
 export const modelAndNodeArb = fc
   .tuple(modelArb, fc.nat())
   .map(([model, n]) => ({ model, nodeId: pick(nodeIds(model), n) }));
 
-/** A model together with one VISIBLE node id — the only kind the UI can target. */
+/** A document together with one VISIBLE node id — the only kind the UI can target. */
 export const modelAndVisibleArb = fc
   .tuple(modelArb, fc.nat())
   .map(([model, n]) => ({ model, nodeId: pick(getFlatOrder(model), n) }));

@@ -8,7 +8,7 @@
  * dispatches so far actually changed the document — a no-op reorder, a
  * view-only step, or a dispatch swallowed by read-only mode must not write.
  */
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type {
   EditorAction,
   EditorState,
@@ -20,7 +20,7 @@ import { assertNever } from "../lib/assertNever";
 export interface KeyEffectDeps {
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved). */
-  saveNote: (model: MindMapModel) => void;
+  saveNote: (model: MindMapDocument) => void;
   // Key-press only; a command runner (paste) leaves them out.
   openPalette?: () => void;
   openHelp?: () => void;

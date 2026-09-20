@@ -23,7 +23,7 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { modelArb, sequentialIds, uncollapsed } from "../domain/model.arb";
+import { modelArb, sequentialIds, uncollapsedDocument } from "../domain/model.arb";
 import { editorReducer } from "./editorReducer";
 import {
   actionStepArb,
@@ -65,7 +65,7 @@ describe("readOnly guard along random action sequences", () => {
         }
         // 保存則: 折りたたみ以外は一切通っていないので、`collapsed` を剥がせば
         // 最初のモデルに戻る。
-        expect(uncollapsed(state.document.model)).toEqual(uncollapsed(model));
+        expect(uncollapsedDocument(state.document.model)).toEqual(uncollapsedDocument(model));
       }),
       { numRuns: 300 }
     );
@@ -137,7 +137,7 @@ describe("readOnly guard on the actions that would otherwise open the editor", (
     fc.assert(
       fc.property(modelArb, fc.nat(), (model, n) => {
         const state = initialEditorState(model);
-        const nodeId = model.children[n % model.children.length].id;
+        const nodeId = model.roots[n % model.roots.length].id;
         const next = guardedStep(
           state,
           { type: "activateNode", nodeId, cursorPos: 0, selectionEnd: 0, editing: true },

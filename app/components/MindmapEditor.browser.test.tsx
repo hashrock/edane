@@ -49,7 +49,7 @@ beforeEach(() => {
 describe("MindmapEditor (browser e2e)", () => {
   it("clicking a node focuses the hidden input and accepts typing", async () => {
     render(
-      <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+      <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
     );
 
     // Wait until Konva has laid out and the test API can locate the node.
@@ -79,7 +79,7 @@ describe("MindmapEditor (browser e2e)", () => {
     // edit mode. The point of this test is that typing reaches the focused input.
     await userEvent.keyboard("X");
     const text = await waitFor(() => {
-      const t = api().getModel().children[1].text;
+      const t = api().getModel().roots[1].text;
       return t !== "World" ? t : null;
     });
 

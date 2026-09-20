@@ -3,10 +3,10 @@
  * its doc comment states, as properties:
  *  - never lands inside the dragged branch (the parent is neither the dragged
  *    node nor one of its visible descendants);
- *  - the parent exists (a laid-out node or the document root) and a sibling
- *    index is within the parent's children;
- *  - a top-level node has no sibling zones (a sibling of a tree root would be
- *    a new tree), so a "sibling" target never has the document root as parent;
+ *  - the parent exists (a laid-out node — never "the roots": a root has no
+ *    parent) and a sibling index is within the parent's children;
+ *  - a root has no sibling zones (a sibling of a root would be a new tree), so
+ *    a "sibling" target's highlighted node is always a nested node;
  *  - a "child" target's highlighted node is the parent itself;
  *  - it never returns a no-op: applying the target with `moveBranch` always
  *    produces a different model (moveBranch itself returns the same reference
@@ -15,17 +15,16 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { findNode, moveBranch, type MindMapModel } from "../domain/model";
+import { findNode, isRoot, moveBranch, type MindMapDocument } from "../domain/model";
 import { modelArb, pick } from "../domain/model.arb";
-import { resolveDropTarget, type DropRoot } from "./dragDrop";
+import { resolveDropTarget } from "./dragDrop";
 import { flattenToNodes, nodeBoxHeight, nodeBoxWidth, type MindMapNode } from "./nodeUtils";
 import { layoutMindMap } from "../lib/treeLayout";
 
 interface Scene {
-  model: MindMapModel;
+  model: MindMapDocument;
   nodes: MindMapNode[];
   parentOf: Map<string, string>;
-  root: DropRoot;
   draggedId: string;
   excluded: Set<string>;
 }
@@ -34,10 +33,9 @@ interface Scene {
 const sceneArb: fc.Arbitrary<Scene> = fc.tuple(modelArb, fc.nat()).map(([model, n]) => {
   const nodes = flattenToNodes(model);
   layoutMindMap(nodes);
-  const root: DropRoot = { id: model.id, children: model.children.map((c) => c.id) };
+  // Roots have no parent and therefore no entry.
   const parentOf = new Map<string, string>();
   for (const node of nodes) for (const c of node.children) parentOf.set(c, node.id);
-  for (const c of root.children) parentOf.set(c, root.id);
   const draggedId = pick(nodes, n).id;
   const excluded = new Set<string>();
   const byId = new Map(nodes.map((x) => [x.id, x]));
@@ -46,7 +44,7 @@ const sceneArb: fc.Arbitrary<Scene> = fc.tuple(modelArb, fc.nat()).map(([model, 
     for (const c of byId.get(id)?.children ?? []) mark(c);
   };
   mark(draggedId);
-  return { model, nodes, parentOf, root, draggedId, excluded };
+  return { model, nodes, parentOf, draggedId, excluded };
 });
 
 type Pointer =
@@ -80,21 +78,20 @@ describe("resolveDropTarget", () => {
   it("returns a valid, non-no-op target outside the dragged branch, or null", () => {
     fc.assert(
       fc.property(sceneArb, pointerArb, (scene, p) => {
-        const { model, nodes, parentOf, root, draggedId, excluded } = scene;
+        const { model, nodes, parentOf, draggedId, excluded } = scene;
         const { x, y } = pointerAt(scene, p);
-        const target = resolveDropTarget(nodes, draggedId, excluded, parentOf, root, x, y);
+        const target = resolveDropTarget(nodes, draggedId, excluded, parentOf, x, y);
         if (target === null) return;
 
-        // Outside the dragged subtree, onto something that exists.
+        // Outside the dragged subtree, onto a node that exists.
         expect(excluded.has(target.parentId)).toBe(false);
         expect(excluded.has(target.targetId)).toBe(false);
-        const parentExists = target.parentId === root.id || findNode(model, target.parentId) !== null;
-        expect(parentExists).toBe(true);
+        expect(findNode(model, target.parentId)).not.toBeNull();
 
         if (target.kind === "child") {
           expect(target.targetId).toBe(target.parentId);
         } else {
-          expect(target.parentId).not.toBe(root.id); // tree roots have no sibling zones
+          expect(isRoot(model, target.targetId)).toBe(false); // roots have no sibling zones
           expect(parentOf.get(target.targetId)).toBe(target.parentId);
           const siblings = findNode(model, target.parentId)!.children.map((c) => c.id);
           expect(target.index).toBeGreaterThanOrEqual(0);
@@ -116,14 +113,14 @@ describe("resolveDropTarget", () => {
   it("is null when the pointer is outside every visible box (with slack)", () => {
     fc.assert(
       fc.property(sceneArb, fc.integer({ min: -500, max: 3000 }), fc.integer({ min: -500, max: 3000 }), (scene, x, y) => {
-        const { nodes, parentOf, root, draggedId, excluded } = scene;
+        const { nodes, parentOf, draggedId, excluded } = scene;
         const SLACK = 8; // ≥ the largest slack the resolver applies
         const overSomething = nodes.some((node) => {
           const w = nodeBoxWidth(node.width, node.depth === 0);
           const h = nodeBoxHeight(node.height);
           return x >= node.x - SLACK && x <= node.x + w + SLACK && y >= node.y - h / 2 - SLACK && y <= node.y + h / 2 + SLACK;
         });
-        const target = resolveDropTarget(nodes, draggedId, excluded, parentOf, root, x, y);
+        const target = resolveDropTarget(nodes, draggedId, excluded, parentOf, x, y);
         if (!overSomething) expect(target).toBeNull();
       })
     );

@@ -8,12 +8,13 @@ import fc from "fast-check";
 import {
   cloneWithNewIds,
   findNode,
-  findParentAndIndex,
-  firstNavigableId,
+  locateNode,
+  firstRootId,
   getFlatOrder,
   NODE_TYPES,
   visibleChildrenOf,
   type IdSource,
+  type MindMapDocument,
   type MindMapModel,
 } from "../domain/model";
 import { modelArb, nodeArb, nodeIds, pick } from "../domain/model.arb";
@@ -34,7 +35,7 @@ import type { EditorLayout } from "./editSurface";
  * position is reachable and shrinks toward the start.
  */
 export function editorStateAt(
-  model: MindMapModel,
+  model: MindMapDocument,
   nodeId: string,
   opts: { editing?: boolean; pos?: number } = {}
 ): EditorState {
@@ -59,17 +60,17 @@ export function editorStateAt(
  * action-sequence property, so the machines driven by the same sequences all
  * start from the same place.
  */
-export function initialEditorState(model: MindMapModel): EditorState {
-  return editorStateAt(model, firstNavigableId(model));
+export function initialEditorState(model: MindMapDocument): EditorState {
+  return editorStateAt(model, firstRootId(model));
 }
 
 /**
  * The editor's standing invariant, checked after any action: ids unique; a
- * top-level node exists; the active node is set, is not the (invisible) root
- * and is visible (no collapsed ancestor); nested nodes carry no canvas
- * position; the caret stays within the edit buffer. One DFS collects
- * everything. (That the buffer itself tracks the model is a separate property
- * — see "the edit buffer follows the document" in editorReducer.property.test.)
+ * root exists; the active node is set and visible (no collapsed ancestor);
+ * nested nodes carry no canvas position; the caret stays within the edit
+ * buffer. One DFS collects everything. (That the buffer itself tracks the
+ * model is a separate property — see "the edit buffer follows the document"
+ * in editorReducer.property.test.)
  */
 export function expectFocusInvariant(state: EditorState, trail: string): void {
   const { model } = state.document;
@@ -84,12 +85,11 @@ export function expectFocusInvariant(state: EditorState, trail: string): void {
     const vis = visibleChildrenOf(n);
     for (const c of n.children) walk(c, true, shown && vis.kind === "recurse");
   };
-  for (const top of model.children) walk(top, false, true);
+  for (const root of model.roots) walk(root, false, true);
   expect(ids.size, `unique ids after ${trail}`).toBe(count);
-  expect(model.children.length, `top-level node after ${trail}`).toBeGreaterThan(0);
+  expect(model.roots.length, `root after ${trail}`).toBeGreaterThan(0);
   const active = state.view.activeNodeId;
   expect(active, `active node after ${trail}`).not.toBeNull();
-  expect(active, `active is root after ${trail}`).not.toBe(model.id);
   expect(visible.has(active!), `active visible after ${trail}`).toBe(true);
   // The caret is an offset into editingText, so it is bounded by editingText —
   // NOT by the model's text, and with no exemptions. It used to be checked only
@@ -104,10 +104,14 @@ export function expectFocusInvariant(state: EditorState, trail: string): void {
   expect(state.view.selectionEnd, `selection after ${trail}`).toBeLessThanOrEqual(len);
 }
 
-/** Is the node on the tree's trailing edge (last child of a last child … of the last top-level node)? */
-export function onTrailingEdge(model: MindMapModel, nodeId: string): boolean {
-  for (let info = findParentAndIndex(model, nodeId); info; info = findParentAndIndex(model, info.parent.id)) {
-    if (info.index !== info.parent.children.length - 1) return false;
+/** Is the node on the document's trailing edge (last child of a last child … of the last root)? */
+export function onTrailingEdge(model: MindMapDocument, nodeId: string): boolean {
+  for (
+    let loc = locateNode(model, nodeId);
+    loc;
+    loc = loc.parent ? locateNode(model, loc.parent.id) : null
+  ) {
+    if (loc.index !== loc.siblings.length - 1) return false;
   }
   return true;
 }
@@ -199,7 +203,7 @@ export interface ActionStep {
   /** A subtree entering from outside (paste / insert); drawn only for those kinds. */
   branch: MindMapModel;
   /** A whole other document (undo/redo swap); drawn only for `replace`. */
-  model: MindMapModel;
+  model: MindMapDocument;
 }
 
 // The kinds that bring a tree with them draw one; every other kind shares a
@@ -208,6 +212,7 @@ export interface ActionStep {
 const NEEDS_BRANCH: Kind[] = ["pasteBranch", "insertNodes"];
 const NEEDS_MODEL: Kind[] = ["replace"];
 const PLACEHOLDER: MindMapModel = { id: "placeholder", text: "", children: [] };
+const PLACEHOLDER_DOC: MindMapDocument = { title: "", roots: [PLACEHOLDER] };
 /**
  * A random action, drawn independently of any state: node ids and caret
  * positions are unbounded naturals resolved against the live state by
@@ -225,7 +230,7 @@ export const actionStepArb: fc.Arbitrary<ActionStep> = fc
       text: fc.string({ maxLength: 6 }),
       flag: fc.boolean(),
       branch: NEEDS_BRANCH.includes(kind) ? nodeArb : fc.constant(PLACEHOLDER),
-      model: NEEDS_MODEL.includes(kind) ? modelArb : fc.constant(PLACEHOLDER),
+      model: NEEDS_MODEL.includes(kind) ? modelArb : fc.constant(PLACEHOLDER_DOC),
     })
   );
 
@@ -286,10 +291,12 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
     case "insertSiblingAfter":
       return { type: kind };
     case "moveBranch":
+      // The new parent is always a node (a root has no parent to move under
+      // — placeBranchAt is the way onto the canvas), so `flag` is unused here.
       return {
         type: kind,
         nodeId: vis(a),
-        newParentId: flag ? model.id : vis(b),
+        newParentId: vis(b),
         index: c % 6 === 0 ? undefined : (c % 6) - 1,
       };
     case "placeBranchAt":
@@ -354,7 +361,9 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       // the time the view points at a node of the SAME document (possibly one
       // that is now hidden), half the time at a document that no longer has
       // it at all.
-      const nextModel = flag ? model : cloneWithNewIds(step.model, mint);
+      const nextModel: MindMapDocument = flag
+        ? model
+        : { ...step.model, roots: step.model.roots.map((r) => cloneWithNewIds(r, mint)) };
       const view = flag
         ? { ...state.view, activeNodeId: id(b) }
         : state.view;

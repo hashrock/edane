@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import {
   measureModelNode,
   flattenToNodes,
@@ -24,6 +24,10 @@ const LONG = "x".repeat(600);
 
 function model(over: Partial<MindMapModel>): MindMapModel {
   return { id: "n", text: "", children: [], ...over };
+}
+
+function docOf(...roots: MindMapModel[]): MindMapDocument {
+  return { title: "title", roots };
 }
 
 describe("measureModelNode width cap", () => {
@@ -72,17 +76,39 @@ describe("measureModelNode width cap", () => {
 describe("flattenToNodes width cap", () => {
   it("caps every flat node", () => {
     const nodes = flattenToNodes(
-      model({
-        text: "title",
-        children: [
-          model({ id: "t", text: LONG, children: [model({ id: "u", text: LONG })] }),
-        ],
-      })
+      docOf(model({ id: "t", text: LONG, children: [model({ id: "u", text: LONG })] }))
     );
     expect(nodes.length).toBeGreaterThan(1);
     for (const n of nodes) {
       expect(n.width).toBeLessThanOrEqual(NODE_MAX_CONTENT_WIDTH);
     }
+  });
+});
+
+describe("flattenToNodes over a forest", () => {
+  it("gives every root depth 0 and carries its position", () => {
+    const nodes = flattenToNodes(
+      docOf(
+        model({ id: "r1", text: "R1", children: [model({ id: "c", text: "C" })] }),
+        model({ id: "r2", text: "R2", position: { x: 3, y: 4 } })
+      )
+    );
+    expect(nodes.map((n) => [n.id, n.depth])).toEqual([
+      ["r1", 0],
+      ["c", 1],
+      ["r2", 0],
+    ]);
+    expect(nodes.find((n) => n.id === "r2")!.position).toEqual({ x: 3, y: 4 });
+    expect(nodes.find((n) => n.id === "r1")!.position).toBeUndefined();
+  });
+
+  it("omits a collapsed root's descendants but keeps the count", () => {
+    const nodes = flattenToNodes(
+      docOf(model({ id: "r", text: "R", collapsed: true, children: [model({ id: "c", text: "C" })] }))
+    );
+    expect(nodes.map((n) => n.id)).toEqual(["r"]);
+    expect(nodes[0].childCount).toBe(1);
+    expect(nodes[0].children).toEqual([]);
   });
 });
 
@@ -198,9 +224,7 @@ describe("task checkbox geometry", () => {
   });
 
   it("carries the flag onto the flat render node", () => {
-    const nodes = flattenToNodes(
-      model({ text: "R", children: [model({ id: "t", text: "task", checked: true })] })
-    );
+    const nodes = flattenToNodes(docOf(model({ id: "t", text: "task", checked: true })));
     expect(nodes.find((n) => n.id === "t")!.checked).toBe(true);
   });
 });

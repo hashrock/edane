@@ -2,19 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import MindmapEditor from "./MindmapEditor";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
 import type { MindmapTestApi } from "./MindmapEditor";
 
 /**
  * Tree roots are created only on purpose: right-click on empty canvas offers
  * "Add root here", and nothing else (Enter on a tree root, paste, drop) makes
- * one. See `isTopLevel` in domain/model.ts.
+ * one. See `isRoot` in domain/model.ts.
  */
 
-const MODEL: MindMapModel = {
-  id: "root",
-  text: "Root",
-  children: [
+const MODEL: MindMapDocument = {
+  title: "Root",
+  roots: [
     {
       id: "a",
       text: "Alpha",
@@ -53,15 +52,15 @@ beforeEach(() => {
   document.head.appendChild(style);
 });
 
-async function setup(readOnly = false, model: MindMapModel = MODEL) {
+async function setup(readOnly = false, model: MindMapDocument = MODEL) {
   render(
     <MindmapEditor
-      initialContent={JSON.stringify(model)}
+      initialContent={JSON.stringify({ version: 2, ...model })}
       initialTitle="Root"
       readOnly={readOnly}
     />
   );
-  await waitFor(() => api().getActiveNodeId() === model.children[0].id);
+  await waitFor(() => api().getActiveNodeId() === model.roots[0].id);
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
   const canvas = document.querySelector<HTMLElement>('[data-testid="mm-canvas"]')!;
   const target = canvas.querySelector("canvas") ?? canvas;
@@ -91,8 +90,8 @@ describe("adding a tree root", () => {
     const btn = await waitFor(() => menuButton("Add root here"));
     btn.click();
 
-    await waitFor(() => api().getModel().children.length === 2);
-    const created = api().getModel().children[1];
+    await waitFor(() => api().getModel().roots.length === 2);
+    const created = api().getModel().roots[1];
     expect(created.text).toBe("");
     expect(created.position).toBeDefined();
     expect(api().getActiveNodeId()).toBe(created.id);
@@ -104,7 +103,7 @@ describe("adding a tree root", () => {
 
     // Typing lands in the new root.
     await userEvent.keyboard("Beta");
-    await waitFor(() => api().getModel().children[1].text === "Beta");
+    await waitFor(() => api().getModel().roots[1].text === "Beta");
   });
 
   it("right-click on a node opens the node menu, not the root item", async () => {
@@ -123,7 +122,7 @@ describe("adding a tree root", () => {
   });
 
   it("offers nothing when the note is single-root and already has its one tree", async () => {
-    // A display preference only (MultiRootToggle / MindMapModel.multiRoot):
+    // A display preference only (MultiRootToggle / MindMapDocument.multiRoot):
     // it hides this menu item, but doesn't stop addRootAt from working if
     // reached another way — there's no invariant to enforce here.
     const { rightClick } = await setup(false, { ...MODEL, multiRoot: false });

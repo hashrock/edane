@@ -37,7 +37,7 @@ import type { DocumentState } from "./editorReducer";
 // document is a fresh object; the model inside is irrelevant.
 let seq = 0;
 const fresh = (): DocumentState => ({
-  model: { id: `s${seq++}`, text: "", children: [] },
+  model: { title: `s${seq++}`, roots: [] },
   clipboard: null,
 });
 

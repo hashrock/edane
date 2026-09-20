@@ -36,10 +36,9 @@ export const VERTICAL_GAP = 10;
 const TREE_GAP = 40;
 
 /**
- * Tree roots of the flat array: nodes no other node lists as a child. The
- * document root is not part of the array (it's the title), so a document with
- * several top-level nodes is a forest, laid out as vertically stacked trees in
- * array order.
+ * Tree roots of the flat array: nodes no other node lists as a child. A
+ * document with several roots is a forest, laid out as vertically stacked
+ * trees in array order (unless a root carries its own `position`).
  */
 export function layoutRoots(nodes: LayoutNode[]): LayoutNode[] {
   const childIds = new Set<string>();

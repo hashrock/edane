@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { router } from "@inertiajs/react";
-import { type MindMapModel, findNode, firstNavigableId } from "../domain/model";
+import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
   type EditorState,
   type EditorAction,
@@ -37,7 +37,7 @@ import {
 } from "../application/saveTracker";
 import {
   parseContent,
-  serializeModel,
+  serializeDocument,
 } from "../application/persistence";
 import { publicNoteUrl } from "../application/publicNoteLink";
 import { t } from "../application/i18n";
@@ -127,12 +127,12 @@ export interface NoteEditorEngine {
   state: EditorState;
   stateRef: React.MutableRefObject<EditorState>;
   /** Convenience alias for state.document.model. */
-  model: MindMapModel;
-  modelRef: React.MutableRefObject<MindMapModel>;
+  model: MindMapDocument;
+  modelRef: React.MutableRefObject<MindMapDocument>;
   /** Central dispatch: pure reducer + undo bookkeeping. Returns next state. */
   dispatch: (action: EditorAction, undoType?: UndoType) => EditorState;
   /** Persist the model (no-op when the note is unsaved / guest mode). */
-  saveNote: (currentModel: MindMapModel, pub?: boolean) => Promise<boolean>;
+  saveNote: (currentModel: MindMapDocument, pub?: boolean) => Promise<boolean>;
   updateSaveStatus: (status: SaveStatusText) => void;
   saveStatusRef: React.RefObject<HTMLSpanElement | null>;
   /**
@@ -164,6 +164,16 @@ export interface NoteEditorEngine {
   bypassNavGuardRef: React.MutableRefObject<boolean>;
 }
 
+/**
+ * What a save persists, as one comparable string: the content column plus the
+ * title column. The title is not part of the serialized content (see
+ * persistence.ts), so comparing content alone would miss a title-only edit
+ * and the navigation guard would let it be lost.
+ */
+function saveSnapshot(doc: MindMapDocument): string {
+  return JSON.stringify({ title: doc.title, content: serializeDocument(doc) });
+}
+
 export function useNoteEditor({
   noteId,
   initialContent,
@@ -176,7 +186,7 @@ export function useNoteEditor({
   // active (the root is the title, not a node).
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
-    const firstId = firstNavigableId(model);
+    const firstId = firstRootId(model);
     return {
       document: { model, clipboard: null },
       view: {
@@ -208,7 +218,7 @@ export function useNoteEditor({
   // The server just handed us the initial model, so that's the clean baseline.
   const saveRef = useRef<SaveTracker>(untrackedSave);
   if (isUntracked(saveRef.current) && noteId && !readOnly) {
-    saveRef.current = initialSaveTracker(serializeModel(model));
+    saveRef.current = initialSaveTracker(saveSnapshot(model));
   }
   // Set true just before re-issuing a visit we already flushed, so the
   // navigation guard lets that one visit pass through instead of re-flushing.
@@ -278,9 +288,12 @@ export function useNoteEditor({
   }, [noteId]);
 
   const saveNote = useCallback(
-    async (currentModel: MindMapModel, pub?: boolean): Promise<boolean> => {
+    async (currentModel: MindMapDocument, pub?: boolean): Promise<boolean> => {
       if (!noteId || readOnly) return true;
-      const content = serializeModel(currentModel);
+      const content = serializeDocument(currentModel);
+      // The tracker's baseline is the whole save payload (title + content),
+      // so a title-only edit counts as dirty too.
+      const snapshot = saveSnapshot(currentModel);
       saveRef.current = beginSave(saveRef.current);
       const seq = saveRef.current.issued;
       updateSaveStatus("saving");
@@ -301,13 +314,13 @@ export function useNoteEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             content,
-            title: currentModel.text,
+            title: currentModel.title,
             isPublic: pub ?? isPublic,
           }),
         });
         settle(
           res.ok
-            ? { ok: true, content }
+            ? { ok: true, content: snapshot }
             : { ok: false, reason: classifySaveFailure(res.status) }
         );
         return res.ok;
@@ -323,7 +336,7 @@ export function useNoteEditor({
   // (guest/embed mode has no autosave and nothing to guard — the tracker has
   // no baseline there, so this is false).
   const isDirty = useCallback(
-    () => isTrackerDirty(saveRef.current, serializeModel(modelRef.current)),
+    () => isTrackerDirty(saveRef.current, saveSnapshot(modelRef.current)),
     []
   );
 
@@ -383,8 +396,8 @@ export function useNoteEditor({
         keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: serializeModel(current),
-          title: current.text,
+          content: serializeDocument(current),
+          title: current.title,
           isPublic,
         }),
       }).catch(() => {});

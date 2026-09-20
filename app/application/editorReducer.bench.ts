@@ -1,5 +1,5 @@
 import { bench, describe } from "vitest";
-import type { MindMapModel } from "../domain/model";
+import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode } from "../domain/model";
 import { editorReducer, type EditorState } from "./editorReducer";
 
@@ -25,7 +25,8 @@ function buildTree(count: number): MindMapModel {
 }
 
 /** State editing the last (deepest-created) node — worst case for findNode. */
-function stateForTree(model: MindMapModel, count: number): EditorState {
+function stateForTree(root: MindMapModel, count: number): EditorState {
+  const model: MindMapDocument = { title: "bench", roots: [root] };
   const targetId = `n${count - 1}`;
   const text = findNode(model, targetId)!.text;
   return {

@@ -3,7 +3,7 @@ import { render } from "vitest-browser-react";
 import { userEvent } from "vitest/browser";
 import OutlineEditor from "./OutlineEditor";
 import { useNoteEditor, type NoteEditorEngine } from "./useNoteEditor";
-import type { MindMapModel } from "../domain/model";
+import { findNode, type MindMapModel } from "../domain/model";
 import { NODE_MAX_CONTENT_WIDTH } from "../lib/measureText";
 
 const MODEL: MindMapModel = {
@@ -19,7 +19,7 @@ const MODEL: MindMapModel = {
 function harnessFor(model: MindMapModel) {
   return function Harness() {
     const engine = useNoteEditor({
-      initialContent: JSON.stringify(model),
+      initialContent: JSON.stringify({ version: 2, roots: model.children }),
       initialTitle: "Root",
     });
     (window as unknown as { __engine?: NoteEditorEngine }).__engine = engine;
@@ -79,14 +79,6 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
   }
 }
 
-function findNode(node: MindMapModel, id: string): MindMapModel | null {
-  if (node.id === id) return node;
-  for (const c of node.children) {
-    const hit = findNode(c, id);
-    if (hit) return hit;
-  }
-  return null;
-}
 
 async function activeTextarea(): Promise<HTMLTextAreaElement> {
   return waitFor(() =>
@@ -269,8 +261,8 @@ describe("OutlineEditor (browser e2e)", () => {
     await userEvent.keyboard("{End}{Enter}");
     // "a" is a tree root, so the new empty node is its child (a sibling would
     // be a new tree); it becomes active.
-    await waitFor(() => engine().model.children[0].children.length === 1);
-    expect(engine().model.children.length).toBe(2);
+    await waitFor(() => engine().model.roots[0].children.length === 1);
+    expect(engine().model.roots.length).toBe(2);
     const active = engine().state.view.activeNodeId;
     expect(active).not.toBe("a");
     expect(engine().state.view.editing).toBe(true);
@@ -294,7 +286,7 @@ describe("OutlineEditor (browser e2e)", () => {
     await userEvent.click(indentBtn);
     // "b" becomes the last child of "a".
     await waitFor(() => findNode(engine().model, "a")?.children.length === 1);
-    expect(engine().model.children.length).toBe(1);
+    expect(engine().model.roots.length).toBe(1);
     expect(findNode(engine().model, "a")?.children[0].id).toBe("b");
   });
 });

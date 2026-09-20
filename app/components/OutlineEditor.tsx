@@ -10,6 +10,7 @@ import { Link, router } from "@inertiajs/react";
 import { findNode, isMultiRoot } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
 import { pasteCommand } from "../application/editorCommands";
+import { serializeDocument } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
 import { supportsCheckbox } from "../application/nodeUtils";
 import {
@@ -113,7 +114,7 @@ export default function OutlineEditor({
   const rows = useMemo(() => outlineRows(model), [model]);
   // The root is the note title (edited in the header); it is not an outline
   // row — the rows start at the top-level nodes. See outlineRows().
-  const title = model.text;
+  const title = model.title;
   const activeNode_ = activeNodeId ? findNode(model, activeNodeId) : null;
   // Custom nodes (image / link) keep their rendered preview while editing and
   // expose the URL in an inline box below it, instead of swapping the whole row
@@ -406,8 +407,8 @@ export default function OutlineEditor({
           <button
             onClick={() =>
               onSaveToAccount({
-                title: model.text,
-                content: JSON.stringify(model),
+                title: model.title,
+                content: serializeDocument(model),
               })
             }
             className="shrink-0 whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
@@ -614,14 +615,6 @@ export default function OutlineEditor({
               );
             })}
           </ul>
-        {model.children.length === 0 && !readOnly && (
-          <button
-            onClick={() => withSave("add-child", { type: "addChild", nodeId: model.id })}
-            className="mx-auto mt-4 block rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50"
-          >
-            {t("addFirstItem")}
-          </button>
-        )}
 
         {/* Single overlaid editor for the active row (keeps the keyboard open). */}
         {overlay && (

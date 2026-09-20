@@ -69,7 +69,7 @@ async function clickNode(id: string) {
 
 async function renderEditor() {
   render(
-    <MindmapEditor initialContent={JSON.stringify(MODEL)} initialTitle="Root" />
+    <MindmapEditor initialContent={JSON.stringify({ version: 2, roots: MODEL.children })} initialTitle="Root" />
   );
   await waitFor(() => api().getActiveNodeId() === "a");
   await waitFor(() => api().getRedrawStats().redrawCount > 0);
@@ -107,7 +107,7 @@ describe("preference: tabBehavior = insert-child", () => {
     const activeId = api().getActiveNodeId()!;
     const b = api()
       .getModel()
-      .children.find((n) => n.id === "b")!;
+      .roots.find((n) => n.id === "b")!;
     expect(b.children.map((c) => c.id)).toContain(activeId);
   });
 });
@@ -128,7 +128,7 @@ describe("preference: arrowBehavior = navigate", () => {
     // Left must not have folded the branch.
     const a = api()
       .getModel()
-      .children.find((n) => n.id === "a")!;
+      .roots.find((n) => n.id === "a")!;
     expect(a.collapsed).not.toBe(true);
   });
 });
@@ -160,7 +160,7 @@ describe("preference: selectionMode = false (always edit)", () => {
 
     await userEvent.keyboard("{Control>}{Shift>}{Backspace}{/Shift}{/Control}");
     await waitFor(
-      () => !api().getModel().children.some((n) => n.id === "b")
+      () => !api().getModel().roots.some((n) => n.id === "b")
     );
     // Refocused on the nearest surviving node (the flat-order predecessor of
     // "b" is "a1").
