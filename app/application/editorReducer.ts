@@ -747,6 +747,18 @@ function withoutSelection(view: ViewState): ViewState {
   return view.selectedIds === undefined ? view : { ...view, selectedIds: undefined };
 }
 
+/**
+ * Whether an action MEANS to touch the multi-selection itself (see
+ * ViewState.selectedIds' doc comment) rather than being an unrelated edit or
+ * focus change that should drop it. The one predicate both branches of
+ * {@link editorReducer} below — the normal path and the undo/redo `replace`
+ * path — call before deciding whether to run {@link withoutSelection}, so
+ * "which actions keep the selection" can't drift between the two.
+ */
+function keepsSelection(type: EditorAction["type"]): boolean {
+  return type === "setSelectedIds" || type === "setCheckedMany";
+}
+
 function withCaretInBuffer(view: ViewState): ViewState {
   const len = view.editingText.length;
   const cursorPos = Math.min(Math.max(view.cursorPos, 0), len);
@@ -1254,9 +1266,12 @@ export function editorReducer(
     // "the active node always exists" is enforced by the reducer itself —
     // never left as a rule each caller must remember to apply. Idempotent: a
     // view that already points to a live node is returned unchanged.
-    const view = withoutSelection(
-      reconcileView(action.state.view, action.state.document, state.document)
+    const reconciled = reconcileView(
+      action.state.view,
+      action.state.document,
+      state.document
     );
+    const view = keepsSelection(action.type) ? reconciled : withoutSelection(reconciled);
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
   }
@@ -1286,12 +1301,10 @@ export function editorReducer(
       docResult.focusSelectionEnd
     )
   );
-  // setSelectedIds is the only action that MEANS to set selectedIds, and
-  // setCheckedMany acts ON the current selection rather than replacing it
-  // (see ViewState.selectedIds' doc comment) — every other action clears it,
-  // enforced here once rather than in each of the ~40 cases above, so a new
-  // action can't forget to and leave a stale multi-selection behind.
-  if (action.type !== "setSelectedIds" && action.type !== "setCheckedMany") {
+  // Every action other than the two `keepsSelection` ones clears the
+  // multi-selection, checked here once rather than in each of the ~40 cases
+  // above, so a new action can't forget to and leave a stale one behind.
+  if (!keepsSelection(action.type)) {
     nextView = withoutSelection(nextView);
   }
 

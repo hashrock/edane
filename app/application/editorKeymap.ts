@@ -39,13 +39,9 @@ import type {
 } from "./editorReducer";
 import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
-import {
-  findNode,
-  hasStructuralSuccessor,
-  nextCheckedState,
-  nextCheckedStateForGroup,
-} from "../domain/model";
+import { findNode, hasStructuralSuccessor, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
+import { planGroupCheckToggle } from "./selection";
 import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
@@ -518,22 +514,18 @@ export function buildKeymap(
       run: (ctx) => {
         // A multi-selection (issue #171) bulk-toggles: every eligible node
         // moves to the SAME target state in one undo entry, rather than each
-        // cycling its own done/open independently — see
-        // nextCheckedStateForGroup's doc comment for why a mixed group can't
-        // use the single-node cycle.
+        // cycling its own done/open independently. May create a checkbox on
+        // an eligible node that doesn't have one yet, like the single-node
+        // cycle below does on its first press — see planGroupCheckToggle.
         const selected = ctx.state.view.selectedIds;
         if (selected && selected.length > 1) {
-          const model = ctx.state.document.model;
-          const eligible = selected
-            .map((id) => findNode(model, id))
-            .filter(
-              (m): m is MindMapModel => !!m && supportsCheckbox(m.type ?? "text")
-            );
-          if (eligible.length === 0) return handled();
-          const checked = nextCheckedStateForGroup(eligible.map((m) => m.checked));
+          const plan = planGroupCheckToggle(ctx.state.document.model, selected, {
+            requireExisting: false,
+          });
+          if (!plan) return handled();
           return handled(
             dispatch(
-              { type: "setCheckedMany", nodeIds: eligible.map((m) => m.id), checked },
+              { type: "setCheckedMany", nodeIds: plan.nodeIds, checked: plan.checked },
               "check"
             ),
             SAVE

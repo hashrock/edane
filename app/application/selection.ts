@@ -14,7 +14,13 @@
  * ids — so it can be exercised the same way as every other tree-shaped
  * decision in this codebase (getFlatOrder-based), independent of Konva/React.
  */
-import { getFlatOrder, type MindMapDocument } from "../domain/model";
+import {
+  findNode,
+  nextCheckedStateForGroup,
+  getFlatOrder,
+  type MindMapDocument,
+} from "../domain/model";
+import { supportsCheckbox } from "./nodeUtils";
 
 export interface SelectionModifiers {
   shiftKey: boolean;
@@ -55,4 +61,41 @@ export function nextMultiSelection(
     return Array.from(base);
   }
   return [];
+}
+
+/**
+ * What a bulk "toggle task" gesture over a multi-selection does: which of
+ * the selected ids to touch, and the single target state to move them all
+ * to (see {@link nextCheckedStateForGroup}). Single authority for both bulk
+ * entry points — the checkbox click (MindmapEditor) and the ⌘/Ctrl+Shift+D
+ * keyboard shortcut (editorKeymap) — the same way `nextCheckedState` is the
+ * one authority for their single-node counterparts, so the two bulk paths
+ * can't quietly drift on which nodes qualify.
+ *
+ * `requireExisting`: a CLICK on the checkbox never creates one (that's what
+ * the single-node click handler does too — see MindmapEditor's setChecked
+ * call site), so the bulk click path only touches nodes that already show a
+ * box. The keyboard shortcut, like its single-node sibling, may turn an
+ * eligible node into a task for the first time.
+ *
+ * Returns null when nothing in the selection qualifies (nothing to dispatch).
+ */
+export function planGroupCheckToggle(
+  doc: MindMapDocument,
+  ids: readonly string[],
+  opts: { requireExisting: boolean }
+): { nodeIds: string[]; checked: boolean } | null {
+  const eligible = ids
+    .map((id) => findNode(doc, id))
+    .filter(
+      (n): n is NonNullable<typeof n> =>
+        !!n &&
+        supportsCheckbox(n.type ?? "text") &&
+        (!opts.requireExisting || n.checked !== undefined)
+    );
+  if (eligible.length === 0) return null;
+  return {
+    nodeIds: eligible.map((n) => n.id),
+    checked: nextCheckedStateForGroup(eligible.map((n) => n.checked)),
+  };
 }

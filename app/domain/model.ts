@@ -416,6 +416,9 @@ export function setChecked(
  * nodes in one document clone (one undo entry for a multi-select bulk toggle,
  * instead of one per node). Ids that no longer exist are silently skipped —
  * the selection they came from was read from a possibly-stale view.
+ *
+ * One DFS over the cloned tree rather than one {@link findNode} lookup per id
+ * (each of which is its own DFS) — O(nodes) instead of O(ids × nodes).
  */
 export function setCheckedMany(
   doc: MindMapDocument,
@@ -423,12 +426,16 @@ export function setCheckedMany(
   checked: boolean | null
 ): MindMapDocument {
   const cloned = cloneDocument(doc);
-  for (const nodeId of nodeIds) {
-    const node = findNode(cloned, nodeId);
-    if (!node) continue;
-    if (checked === null) delete node.checked;
-    else node.checked = checked;
+  const ids = new Set(nodeIds);
+  if (ids.size === 0) return cloned;
+  function walk(node: MindMapModel) {
+    if (ids.has(node.id)) {
+      if (checked === null) delete node.checked;
+      else node.checked = checked;
+    }
+    for (const child of node.children) walk(child);
   }
+  for (const root of cloned.roots) walk(root);
   return cloned;
 }
 

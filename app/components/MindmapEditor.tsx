@@ -16,10 +16,9 @@ import {
   firstRootId,
   getFlatOrder,
   isRoot,
-  nextCheckedStateForGroup,
   subtreeIds,
 } from "../domain/model";
-import { nextMultiSelection } from "../application/selection";
+import { nextMultiSelection, planGroupCheckToggle } from "../application/selection";
 import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
 import { pasteCommand, type PasteSource } from "../application/editorCommands";
@@ -774,20 +773,16 @@ export function MindmapEditorView({
   // it's part of a multi-selection flips every other tasked node in that
   // selection to the same state in one undo entry, instead of one at a time.
   // Only nodes that already show a checkbox participate — a click never
-  // creates one (⌘/Ctrl+Shift+D does; see editorKeymap.ts's toggle-task).
+  // creates one (⌘/Ctrl+Shift+D does; see editorKeymap.ts's toggle-task,
+  // which shares this same planning function with requireExisting: false).
   const toggleCheckedMany = useCallback(
     (selectedIds: readonly string[]) => {
-      const model = modelRef.current;
-      const tasked = selectedIds
-        .map((id) => findNode(model, id))
-        .filter(
-          (n): n is MindMapModel =>
-            !!n && n.checked !== undefined && supportsCheckbox(n.type ?? "text")
-        );
-      if (tasked.length === 0) return;
-      const checked = nextCheckedStateForGroup(tasked.map((n) => n.checked));
+      const plan = planGroupCheckToggle(modelRef.current, selectedIds, {
+        requireExisting: true,
+      });
+      if (!plan) return;
       const next = dispatch(
-        { type: "setCheckedMany", nodeIds: tasked.map((n) => n.id), checked },
+        { type: "setCheckedMany", nodeIds: plan.nodeIds, checked: plan.checked },
         "check"
       );
       if (noteId) saveNote(next.document.model);
@@ -2523,6 +2518,9 @@ export function MindmapEditorView({
     });
 
     // Draw nodes
+    // Built once per redraw rather than an `.includes()` scan per node below
+    // — O(nodes) instead of O(nodes × selection size).
+    const selectedSet = selectedIds && selectedIds.length > 1 ? new Set(selectedIds) : null;
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
       // Top-level nodes are the roots of their trees (the document root is
@@ -2544,10 +2542,7 @@ export function MindmapEditorView({
       // stroke so a whole bulk-selected group reads at a glance. Only
       // meaningful once there are 2+ ids (see ViewState.selectedIds: an
       // absent/single-element selection just means "activeNodeId alone").
-      const isMultiSelected =
-        !isEditing &&
-        (selectedIds?.length ?? 0) > 1 &&
-        selectedIds!.includes(node.id);
+      const isMultiSelected = !isEditing && !!selectedSet?.has(node.id);
       // Image/link nodes keep their rendered preview even while editing — the
       // URL is edited in the visible box below the node — so only TEXT nodes
       // swap to raw-text (live buffer) editing on the canvas. Markdown edits as
