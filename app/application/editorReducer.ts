@@ -19,7 +19,13 @@
  * Selection model: exactly ONE node is always active (`activeNodeId` is never
  * null). `editing` distinguishes "editing" (caret + text input) from "selected"
  * (node highlighted). Text range selection within a node uses cursorPos/
- * selectionEnd. There is no multi-node selection.
+ * selectionEnd.
+ *
+ * Multi-node selection (`ViewState.selectedIds`) is a separate, orthogonal
+ * concept layered on top for bulk operations (e.g. checking several boxes at
+ * once) — see its doc comment. `activeNodeId` still names the one node a
+ * click/keystroke without a bulk gesture would act on; there is no notion of
+ * multiple "active" nodes.
  */
 
 import type { IdSource, MindMapDocument, MindMapModel, NodeType } from "../domain/model";
@@ -51,6 +57,7 @@ import {
   setNodeType,
   setNodeStyle,
   setChecked,
+  setCheckedMany,
   setLinkMeta,
   moveNodeUp,
   moveNodeDown,
@@ -88,6 +95,23 @@ export interface ViewState {
    * deleted or moved to another parent.
    */
   lastChildByParent: Record<string, string>;
+  /**
+   * Node ids explicitly multi-selected (ctrl/cmd-click adds/removes one,
+   * shift-click selects a flat-order range — see application/selection.ts),
+   * for bulk operations like checking several boxes at once. Absent — not an
+   * empty array — means "no multi-selection": `activeNodeId` alone is
+   * selected, the pre-existing behavior, mirroring how MindMapModel.checked
+   * being absent means "not a task" rather than "unchecked".
+   *
+   * Only `setSelectedIds` ever sets this. Every OTHER action clears it back
+   * to absent (enforced once, at the tail of {@link editorReducer}) so a
+   * multi-selection can never linger through an edit or a focus change it
+   * wasn't part of — the same "no path may skip the invariant" reasoning as
+   * the caret bound in {@link withCaretInBuffer}. `setCheckedMany` is the one
+   * exception: it acts ON the current selection, so it leaves it in place for
+   * a follow-up bulk action.
+   */
+  selectedIds?: string[];
 }
 
 export interface EditorState {
@@ -235,6 +259,14 @@ export type EditorAction =
     }
   // Task checkbox; `null` removes it (the node stops being a task).
   | { type: "setChecked"; nodeId: string; checked: boolean | null }
+  // --- multi-select ---
+  // Replace the whole multi-selection set (ctrl/cmd-click toggle, shift-click
+  // range — computed by the caller; see application/selection.ts). Empty
+  // clears it back to just the active node.
+  | { type: "setSelectedIds"; ids: string[] }
+  // Bulk form of setChecked: apply the same checkbox state to every id (see
+  // domain/model.ts's setCheckedMany). `null` removes the checkbox from all.
+  | { type: "setCheckedMany"; nodeIds: string[]; checked: boolean | null }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -607,6 +639,12 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
+    case "setCheckedMany": {
+      if (action.nodeIds.length === 0) return { document };
+      const newModel = setCheckedMany(document.model, action.nodeIds, action.checked);
+      return { document: { ...document, model: newModel } };
+    }
+
     case "setTitle": {
       if (action.text === document.model.title) return { document };
       return {
@@ -635,6 +673,7 @@ function documentReducer(
     case "startEditing":
     case "selectAllInNode":
     case "dragSelect":
+    case "setSelectedIds":
       return { document };
 
     case "exitEditing": {
@@ -697,6 +736,17 @@ function documentReducer(
  * preserved when nothing is out of range, so a no-op still returns the same
  * reference.
  */
+function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Identity-preserving: only allocates when there was a selection to drop. */
+function withoutSelection(view: ViewState): ViewState {
+  return view.selectedIds === undefined ? view : { ...view, selectedIds: undefined };
+}
+
 function withCaretInBuffer(view: ViewState): ViewState {
   const len = view.editingText.length;
   const cursorPos = Math.min(Math.max(view.cursorPos, 0), len);
@@ -804,8 +854,18 @@ function viewReducer(
     case "setNodeStyle":
     case "setLinkMeta":
     case "setChecked":
+    case "setCheckedMany":
     case "copyBranch":
       return view;
+
+    case "setSelectedIds": {
+      const ids = Array.from(new Set(action.ids)).filter(
+        (nodeId) => findNode(model, nodeId) != null
+      );
+      const next = ids.length > 0 ? ids : undefined;
+      if (sameIds(view.selectedIds, next)) return view;
+      return { ...view, selectedIds: next };
+    }
 
     case "moveUp":
     case "arrowLeftEdge": {
@@ -1194,10 +1254,8 @@ export function editorReducer(
     // "the active node always exists" is enforced by the reducer itself —
     // never left as a rule each caller must remember to apply. Idempotent: a
     // view that already points to a live node is returned unchanged.
-    const view = reconcileView(
-      action.state.view,
-      action.state.document,
-      state.document
+    const view = withoutSelection(
+      reconcileView(action.state.view, action.state.document, state.document)
     );
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
@@ -1217,7 +1275,7 @@ export function editorReducer(
     docResult.document = { ...docResult.document, model };
     docResult.focusId = firstRootId(model);
   }
-  const nextView = withCaretInBuffer(
+  let nextView = withCaretInBuffer(
     viewReducer(
       state.view,
       action,
@@ -1228,6 +1286,14 @@ export function editorReducer(
       docResult.focusSelectionEnd
     )
   );
+  // setSelectedIds is the only action that MEANS to set selectedIds, and
+  // setCheckedMany acts ON the current selection rather than replacing it
+  // (see ViewState.selectedIds' doc comment) — every other action clears it,
+  // enforced here once rather than in each of the ~40 cases above, so a new
+  // action can't forget to and leave a stale multi-selection behind.
+  if (action.type !== "setSelectedIds" && action.type !== "setCheckedMany") {
+    nextView = withoutSelection(nextView);
+  }
 
   if (docResult.document === state.document && nextView === state.view) {
     return state;

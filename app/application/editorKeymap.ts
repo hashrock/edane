@@ -39,7 +39,12 @@ import type {
 } from "./editorReducer";
 import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
-import { findNode, hasStructuralSuccessor, nextCheckedState } from "../domain/model";
+import {
+  findNode,
+  hasStructuralSuccessor,
+  nextCheckedState,
+  nextCheckedStateForGroup,
+} from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
 import {
   DEFAULT_PREFERENCES,
@@ -511,6 +516,29 @@ export function buildKeymap(
       // already spoken for by one half or the other.
       match: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "d",
       run: (ctx) => {
+        // A multi-selection (issue #171) bulk-toggles: every eligible node
+        // moves to the SAME target state in one undo entry, rather than each
+        // cycling its own done/open independently — see
+        // nextCheckedStateForGroup's doc comment for why a mixed group can't
+        // use the single-node cycle.
+        const selected = ctx.state.view.selectedIds;
+        if (selected && selected.length > 1) {
+          const model = ctx.state.document.model;
+          const eligible = selected
+            .map((id) => findNode(model, id))
+            .filter(
+              (m): m is MindMapModel => !!m && supportsCheckbox(m.type ?? "text")
+            );
+          if (eligible.length === 0) return handled();
+          const checked = nextCheckedStateForGroup(eligible.map((m) => m.checked));
+          return handled(
+            dispatch(
+              { type: "setCheckedMany", nodeIds: eligible.map((m) => m.id), checked },
+              "check"
+            ),
+            SAVE
+          );
+        }
         const n = ctx.node;
         if (!n || !supportsCheckbox(n.type ?? "text")) return handled();
         return handled(dispatch({ type: "setChecked", nodeId: n.id, checked: nextCheckedState(n.checked) }, "check"), SAVE);

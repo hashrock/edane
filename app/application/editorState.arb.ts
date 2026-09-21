@@ -185,6 +185,8 @@ const KINDS = {
   setNodeStyle: true,
   setLinkMeta: true,
   setChecked: true,
+  setSelectedIds: true,
+  setCheckedMany: true,
   insertNodes: true,
   setTitle: true,
   replace: true,
@@ -349,6 +351,21 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       return { type: kind, nodeId: id(a), linkTitle: text, favicon: flag ? null : "f.ico" };
     case "setChecked":
       return { type: kind, nodeId: vis(a), checked: flag ? null : c % 2 === 0 };
+    case "setSelectedIds":
+    case "setCheckedMany": {
+      // A contiguous flat-order range between two visible nodes — the same
+      // shape a shift-click range-select or a bulk checkbox toggle actually
+      // produces (see application/selection.ts), rather than an arbitrary id
+      // subset no real gesture would generate.
+      const order = getFlatOrder(model);
+      const ai = a % order.length;
+      const bi = b % order.length;
+      const [lo, hi] = ai <= bi ? [ai, bi] : [bi, ai];
+      const ids = order.slice(lo, hi + 1);
+      return kind === "setSelectedIds"
+        ? { type: kind, ids }
+        : { type: kind, nodeIds: ids, checked: flag ? null : c % 2 === 0 };
+    }
     case "insertNodes":
       return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)] };
     case "setTitle":

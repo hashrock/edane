@@ -50,6 +50,8 @@ const READ_ONLY_ALLOWED = {
   setSelection: true,
   // クリックによる選択。`editing: true` で来たら下で剥がす。
   activateNode: true,
+  // 複数選択の集合を差し替えるだけ——文書もキャレットも動かさない。
+  setSelectedIds: true,
   // 編集モードから出るだけ——入ることはない（閲覧専用ではそもそも編集中に
   // ならないので実質 no-op）。
   exitEditing: true,
@@ -87,6 +89,7 @@ const READ_ONLY_ALLOWED = {
   setNodeStyle: false,
   setLinkMeta: false,
   setChecked: false,
+  setCheckedMany: false,
   insertNodes: false,
   setTitle: false,
   // undo/redo の文書丸ごと差し替え。閲覧専用では undo スタックに何も積まれない

@@ -21,7 +21,9 @@ import {
   setNodeStyle,
   setLinkMeta,
   setChecked,
+  setCheckedMany,
   nextCheckedState,
+  nextCheckedStateForGroup,
   toggleCollapse,
   addChildToNode,
   removeNode,
@@ -767,6 +769,50 @@ describe("task checkbox", () => {
     expect(nextCheckedState(undefined)).toBe(false);
     expect(nextCheckedState(false)).toBe(true);
     expect(nextCheckedState(true)).toBe(false);
+  });
+});
+
+describe("bulk task checkbox (issue #171)", () => {
+  const tree = (): MindMapDocument =>
+    doc([
+      { id: "a", text: "A", children: [] },
+      { id: "b", text: "B", children: [] },
+      { id: "c", text: "C", children: [] },
+    ]);
+
+  it("applies the same state to every listed node", () => {
+    const next = setCheckedMany(tree(), ["a", "b"], true);
+    expect(findNode(next, "a")!.checked).toBe(true);
+    expect(findNode(next, "b")!.checked).toBe(true);
+    expect(findNode(next, "c")!.checked).toBeUndefined();
+  });
+
+  it("removes the checkbox on null for every listed node", () => {
+    const withBoxes = setCheckedMany(tree(), ["a", "b"], true);
+    const cleared = setCheckedMany(withBoxes, ["a", "b"], null);
+    expect("checked" in findNode(cleared, "a")!).toBe(false);
+    expect("checked" in findNode(cleared, "b")!).toBe(false);
+  });
+
+  it("silently skips ids that no longer exist", () => {
+    const next = setCheckedMany(tree(), ["a", "nonexistent"], true);
+    expect(findNode(next, "a")!.checked).toBe(true);
+  });
+
+  it("does not mutate the input document", () => {
+    const before = tree();
+    setCheckedMany(before, ["a", "b"], true);
+    expect(findNode(before, "a")!.checked).toBeUndefined();
+  });
+
+  it("bulk toggle checks everyone unless all are already done, then opens everyone", () => {
+    expect(nextCheckedStateForGroup([undefined, false, undefined])).toBe(true);
+    expect(nextCheckedStateForGroup([true, false])).toBe(true);
+    expect(nextCheckedStateForGroup([true, true])).toBe(false);
+    // Vacuous truth: an empty group is trivially "all done", so this returns
+    // false. Never actually called this way — every caller filters to
+    // eligible nodes first and bails out on an empty result.
+    expect(nextCheckedStateForGroup([])).toBe(false);
   });
 });
 

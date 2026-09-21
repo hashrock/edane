@@ -285,6 +285,90 @@ describe("task checkbox (Cmd/Ctrl + Shift + D)", () => {
   });
 });
 
+describe("bulk task checkbox on a multi-selection (issue #171)", () => {
+  const withSelection = (st: EditorState, ids: string[]): EditorState => ({
+    ...st,
+    view: { ...st.view, selectedIds: ids },
+  });
+
+  it("checks every eligible selected node in one dispatch when none is done yet", () => {
+    const r = run(withSelection(state(model(), "a", false), ["a", "b"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.dispatched).toEqual([
+      { type: "setCheckedMany", nodeIds: ["a", "b"], checked: true },
+    ]);
+    expect(r.kinds).toEqual(["dispatch", "save"]);
+  });
+
+  it("unchecks everyone once the whole selection is already done", () => {
+    const m = model();
+    m.roots[0].checked = true; // a
+    m.roots[1].checked = true; // b
+    const r = run(withSelection(state(m, "a", false), ["a", "b"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.dispatched).toEqual([
+      { type: "setCheckedMany", nodeIds: ["a", "b"], checked: false },
+    ]);
+  });
+
+  it("a mixed group (some done, some not) checks everyone rather than cycling", () => {
+    const m = model();
+    m.roots[0].checked = true; // a: done
+    m.roots[1].checked = false; // b: open
+    const r = run(withSelection(state(m, "a", false), ["a", "b"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.dispatched).toEqual([
+      { type: "setCheckedMany", nodeIds: ["a", "b"], checked: true },
+    ]);
+  });
+
+  it("skips nodes whose kind shows no checkbox", () => {
+    const m = model();
+    m.roots[1].type = "image"; // b
+    const r = run(withSelection(state(m, "a", false), ["a", "b"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.dispatched).toEqual([
+      { type: "setCheckedMany", nodeIds: ["a"], checked: true },
+    ]);
+  });
+
+  it("does nothing when no node in the selection can take a checkbox", () => {
+    const m = model();
+    m.roots[0].type = "image";
+    m.roots[1].type = "image";
+    const r = run(withSelection(state(m, "a", false), ["a", "b"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.kinds).toEqual([]);
+    expect(r.handled).toBe(true);
+  });
+
+  it("a single-node selection (length 1) still uses the single-node cycle", () => {
+    const r = run(withSelection(state(model(), "a", false), ["a"]), {
+      key: "d",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(r.dispatched).toEqual([
+      { type: "setChecked", nodeId: "a", checked: false },
+    ]);
+  });
+});
+
 describe("reorder and bold (cross-mode)", () => {
   it("Alt+ArrowUp reorders up, in selection mode", () => {
     const r = run(state(model(), "b", false), { key: "ArrowUp", altKey: true });
