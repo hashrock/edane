@@ -187,6 +187,10 @@ const KINDS = {
   setChecked: true,
   setSelectedIds: true,
   setCheckedMany: true,
+  setNodeTypeMany: true,
+  setNodeStyleMany: true,
+  setCollapsedMany: true,
+  deleteNodes: true,
   insertNodes: true,
   setTitle: true,
   replace: true,
@@ -352,19 +356,41 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
     case "setChecked":
       return { type: kind, nodeId: vis(a), checked: flag ? null : c % 2 === 0 };
     case "setSelectedIds":
-    case "setCheckedMany": {
+    case "setCheckedMany":
+    case "setNodeTypeMany":
+    case "setNodeStyleMany":
+    case "setCollapsedMany":
+    case "deleteNodes": {
       // A contiguous flat-order range between two visible nodes — the same
-      // shape a shift-click range-select or a bulk checkbox toggle actually
-      // produces (see application/selection.ts), rather than an arbitrary id
-      // subset no real gesture would generate.
+      // shape a shift-click range-select and every bulk edit made from one
+      // actually produce (see application/selection.ts), rather than an
+      // arbitrary id subset no real gesture would generate. A range can hold
+      // a node and its own descendants, which is exactly the case the bulk
+      // delete has to survive.
       const order = getFlatOrder(model);
       const ai = a % order.length;
       const bi = b % order.length;
       const [lo, hi] = ai <= bi ? [ai, bi] : [bi, ai];
       const ids = order.slice(lo, hi + 1);
-      return kind === "setSelectedIds"
-        ? { type: kind, ids }
-        : { type: kind, nodeIds: ids, checked: flag ? null : c % 2 === 0 };
+      switch (kind) {
+        case "setSelectedIds":
+          return { type: kind, ids };
+        case "setCheckedMany":
+          return { type: kind, nodeIds: ids, checked: flag ? null : c % 2 === 0 };
+        case "setNodeTypeMany":
+          return { type: kind, nodeIds: ids, nodeType: pick(NODE_TYPES, b) };
+        case "setNodeStyleMany":
+          return {
+            type: kind,
+            nodeIds: ids,
+            fontSize: flag ? null : 8 + (b % 40),
+            bold: c % 2 === 0,
+          };
+        case "setCollapsedMany":
+          return { type: kind, nodeIds: ids, collapsed: flag };
+        case "deleteNodes":
+          return { type: kind, nodeIds: ids };
+      }
     }
     case "insertNodes":
       return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)] };

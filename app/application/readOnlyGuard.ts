@@ -90,6 +90,13 @@ const READ_ONLY_ALLOWED = {
   setLinkMeta: false,
   setChecked: false,
   setCheckedMany: false,
+  setNodeTypeMany: false,
+  setNodeStyleMany: false,
+  // 単体の toggleCollapse は「読むための操作」として通すが、一括版は通さない:
+  // 閲覧専用では複数選択そのものが作れない（canvas の mousedown が readOnly で
+  // 先に return する）ので、来るはずのないものを通す理由がない。
+  setCollapsedMany: false,
+  deleteNodes: false,
   insertNodes: false,
   setTitle: false,
   // undo/redo の文書丸ごと差し替え。閲覧専用では undo スタックに何も積まれない

@@ -18,7 +18,13 @@ import {
   isRoot,
   subtreeIds,
 } from "../domain/model";
-import { nextMultiSelection, planGroupCheckToggle } from "../application/selection";
+import {
+  checkboxMenuTargets,
+  nextMultiSelection,
+  outermostBranches,
+  planGroupCheckToggle,
+  planGroupCollapse,
+} from "../application/selection";
 import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
 import { pasteCommand, type PasteSource } from "../application/editorCommands";
@@ -328,6 +334,8 @@ export interface MindmapTestApi {
     cursorPos: number;
     selectionEnd: number;
     editing: boolean;
+    /** The multi-selection, or [] when there is none (see ViewState.selectedIds). */
+    selectedIds: readonly string[];
   };
   getNodeClickPoint: (id: string) => { x: number; y: number } | null;
   /**
@@ -1234,6 +1242,32 @@ export function MindmapEditorView({
     const hasChildren = node.children.length > 0;
     const type = node.type ?? "text";
 
+    // What the bulk-capable items below act on: the WHOLE multi-selection when
+    // the right-clicked node is part of one (issue #171), otherwise just that
+    // node. Computed once here so every group answers "one or many?" the same
+    // way, with the same take-over rule as the checkbox click — a selection
+    // that doesn't contain the clicked node is someone else's, so the menu
+    // stays single-node.
+    //
+    // Deliberately NOT bulk, and why: add child / add sibling / detach as a
+    // new tree each create or place exactly one node and hand it the focus
+    // (there is no sensible "which one did I just make?" for a group); upload
+    // image and publish branch open a picker/dialog that speaks for one node;
+    // open link / fetch metadata are offered only on the link that was
+    // clicked. Those stay single-node on purpose.
+    const targetIds =
+      selectedIds !== undefined &&
+      selectedIds.length > 1 &&
+      selectedIds.includes(nodeId)
+        ? selectedIds
+        : [nodeId];
+    const bulk = targetIds.length > 1;
+    /** Save after a bulk edit and hand the keyboard back to the canvas. */
+    const afterBulk = (next: EditorState) => {
+      if (noteId) saveNote(next.document.model);
+      focusEditorSoon();
+    };
+
     // Items are grouped by category; empty groups are dropped and the
     // remaining groups are joined with divider separators below.
     // 閲覧専用では編集系の項目・グループを個別にゲートし、閲覧操作
@@ -1308,11 +1342,29 @@ export function MindmapEditorView({
         });
       }
     }
-    if (hasChildren) {
+    // Collapse/expand. Over a selection every parent in it folds to the SAME
+    // state (planGroupCollapse), so a mixed group can't be left half-folded.
+    const collapsePlan = hasChildren
+      ? planGroupCollapse(modelRef.current, targetIds)
+      : null;
+    if (collapsePlan) {
       structureGroup.push({
-        label: node.collapsed ? t("menuExpand") : t("menuCollapse"),
+        label: collapsePlan.collapsed ? t("menuCollapse") : t("menuExpand"),
         onSelect: () => {
-          const next = toggleCollapse(nodeId);
+          // The single-node path keeps going through the component's
+          // toggleCollapse: it drives the fold/unfold morph animation, which
+          // is a one-node effect with nothing to show for a group.
+          const next =
+            collapsePlan.nodeIds.length === 1
+              ? toggleCollapse(collapsePlan.nodeIds[0])
+              : dispatch(
+                  {
+                    type: "setCollapsedMany",
+                    nodeIds: collapsePlan.nodeIds,
+                    collapsed: collapsePlan.collapsed,
+                  },
+                  "collapse"
+                );
           if (noteId) saveNote(next.document.model);
         },
       });
@@ -1323,12 +1375,17 @@ export function MindmapEditorView({
     const typeGroup: ContextMenuAction[] = [];
     if (!readOnly) {
       const setType = (nodeType: NodeType) => () => {
+        // The single-node action also ACTIVATES the converted node so its URL
+        // can be typed straight away; over a group there is no one node to
+        // hand that to, so the bulk action just converts and leaves the
+        // selection alone.
         const next = dispatch(
-          { type: "setNodeType", nodeId, nodeType },
+          bulk
+            ? { type: "setNodeTypeMany", nodeIds: [...targetIds], nodeType }
+            : { type: "setNodeType", nodeId, nodeType },
           "set-type"
         );
-        if (noteId) saveNote(next.document.model);
-        focusEditorSoon();
+        afterBulk(next);
       };
       for (const [nodeType, label] of Object.entries(NODE_TYPE_LABEL) as [
         NodeType,
@@ -1341,22 +1398,43 @@ export function MindmapEditorView({
     groups.push(typeGroup);
 
     // --- Task checkbox ---
-    // Offered for the kinds that can show one (supportsCheckbox).
+    // Offered for the kinds that can show one (supportsCheckbox). The menu is
+    // the third way to reach the bulk toggle the checkbox click and
+    // ⌘/Ctrl+Shift+D already do, and the only way to reach "add"/"remove" in
+    // bulk.
     const taskGroup: ContextMenuAction[] = [];
     if (!readOnly && supportsCheckbox(type)) {
-      if (node.checked === undefined) {
+      const { plain, tasked } = checkboxMenuTargets(modelRef.current, targetIds);
+      const applyChecked = (nodeIds: string[], checked: boolean | null) => {
+        const next = dispatch(
+          { type: "setCheckedMany", nodeIds, checked },
+          "check"
+        );
+        afterBulk(next);
+      };
+      if (plain.length > 0) {
         taskGroup.push({
           label: t("menuAddCheckbox"),
-          onSelect: () => setNodeChecked(nodeId, false),
+          // Only the nodes without a box: a task already in the selection
+          // keeps its done/open state instead of being reopened by the same
+          // call (the "add" reads as "give the ones that have none").
+          onSelect: () => applyChecked(plain, false),
         });
-      } else {
+      }
+      // One authority for the target state, shared with the click and the
+      // keyboard shortcut — a mixed group checks everyone unless they are
+      // all already done (nextCheckedStateForGroup).
+      const plan = planGroupCheckToggle(modelRef.current, tasked, {
+        requireExisting: true,
+      });
+      if (plan) {
         taskGroup.push({
-          label: node.checked ? t("menuUncheckTask") : t("menuCheckTask"),
-          onSelect: () => setNodeChecked(nodeId, !node.checked),
+          label: plan.checked ? t("menuCheckTask") : t("menuUncheckTask"),
+          onSelect: () => applyChecked(plan.nodeIds, plan.checked),
         });
         taskGroup.push({
           label: t("menuRemoveCheckbox"),
-          onSelect: () => setNodeChecked(nodeId, null),
+          onSelect: () => applyChecked(tasked, null),
         });
       }
     }
@@ -1366,12 +1444,27 @@ export function MindmapEditorView({
     const formatGroup: ContextMenuAction[] = [];
     if (!readOnly && type === "text") {
       const SIZES = [12, DEFAULT_FONT_SIZE, 18, 24, 32];
-      const current = node.fontSize ?? DEFAULT_FONT_SIZE;
-      const bigger = SIZES.find((s) => s > current);
-      const smaller = [...SIZES].reverse().find((s) => s < current);
+      // Only the plain-text nodes of the selection: an image or a markdown
+      // card draws neither a font size nor bold, so styling it would store a
+      // field nothing reads. The clicked node is one of them (the gate above).
+      const styled = targetIds
+        .map((id) => findNode(modelRef.current, id))
+        .filter(
+          (n): n is MindMapModel => !!n && (n.type ?? "text") === "text"
+        );
+      const sizes = styled.map((n) => n.fontSize ?? DEFAULT_FONT_SIZE);
+      // One step for the whole group, measured from its extremes so nobody
+      // moves the wrong way: "bigger" clears the largest node, "smaller"
+      // undercuts the smallest. Over a single node it is the step it always
+      // was.
+      const bigger = SIZES.find((size) => size > Math.max(...sizes));
+      const smaller = [...SIZES].reverse().find((size) => size < Math.min(...sizes));
       const applyStyle = (style: { fontSize?: number | null; bold?: boolean }) => {
+        const nodeIds = styled.map((n) => n.id);
         const next = dispatch(
-          { type: "setNodeStyle", nodeId, ...style },
+          nodeIds.length > 1
+            ? { type: "setNodeStyleMany", nodeIds, ...style }
+            : { type: "setNodeStyle", nodeId: nodeIds[0], ...style },
           "style"
         );
         if (noteId) saveNote(next.document.model);
@@ -1386,14 +1479,21 @@ export function MindmapEditorView({
           label: t("menuSmallerText"),
           onSelect: () => applyStyle({ fontSize: smaller }),
         });
-      if (node.fontSize !== undefined && node.fontSize !== DEFAULT_FONT_SIZE)
+      if (
+        styled.some(
+          (n) => n.fontSize !== undefined && n.fontSize !== DEFAULT_FONT_SIZE
+        )
+      )
         formatGroup.push({
           label: t("menuResetTextSize"),
           onSelect: () => applyStyle({ fontSize: null }),
         });
+      // Bold reads the group the same way the checkbox does: turn it on unless
+      // EVERY node already has it, then turn it off for all.
+      const allBold = styled.every((n) => n.bold);
       formatGroup.push({
-        label: node.bold ? t("menuBoldOff") : t("menuBoldOn"),
-        onSelect: () => applyStyle({ bold: !node.bold }),
+        label: allBold ? t("menuBoldOff") : t("menuBoldOn"),
+        onSelect: () => applyStyle({ bold: !allBold }),
       });
     }
     groups.push(formatGroup);
@@ -1413,7 +1513,17 @@ export function MindmapEditorView({
     copyGroup.push({
       label: t("menuCopyBranchText"),
       onSelect: () => {
-        navigator.clipboard.writeText(modelToText(node));
+        // One block per selected branch, in document order. A node that sits
+        // inside another selected branch is dropped (outermostBranches) —
+        // its text is already in that branch's block.
+        const text = outermostBranches(modelRef.current, targetIds)
+          .map((id) => findNode(modelRef.current, id))
+          .filter((n): n is MindMapModel => !!n)
+          // Not `.map(modelToText)`: modelToText's second parameter is the
+          // indent depth, and map would hand it the array index.
+          .map((branch) => modelToText(branch))
+          .join("\n");
+        navigator.clipboard.writeText(text);
       },
     });
     if (noteId && !readOnly) {
@@ -1434,7 +1544,15 @@ export function MindmapEditorView({
         label: t("menuDeleteNode"),
         danger: true,
         onSelect: () => {
-          const next = dispatch({ type: "deleteNode", nodeId }, "delete-node");
+          // Every selected branch goes in one undo entry. Unlike the edits
+          // above, this one leaves no selection behind — the nodes are gone
+          // (see keepsSelection in editorReducer.ts).
+          const next = dispatch(
+            bulk
+              ? { type: "deleteNodes", nodeIds: [...targetIds] }
+              : { type: "deleteNode", nodeId },
+            "delete-node"
+          );
           if (noteId) saveNote(next.document.model);
         },
       });
@@ -1459,7 +1577,8 @@ export function MindmapEditorView({
     fetchLinkMeta,
     triggerImageUpload,
     flashNodes,
-    setNodeChecked,
+    focusEditorSoon,
+    selectedIds,
     locale,
   ]);
 
@@ -2645,10 +2764,12 @@ export function MindmapEditorView({
       });
       group.add(rect);
 
-      // Multi-selection ring (issue #171): drawn as a separate dashed outline
-      // rather than folded into the fill/stroke ternaries above, so it reads
+      // Multi-selection ring (issue #171): drawn as a separate outline rather
+      // than folded into the fill/stroke ternaries above, so it reads
       // consistently ("this node is part of the bulk selection") whatever
       // the node's own resting colors are — root, markdown card, or plain.
+      // Solid, never dashed: the canvas draws no other dashed stroke, and a
+      // dashed ring read as "provisional" next to the crisp box it hugs.
       if (isMultiSelected) {
         group.add(
           new Konva.Rect({
@@ -2659,7 +2780,6 @@ export function MindmapEditorView({
             cornerRadius: 14,
             stroke: "#2563eb",
             strokeWidth: 2,
-            dash: [4, 3],
             listening: false,
             perfectDrawEnabled: false,
           })
@@ -3469,6 +3589,7 @@ export function MindmapEditorView({
           cursorPos: s.cursorPos,
           selectionEnd: s.selectionEnd,
           editing: s.editing,
+          selectedIds: s.selectedIds ?? [],
         };
       },
       getNodeClickPoint: (id: string) => {
