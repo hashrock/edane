@@ -722,22 +722,18 @@ const routes = app
       embed: c.req.query("embed") === "1",
     })
   )
-  .get("/notes/new", (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
-    return c.render("Notes/New", { user });
-  })
   .post("/notes", async (c) => {
     const user = c.get("user");
     if (!user) return c.redirect("/");
 
     const body = await c.req
-      .json<{ title?: string; isPublic?: boolean; content?: string }>()
-      .catch(() => ({}) as { title?: string; isPublic?: boolean; content?: string });
-    const isPublic = body.isPublic ?? false;
+      .json<{ title?: string; content?: string }>()
+      .catch(() => ({}) as { title?: string; content?: string });
     const id = crypto.randomUUID();
     // Guest-mode imports arrive with their own serialized content; a plain
-    // "new note" falls back to the starter topics.
+    // "new note" falls back to the starter topics. There is no new-note form
+    // anymore, so a note is always born private and is flipped from the
+    // editor header.
     await insertNote(
       drizzle(c.env.DB),
       {
@@ -745,7 +741,7 @@ const routes = app
         userId: user.id,
         title: body.title || "Untitled",
         plainContent: body.content ?? "トピック1\nトピック2",
-        isPublic,
+        isPublic: false,
         now: new Date().toISOString(),
       },
       c.env.ENCRYPTION_KEY

@@ -47,6 +47,7 @@ export default function NotesIndex({
     null
   );
   const [importing, setImporting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
   // コピー結果の一言。エディタのヘッダー（saveStatus）と同じ「見出し行に小さく
   // 出して勝手に消える」パターンに揃えている（専用のトースト機構は持たない）。
@@ -60,6 +61,17 @@ export default function NotesIndex({
     if (!q) return notes;
     return notes.filter((n) => (n.title || "").toLowerCase().includes(q));
   }, [notes, query]);
+
+  // 新規作成画面は挟まない。仮のタイトル・非公開でその場で作って、そのまま
+  // エディタへ送る（タイトルも公開設定もエディタのヘッダーで変えられる）。
+  const createNote = () => {
+    setCreating(true);
+    router.post(
+      "/notes",
+      { title: t("untitled"), content: t("starterTopics") },
+      { onError: () => setCreating(false) }
+    );
+  };
 
   const togglePin = (note: Note) => {
     router.post(
@@ -198,12 +210,14 @@ export default function NotesIndex({
                   {flash.text}
                 </span>
               )}
-              <Link
-                href="/notes/new"
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+              <button
+                type="button"
+                onClick={createNote}
+                disabled={creating}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {t("newNoteButton")}
-              </Link>
+                {creating ? t("creating") : t("newNoteButton")}
+              </button>
             </div>
           </div>
           {notes.length > 0 && (
