@@ -58,6 +58,10 @@ import {
   setNodeStyle,
   setChecked,
   setCheckedMany,
+  setCollapsedMany,
+  setNodeStyleMany,
+  setNodeTypeMany,
+  detachBranches,
   setLinkMeta,
   moveNodeUp,
   moveNodeDown,
@@ -107,9 +111,10 @@ export interface ViewState {
    * to absent (enforced once, at the tail of {@link editorReducer}) so a
    * multi-selection can never linger through an edit or a focus change it
    * wasn't part of — the same "no path may skip the invariant" reasoning as
-   * the caret bound in {@link withCaretInBuffer}. `setCheckedMany` is the one
-   * exception: it acts ON the current selection, so it leaves it in place for
-   * a follow-up bulk action.
+   * the caret bound in {@link withCaretInBuffer}. Two actions are exempt (see
+   * {@link keepsSelection}): `setCheckedMany`, which acts ON the current
+   * selection and leaves it in place for a follow-up bulk action, and
+   * `setSelection`, which is only the textarea reporting its own caret.
    */
   selectedIds?: string[];
 }
@@ -267,6 +272,24 @@ export type EditorAction =
   // Bulk form of setChecked: apply the same checkbox state to every id (see
   // domain/model.ts's setCheckedMany). `null` removes the checkbox from all.
   | { type: "setCheckedMany"; nodeIds: string[]; checked: boolean | null }
+  // Bulk forms of the single-node edits above, for the same multi-selection:
+  // one document clone and one undo entry for the whole group (see
+  // domain/model.ts's updateNodes). The context menu dispatches these when the
+  // right-clicked node is part of a selection; the selection survives them so
+  // a second bulk edit can follow.
+  | { type: "setNodeTypeMany"; nodeIds: string[]; nodeType: NodeType }
+  | {
+      type: "setNodeStyleMany";
+      nodeIds: string[];
+      fontSize?: number | null;
+      bold?: boolean;
+    }
+  // Bulk collapse/expand with an explicit state (not a per-node flip — see
+  // setCollapsedMany); leaves are filtered out below.
+  | { type: "setCollapsedMany"; nodeIds: string[]; collapsed: boolean }
+  // Bulk form of deleteNode: every named branch goes, subtrees and all. Unlike
+  // the edits above this one drops the selection — the nodes it named are gone.
+  | { type: "deleteNodes"; nodeIds: string[] }
   // --- bulk / misc ---
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
   | { type: "setTitle"; text: string }
@@ -645,6 +668,74 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
+    case "setNodeTypeMany": {
+      if (action.nodeIds.length === 0) return { document };
+      const newModel = setNodeTypeMany(
+        document.model,
+        action.nodeIds,
+        action.nodeType
+      );
+      // No focus handoff, unlike the single-node setNodeType: it activates the
+      // converted node so its URL can be typed straight away, which makes no
+      // sense for a group — the selection stays where it is instead.
+      return { document: { ...document, model: newModel } };
+    }
+
+    case "setNodeStyleMany": {
+      if (action.nodeIds.length === 0) return { document };
+      const newModel = setNodeStyleMany(document.model, action.nodeIds, {
+        fontSize: action.fontSize,
+        bold: action.bold,
+      });
+      return { document: { ...document, model: newModel } };
+    }
+
+    case "setCollapsedMany": {
+      // Only parents can fold — same guard as the single toggleCollapse, so a
+      // stale id or a leaf in the selection can't plant an invisible flag.
+      const ids = action.nodeIds.filter((nodeId) => {
+        const node = findNode(document.model, nodeId);
+        return node !== null && node.children.length > 0;
+      });
+      if (ids.length === 0) return { document };
+      const newModel = setCollapsedMany(document.model, ids, action.collapsed);
+      const newDocument = { ...document, model: newModel };
+      // If the focused node just got hidden, land on the outermost node that
+      // swallowed it (the first of the folded ids in flat order — the others
+      // are either deeper in the same branch or later in the document).
+      if (activeNodeId && !getFlatOrder(newModel).includes(activeNodeId)) {
+        const order = getFlatOrder(document.model);
+        const first = [...ids].sort(
+          (x, y) => order.indexOf(x) - order.indexOf(y)
+        )[0];
+        return { document: newDocument, focusId: first };
+      }
+      return { document: newDocument };
+    }
+
+    case "deleteNodes": {
+      const order = getFlatOrder(document.model);
+      const ids = action.nodeIds.filter(
+        (nodeId) => findNode(document.model, nodeId) !== null
+      );
+      if (ids.length === 0) return { document };
+      const newModel = detachBranches(document.model, ids);
+      const newDocument = { ...document, model: newModel };
+      if (activeNodeId && !findNode(newModel, activeNodeId)) {
+        // Land where the EARLIEST deleted branch was: everything before it in
+        // flat order survives unless it was deleted too, so the landing node
+        // is the same one a single delete of that branch would have chosen.
+        const first = [...ids].sort(
+          (x, y) => order.indexOf(x) - order.indexOf(y)
+        )[0];
+        return {
+          document: newDocument,
+          focusId: landOnPredecessor(document.model, first, newModel),
+        };
+      }
+      return { document: newDocument };
+    }
+
     case "setTitle": {
       if (action.text === document.model.title) return { document };
       return {
@@ -748,15 +839,32 @@ function withoutSelection(view: ViewState): ViewState {
 }
 
 /**
- * Whether an action MEANS to touch the multi-selection itself (see
- * ViewState.selectedIds' doc comment) rather than being an unrelated edit or
- * focus change that should drop it. The one predicate both branches of
+ * Whether an action leaves the multi-selection alone: it either MEANS to touch
+ * the selection itself (see ViewState.selectedIds' doc comment) or carries no
+ * user intent at all, as opposed to an edit or focus change that should drop
+ * it. The one predicate both branches of
  * {@link editorReducer} below — the normal path and the undo/redo `replace`
  * path — call before deciding whether to run {@link withoutSelection}, so
  * "which actions keep the selection" can't drift between the two.
  */
 function keepsSelection(type: EditorAction["type"]): boolean {
-  return type === "setSelectedIds" || type === "setCheckedMany";
+  return (
+    type === "setSelectedIds" ||
+    // The bulk edits act ON the current selection, so they leave it in place
+    // for a follow-up bulk action. `deleteNodes` is deliberately NOT here:
+    // the nodes it names no longer exist afterwards.
+    type === "setCheckedMany" ||
+    type === "setNodeTypeMany" ||
+    type === "setNodeStyleMany" ||
+    type === "setCollapsedMany" ||
+    // `setSelection` is not a user intent at all: it is the hidden textarea
+    // reporting its own caret back to us. React synthesises onSelect on
+    // mouseup (its SelectEventPlugin re-reads the DOM selection there), so
+    // EVERY modifier-click that built a multi-selection was followed by one
+    // that wiped it before the button came back up — the selection only ever
+    // lived between mousedown and mouseup.
+    type === "setSelection"
+  );
 }
 
 function withCaretInBuffer(view: ViewState): ViewState {
@@ -839,8 +947,10 @@ function viewReducer(
     case "cutBranch":
     case "pasteBranch":
     case "toggleCollapse":
+    case "setCollapsedMany":
     case "addChild":
     case "deleteNode":
+    case "deleteNodes":
     case "setNodeType":
     case "insertNodes":
     case "moveNodeUp":
@@ -864,6 +974,8 @@ function viewReducer(
 
     case "tab":
     case "setNodeStyle":
+    case "setNodeStyleMany":
+    case "setNodeTypeMany":
     case "setLinkMeta":
     case "setChecked":
     case "setCheckedMany":
@@ -1301,7 +1413,7 @@ export function editorReducer(
       docResult.focusSelectionEnd
     )
   );
-  // Every action other than the two `keepsSelection` ones clears the
+  // Every action other than the `keepsSelection` ones clears the
   // multi-selection, checked here once rather than in each of the ~40 cases
   // above, so a new action can't forget to and leave a stale one behind.
   if (!keepsSelection(action.type)) {

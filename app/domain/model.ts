@@ -337,28 +337,61 @@ export function addSiblingAfter(
   return cloned;
 }
 
+/**
+ * Apply an in-place edit to every named node in ONE document clone — the
+ * shared engine under every "…Many" setter below (and under their single-node
+ * counterparts, which are the same call with one id, so a bulk edit and the
+ * single edit it repeats can never drift on what the edit actually does).
+ *
+ * One clone and one DFS however many ids come in, rather than one
+ * {@link findNode} per id (each of which is its own DFS): a bulk gesture over
+ * a shift-selected range stays O(nodes), and it lands as ONE undo entry.
+ * Ids that no longer exist are silently skipped — a selection is read from a
+ * possibly-stale view.
+ */
+export function updateNodes(
+  doc: MindMapDocument,
+  nodeIds: readonly string[],
+  edit: (node: MindMapModel) => void
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const ids = new Set(nodeIds);
+  if (ids.size === 0) return cloned;
+  function walk(node: MindMapModel) {
+    if (ids.has(node.id)) edit(node);
+    for (const child of node.children) walk(child);
+  }
+  for (const root of cloned.roots) walk(root);
+  return cloned;
+}
+
+/** `text` is stored as absent. */
+const applyNodeType = (type: NodeType) => (node: MindMapModel) => {
+  node.type = type === "text" ? undefined : type;
+};
+
 /** Set a node's kind. Returns a new document. `text` is stored as absent. */
 export function setNodeType(
   doc: MindMapDocument,
   nodeId: string,
   type: NodeType
 ): MindMapDocument {
-  const cloned = cloneDocument(doc);
-  const node = findNode(cloned, nodeId);
-  if (!node) return cloned;
-  node.type = type === "text" ? undefined : type;
-  return cloned;
+  return updateNodes(doc, [nodeId], applyNodeType(type));
 }
 
-/** Set a text node's formatting (font size / bold). Returns a new document. */
-export function setNodeStyle(
+/** Bulk form of {@link setNodeType}: one kind for every id, in one clone. */
+export function setNodeTypeMany(
   doc: MindMapDocument,
-  nodeId: string,
-  style: { fontSize?: number | null; bold?: boolean }
+  nodeIds: readonly string[],
+  type: NodeType
 ): MindMapDocument {
-  const cloned = cloneDocument(doc);
-  const node = findNode(cloned, nodeId);
-  if (node) {
+  return updateNodes(doc, nodeIds, applyNodeType(type));
+}
+
+/** An absent field is left alone; `fontSize: null` clears it back to absent. */
+const applyNodeStyle =
+  (style: { fontSize?: number | null; bold?: boolean }) =>
+  (node: MindMapModel) => {
     if (style.fontSize !== undefined) {
       if (style.fontSize === null) delete node.fontSize;
       else node.fontSize = style.fontSize;
@@ -367,8 +400,24 @@ export function setNodeStyle(
       if (style.bold) node.bold = true;
       else delete node.bold;
     }
-  }
-  return cloned;
+  };
+
+/** Set a text node's formatting (font size / bold). Returns a new document. */
+export function setNodeStyle(
+  doc: MindMapDocument,
+  nodeId: string,
+  style: { fontSize?: number | null; bold?: boolean }
+): MindMapDocument {
+  return updateNodes(doc, [nodeId], applyNodeStyle(style));
+}
+
+/** Bulk form of {@link setNodeStyle}: one style for every id, in one clone. */
+export function setNodeStyleMany(
+  doc: MindMapDocument,
+  nodeIds: readonly string[],
+  style: { fontSize?: number | null; bold?: boolean }
+): MindMapDocument {
+  return updateNodes(doc, nodeIds, applyNodeStyle(style));
 }
 
 /** Set a link node's fetched metadata (title / favicon). Returns a new document. */
@@ -402,41 +451,26 @@ export function setChecked(
   nodeId: string,
   checked: boolean | null
 ): MindMapDocument {
-  const cloned = cloneDocument(doc);
-  const node = findNode(cloned, nodeId);
-  if (node) {
-    if (checked === null) delete node.checked;
-    else node.checked = checked;
-  }
-  return cloned;
+  return updateNodes(doc, [nodeId], applyChecked(checked));
 }
+
+/** `null` removes the checkbox; a boolean sets done/open. */
+const applyChecked = (checked: boolean | null) => (node: MindMapModel) => {
+  if (checked === null) delete node.checked;
+  else node.checked = checked;
+};
 
 /**
  * Bulk form of {@link setChecked}: apply the same checkbox state to several
  * nodes in one document clone (one undo entry for a multi-select bulk toggle,
- * instead of one per node). Ids that no longer exist are silently skipped —
- * the selection they came from was read from a possibly-stale view.
- *
- * One DFS over the cloned tree rather than one {@link findNode} lookup per id
- * (each of which is its own DFS) — O(nodes) instead of O(ids × nodes).
+ * instead of one per node). See {@link updateNodes}.
  */
 export function setCheckedMany(
   doc: MindMapDocument,
   nodeIds: readonly string[],
   checked: boolean | null
 ): MindMapDocument {
-  const cloned = cloneDocument(doc);
-  const ids = new Set(nodeIds);
-  if (ids.size === 0) return cloned;
-  function walk(node: MindMapModel) {
-    if (ids.has(node.id)) {
-      if (checked === null) delete node.checked;
-      else node.checked = checked;
-    }
-    for (const child of node.children) walk(child);
-  }
-  for (const root of cloned.roots) walk(root);
-  return cloned;
+  return updateNodes(doc, nodeIds, applyChecked(checked));
 }
 
 /**
@@ -466,6 +500,22 @@ export function nextCheckedStateForGroup(
   checked: readonly (boolean | undefined)[]
 ): boolean {
   return !checked.every((c) => c === true);
+}
+
+/**
+ * Bulk form of {@link toggleCollapse} with an EXPLICIT state rather than a
+ * per-node flip: a mixed group (some folded, some open) has no single state to
+ * flip from, so the caller decides one for the whole group and every node ends
+ * up the same — the same reasoning as {@link nextCheckedStateForGroup}.
+ */
+export function setCollapsedMany(
+  doc: MindMapDocument,
+  nodeIds: readonly string[],
+  collapsed: boolean
+): MindMapDocument {
+  return updateNodes(doc, nodeIds, (node) => {
+    node.collapsed = collapsed;
+  });
 }
 
 /** Toggle (or set) a node's collapsed flag. Returns a new document. */
@@ -525,6 +575,30 @@ export function detachBranch(
   if (!loc) return { doc: cloned, removed: null };
   const [removed] = loc.siblings.splice(loc.index, 1);
   return { doc: cloned, removed };
+}
+
+/**
+ * Detach SEVERAL whole subtrees at once (the bulk form of
+ * {@link detachBranch}, minus the removed branches the single form hands back
+ * — a bulk delete has nothing to hand anywhere). Ids that name a node inside
+ * another named subtree cost nothing: the outer one is dropped first and its
+ * descendants go with it, so a selection spanning a parent and its own child
+ * deletes exactly the parent's branch rather than tripping over itself.
+ *
+ * Every surviving node is rebuilt, so the returned document shares no mutable
+ * object with `doc`, like every other function here. Deleting every root
+ * leaves `roots` empty — callers restore the invariant with {@link ensureRoot}.
+ */
+export function detachBranches(
+  doc: MindMapDocument,
+  nodeIds: readonly string[]
+): MindMapDocument {
+  const ids = new Set(nodeIds);
+  const prune = (nodes: MindMapModel[]): MindMapModel[] =>
+    nodes
+      .filter((n) => !ids.has(n.id))
+      .map((n) => ({ ...n, children: prune(n.children) }));
+  return { ...doc, roots: prune(doc.roots) };
 }
 
 /**

@@ -1783,6 +1783,116 @@ describe("multi-selection (issue #171)", () => {
     expect(typed.view.selectedIds).toBeUndefined();
   });
 
+  it("a caret report from the textarea (setSelection) keeps the selection", () => {
+    // React synthesises onSelect on mouseup, so the modifier-click that just
+    // built the selection is immediately followed by one of these. Clearing
+    // here meant the selection never outlived the press (#171 regression).
+    const model = sampleModel();
+    const selected = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const reported = editorReducer(selected, {
+      type: "setSelection",
+      cursorPos: 0,
+      selectionEnd: 1,
+    });
+    expect(reported.view.selectedIds).toEqual(["a", "b"]);
+  });
+
+  it("setNodeTypeMany converts every id, and keeps the selection", () => {
+    const selected = editorReducer(stateAt(sampleModel(), "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "a1"],
+    });
+    const next = editorReducer(selected, {
+      type: "setNodeTypeMany",
+      nodeIds: ["a", "a1"],
+      nodeType: "link",
+    });
+    expect(findNode(next.document.model, "a")?.type).toBe("link");
+    expect(findNode(next.document.model, "a1")?.type).toBe("link");
+    // Unlike the single-node setNodeType it takes no focus: there is no one
+    // node to hand the URL box to.
+    expect(next.view.activeNodeId).toBe("a");
+    expect(next.view.selectedIds).toEqual(["a", "a1"]);
+  });
+
+  it("setNodeStyleMany styles every id, and keeps the selection", () => {
+    const selected = editorReducer(stateAt(sampleModel(), "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const next = editorReducer(selected, {
+      type: "setNodeStyleMany",
+      nodeIds: ["a", "b"],
+      fontSize: 24,
+      bold: true,
+    });
+    for (const id of ["a", "b"]) {
+      expect(findNode(next.document.model, id)?.fontSize).toBe(24);
+      expect(findNode(next.document.model, id)?.bold).toBe(true);
+    }
+    expect(next.view.selectedIds).toEqual(["a", "b"]);
+  });
+
+  it("setCollapsedMany folds only the ids that have children", () => {
+    const next = editorReducer(stateAt(sampleModel(), "a"), {
+      type: "setCollapsedMany",
+      // "b" is a leaf and "ghost" is gone: neither may take a collapsed flag.
+      nodeIds: ["a", "b", "ghost"],
+      collapsed: true,
+    });
+    expect(findNode(next.document.model, "a")?.collapsed).toBe(true);
+    expect(findNode(next.document.model, "b")?.collapsed).toBeUndefined();
+  });
+
+  it("setCollapsedMany refocuses when the active node was just hidden", () => {
+    const next = editorReducer(stateAt(sampleModel(), "a1"), {
+      type: "setCollapsedMany",
+      nodeIds: ["a"],
+      collapsed: true,
+    });
+    expect(next.view.activeNodeId).toBe("a");
+  });
+
+  it("setCollapsedMany over leaves only is a no-op", () => {
+    const base = stateAt(sampleModel(), "a");
+    expect(
+      editorReducer(base, { type: "setCollapsedMany", nodeIds: ["b"], collapsed: true })
+    ).toBe(base);
+  });
+
+  it("deleteNodes removes every branch at once and lands on the predecessor", () => {
+    const next = editorReducer(stateAt(sampleModel(), "a"), {
+      type: "deleteNodes",
+      // "a1" is inside "a": deleting both must not trip over itself.
+      nodeIds: ["a", "a1"],
+    });
+    expect(next.document.model.roots.map((r) => r.id)).toEqual(["b"]);
+    expect(next.view.activeNodeId).toBe("b");
+    // The nodes are gone, so no selection may survive pointing at them.
+    expect(next.view.selectedIds).toBeUndefined();
+  });
+
+  it("deleteNodes keeps the focus when the active node survives", () => {
+    const next = editorReducer(stateAt(sampleModel(), "b"), {
+      type: "deleteNodes",
+      nodeIds: ["a"],
+    });
+    expect(next.view.activeNodeId).toBe("b");
+  });
+
+  it("deleting every root leaves the blank root the document must keep", () => {
+    const next = editorReducer(stateAt(sampleModel(), "a"), {
+      type: "deleteNodes",
+      nodeIds: ["a", "b"],
+    });
+    expect(next.document.model.roots).toHaveLength(1);
+    expect(next.document.model.roots[0].text).toBe("");
+    expect(next.view.activeNodeId).toBe(next.document.model.roots[0].id);
+  });
+
   it("undo/redo (replace) never resurrects a stale multi-selection", () => {
     const model = sampleModel();
     const base = stateAt(model, "a");

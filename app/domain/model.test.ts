@@ -22,6 +22,10 @@ import {
   setLinkMeta,
   setChecked,
   setCheckedMany,
+  setCollapsedMany,
+  setNodeTypeMany,
+  setNodeStyleMany,
+  detachBranches,
   nextCheckedState,
   nextCheckedStateForGroup,
   toggleCollapse,
@@ -813,6 +817,91 @@ describe("bulk task checkbox (issue #171)", () => {
     // false. Never actually called this way — every caller filters to
     // eligible nodes first and bails out on an empty result.
     expect(nextCheckedStateForGroup([])).toBe(false);
+  });
+});
+
+describe("detachBranches", () => {
+  const tree = (): MindMapDocument =>
+    doc([
+      {
+        id: "a",
+        text: "A",
+        children: [{ id: "a1", text: "A1", children: [{ id: "a1a", text: "A1a", children: [] }] }],
+      },
+      { id: "b", text: "B", children: [] },
+    ]);
+
+  it("removes each branch with its whole subtree", () => {
+    const next = detachBranches(tree(), ["a1"]);
+    expect(findNode(next, "a1")).toBeNull();
+    expect(findNode(next, "a1a")).toBeNull();
+    expect(findNode(next, "a")).not.toBeNull();
+  });
+
+  it("survives a selection that names a node and its own descendant", () => {
+    const next = detachBranches(tree(), ["a", "a1"]);
+    expect(next.roots.map((r) => r.id)).toEqual(["b"]);
+  });
+
+  it("can empty the document (the caller restores the root)", () => {
+    expect(detachBranches(tree(), ["a", "b"]).roots).toEqual([]);
+  });
+
+  it("does not mutate the input, and shares no node with it", () => {
+    const before = tree();
+    const next = detachBranches(before, ["b"]);
+    expect(before.roots.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(findNode(next, "a1")).not.toBe(findNode(before, "a1"));
+  });
+
+  it("ignores ids that no longer exist", () => {
+    expect(detachBranches(tree(), ["ghost"]).roots.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("setCollapsedMany", () => {
+  const tree = (): MindMapDocument =>
+    doc([
+      { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] },
+      { id: "b", text: "B", collapsed: true, children: [{ id: "b1", text: "B1", children: [] }] },
+    ]);
+
+  it("moves the whole group to the given state, folded or not", () => {
+    const next = setCollapsedMany(tree(), ["a", "b"], true);
+    expect(findNode(next, "a")!.collapsed).toBe(true);
+    expect(findNode(next, "b")!.collapsed).toBe(true);
+  });
+
+  it("does not mutate the input document", () => {
+    const before = tree();
+    setCollapsedMany(before, ["a"], true);
+    expect(findNode(before, "a")!.collapsed).toBeUndefined();
+  });
+});
+
+describe("setNodeTypeMany / setNodeStyleMany", () => {
+  const tree = (): MindMapDocument =>
+    doc([
+      { id: "a", text: "A", children: [] },
+      { id: "b", text: "B", fontSize: 24, bold: true, children: [] },
+    ]);
+
+  it("converts every listed node, storing text as absent", () => {
+    const next = setNodeTypeMany(tree(), ["a", "b"], "link");
+    expect(findNode(next, "a")!.type).toBe("link");
+    expect(findNode(next, "b")!.type).toBe("link");
+    const back = setNodeTypeMany(next, ["a", "b"], "text");
+    expect("type" in findNode(back, "a")!).toBe(true);
+    expect(findNode(back, "a")!.type).toBeUndefined();
+  });
+
+  it("applies only the fields the style names, and clears on null", () => {
+    const next = setNodeStyleMany(tree(), ["a", "b"], { bold: false });
+    expect("bold" in findNode(next, "b")!).toBe(false);
+    // fontSize wasn't named, so it stayed.
+    expect(findNode(next, "b")!.fontSize).toBe(24);
+    const cleared = setNodeStyleMany(next, ["b"], { fontSize: null });
+    expect("fontSize" in findNode(cleared, "b")!).toBe(false);
   });
 });
 
