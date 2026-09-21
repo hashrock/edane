@@ -14,9 +14,11 @@ import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import {
   findNode,
   firstRootId,
+  getFlatOrder,
   isRoot,
   subtreeIds,
 } from "../domain/model";
+import { nextMultiSelection, planGroupCheckToggle } from "../application/selection";
 import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
 import { pasteCommand, type PasteSource } from "../application/editorCommands";
@@ -439,7 +441,7 @@ export function MindmapEditorView({
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
-    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
+    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd, selectedIds },
   } = state;
 
   // Shared text-input glue (input ref, IME state, typeText handlers) — the same
@@ -766,6 +768,29 @@ export function MindmapEditorView({
   );
   const setNodeCheckedRef = useRef(setNodeChecked);
   setNodeCheckedRef.current = setNodeChecked;
+
+  // Bulk form (issue #171): clicking any ALREADY-TASKED node's checkbox while
+  // it's part of a multi-selection flips every other tasked node in that
+  // selection to the same state in one undo entry, instead of one at a time.
+  // Only nodes that already show a checkbox participate — a click never
+  // creates one (⌘/Ctrl+Shift+D does; see editorKeymap.ts's toggle-task,
+  // which shares this same planning function with requireExisting: false).
+  const toggleCheckedMany = useCallback(
+    (selectedIds: readonly string[]) => {
+      const plan = planGroupCheckToggle(modelRef.current, selectedIds, {
+        requireExisting: true,
+      });
+      if (!plan) return;
+      const next = dispatch(
+        { type: "setCheckedMany", nodeIds: plan.nodeIds, checked: plan.checked },
+        "check"
+      );
+      if (noteId) saveNote(next.document.model);
+    },
+    [dispatch, noteId, saveNote]
+  );
+  const toggleCheckedManyRef = useRef(toggleCheckedMany);
+  toggleCheckedManyRef.current = toggleCheckedMany;
 
   // --- Image upload: push a file to R2 and turn the node into an image ---
   const uploadAndSetImage = useCallback(
@@ -2493,6 +2518,9 @@ export function MindmapEditorView({
     });
 
     // Draw nodes
+    // Built once per redraw rather than an `.includes()` scan per node below
+    // — O(nodes) instead of O(nodes × selection size).
+    const selectedSet = selectedIds && selectedIds.length > 1 ? new Set(selectedIds) : null;
     nodes.forEach((node, index) => {
       if (!visible[index]) return;
       // Top-level nodes are the roots of their trees (the document root is
@@ -2509,6 +2537,12 @@ export function MindmapEditorView({
       const isMarkdown = node.type === "markdown";
       const isEditing = editing && activeNodeId === node.id && !isMarkdown;
       const isSelected = activeNodeId === node.id && !isEditing;
+      // Part of an active multi-selection (issue #171) — a THIRD state
+      // alongside isSelected/isEditing, drawn as a tinted fill + accent
+      // stroke so a whole bulk-selected group reads at a glance. Only
+      // meaningful once there are 2+ ids (see ViewState.selectedIds: an
+      // absent/single-element selection just means "activeNodeId alone").
+      const isMultiSelected = !isEditing && !!selectedSet?.has(node.id);
       // Image/link nodes keep their rendered preview even while editing — the
       // URL is edited in the visible box below the node — so only TEXT nodes
       // swap to raw-text (live buffer) editing on the canvas. Markdown edits as
@@ -2611,6 +2645,27 @@ export function MindmapEditorView({
       });
       group.add(rect);
 
+      // Multi-selection ring (issue #171): drawn as a separate dashed outline
+      // rather than folded into the fill/stroke ternaries above, so it reads
+      // consistently ("this node is part of the bulk selection") whatever
+      // the node's own resting colors are — root, markdown card, or plain.
+      if (isMultiSelected) {
+        group.add(
+          new Konva.Rect({
+            x: node.x - 3,
+            y: node.y - rectHeight / 2 - 3,
+            width: rectWidth + 6,
+            height: rectHeight + 6,
+            cornerRadius: 14,
+            stroke: "#2563eb",
+            strokeWidth: 2,
+            dash: [4, 3],
+            listening: false,
+            perfectDrawEnabled: false,
+          })
+        );
+      }
+
       if (asImage) {
         const d = imageDisplaySize(node.text);
         if (d.status === "loaded" && d.img) {
@@ -2711,6 +2766,15 @@ export function MindmapEditorView({
               // The node under the box must not also take the press: hitting
               // the checkbox is a toggle, never a select-or-edit.
               e.cancelBubble = true;
+              // Clicking a tasked node's box while it's part of a multi-
+              // selection (issue #171) flips the whole selection together;
+              // otherwise (no multi-selection, or this node isn't in it) it's
+              // the single-node toggle it always was.
+              const selected = stateRef.current.view.selectedIds;
+              if (selected && selected.length > 1 && selected.includes(node.id)) {
+                toggleCheckedManyRef.current(selected);
+                return;
+              }
               // Read the state from the MODEL, not from the frame this shape
               // was drawn for: a second click that arrives before the redraw
               // would otherwise re-send the state the node already has.
@@ -2822,6 +2886,30 @@ export function MindmapEditorView({
           return;
         }
         e.cancelBubble = true;
+
+        // Ctrl/Cmd/Shift-click: extend the multi-selection (issue #171)
+        // instead of the normal select/edit/drag flow below — no caret move,
+        // no drag arm. A plain click falls through unchanged; activateNode
+        // further down is what clears a stale selection (see
+        // ViewState.selectedIds's doc comment).
+        const nativeEvt = e.evt;
+        if (nativeEvt && (nativeEvt.shiftKey || nativeEvt.ctrlKey || nativeEvt.metaKey)) {
+          const cur = stateRef.current;
+          const ids = nextMultiSelection(
+            cur.document.model,
+            cur.view.activeNodeId,
+            cur.view.selectedIds ?? [],
+            node.id,
+            {
+              shiftKey: nativeEvt.shiftKey,
+              toggleKey: nativeEvt.ctrlKey || nativeEvt.metaKey,
+            }
+          );
+          dispatch({ type: "setSelectedIds", ids });
+          focusEditorSoon();
+          return;
+        }
+
         const stage = konvaStageRef.current;
         if (!stage) return;
         const pointer = stage.getPointerPosition();
@@ -3080,7 +3168,7 @@ export function MindmapEditorView({
   // locale: キャンバスに直接描く文言（読み込み中 / 行数バッジ / フィールド追加
   // ボタンなど）を言語切り替えで描き直す。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, activeNodeId, editing, editingText, konvaReady, dispatch, readOnly, viewportTick, locale]);
+  }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {

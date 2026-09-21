@@ -1694,3 +1694,103 @@ describe("reconcileView", () => {
     expect(reconciled.activeNodeId).toBe("b");
   });
 });
+
+describe("multi-selection (issue #171)", () => {
+  it("setSelectedIds stores the given ids, deduped and filtered to ones that exist", () => {
+    const model = sampleModel();
+    const next = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b", "a", "nonexistent"],
+    });
+    expect(next.view.selectedIds).toEqual(["a", "b"]);
+  });
+
+  it("an empty ids array clears the selection back to absent", () => {
+    const model = sampleModel();
+    const selected = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const cleared = editorReducer(selected, { type: "setSelectedIds", ids: [] });
+    expect(cleared.view.selectedIds).toBeUndefined();
+  });
+
+  it("setCheckedMany applies the same checked state to every listed node in one edit", () => {
+    const model = sampleModel();
+    const next = editorReducer(stateAt(model, "a"), {
+      type: "setCheckedMany",
+      nodeIds: ["a", "b"],
+      checked: true,
+    });
+    expect(findNode(next.document.model, "a")!.checked).toBe(true);
+    expect(findNode(next.document.model, "b")!.checked).toBe(true);
+  });
+
+  it("setCheckedMany is a no-op (same reference) for an empty id list", () => {
+    const model = sampleModel();
+    const state = stateAt(model, "a");
+    const next = editorReducer(state, {
+      type: "setCheckedMany",
+      nodeIds: [],
+      checked: true,
+    });
+    expect(next).toBe(state);
+  });
+
+  it("setCheckedMany leaves the selection in place for a follow-up bulk action", () => {
+    const model = sampleModel();
+    const selected = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const toggled = editorReducer(selected, {
+      type: "setCheckedMany",
+      nodeIds: ["a", "b"],
+      checked: true,
+    });
+    expect(toggled.view.selectedIds).toEqual(["a", "b"]);
+  });
+
+  it("every other action clears a stale multi-selection — even a click on a selected node", () => {
+    const model = sampleModel();
+    const selected = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const clicked = editorReducer(selected, {
+      type: "activateNode",
+      nodeId: "a",
+      cursorPos: 0,
+      selectionEnd: 1,
+      editing: false,
+    });
+    expect(clicked.view.selectedIds).toBeUndefined();
+  });
+
+  it("a plain structural edit (typing) clears the selection too", () => {
+    const model = sampleModel();
+    const selected = editorReducer(stateAt(model, "a"), {
+      type: "setSelectedIds",
+      ids: ["a", "b"],
+    });
+    const typed = editorReducer(selected, {
+      type: "typeText",
+      text: "Az",
+      cursorPos: 2,
+      selectionEnd: 2,
+      commitModel: true,
+    });
+    expect(typed.view.selectedIds).toBeUndefined();
+  });
+
+  it("undo/redo (replace) never resurrects a stale multi-selection", () => {
+    const model = sampleModel();
+    const base = stateAt(model, "a");
+    const staleView: ViewState = { ...base.view, selectedIds: ["a", "b"] };
+    const next = editorReducer(base, {
+      type: "replace",
+      state: { document: base.document, view: staleView },
+    });
+    expect(next.view.selectedIds).toBeUndefined();
+  });
+});

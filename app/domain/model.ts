@@ -412,6 +412,34 @@ export function setChecked(
 }
 
 /**
+ * Bulk form of {@link setChecked}: apply the same checkbox state to several
+ * nodes in one document clone (one undo entry for a multi-select bulk toggle,
+ * instead of one per node). Ids that no longer exist are silently skipped —
+ * the selection they came from was read from a possibly-stale view.
+ *
+ * One DFS over the cloned tree rather than one {@link findNode} lookup per id
+ * (each of which is its own DFS) — O(nodes) instead of O(ids × nodes).
+ */
+export function setCheckedMany(
+  doc: MindMapDocument,
+  nodeIds: readonly string[],
+  checked: boolean | null
+): MindMapDocument {
+  const cloned = cloneDocument(doc);
+  const ids = new Set(nodeIds);
+  if (ids.size === 0) return cloned;
+  function walk(node: MindMapModel) {
+    if (ids.has(node.id)) {
+      if (checked === null) delete node.checked;
+      else node.checked = checked;
+    }
+    for (const child of node.children) walk(child);
+  }
+  for (const root of cloned.roots) walk(root);
+  return cloned;
+}
+
+/**
  * The state the "toggle task" gesture moves a checkbox to — one authority for
  * the keyboard shortcut, the context menu and the click on the box itself:
  *
@@ -424,6 +452,20 @@ export function setChecked(
  */
 export function nextCheckedState(checked: boolean | undefined): boolean {
   return checked === false;
+}
+
+/**
+ * The state a BULK "toggle task" gesture (checking several nodes at once)
+ * moves the whole group to. A mixed group — some done, some open, some not a
+ * task yet — has no single "current" state for {@link nextCheckedState}'s
+ * cycle to advance from, so bulk toggling isn't a cycle: check everyone
+ * unless they are ALL already done, in which case open them all. That is the
+ * one answer that doesn't depend on which node's state happened to be read.
+ */
+export function nextCheckedStateForGroup(
+  checked: readonly (boolean | undefined)[]
+): boolean {
+  return !checked.every((c) => c === true);
 }
 
 /** Toggle (or set) a node's collapsed flag. Returns a new document. */
