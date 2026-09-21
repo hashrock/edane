@@ -323,16 +323,8 @@ export const MESSAGES_JA = {
   purgeConfirmMessage:
     "「{title}」を完全に削除します。この操作は取り消せません。",
 
-  // --- 新規ノート ---
-  newNoteHeadTitle: "新規ノート",
-  newNoteHeading: "新しいノート",
-  newNoteDesc: "タイトルはヘッダーに表示されます。ノードは後から追加できます。",
-  titleLabel: "タイトル",
-  titleExample: "例: プロジェクト計画",
-  makePublic: "公開する",
-  makePublicDesc: "リンクを知っている人が閲覧できます",
+  // --- 新規ノート（一覧の「+ 新規作成」からその場で作る） ---
   creating: "作成中...",
-  createAndEdit: "作成して編集",
   starterTopics: "トピック1\nトピック2",
 
   // --- アプリケーション層の文言 ---
@@ -669,16 +661,8 @@ export const MESSAGES_EN = {
   purgeConfirmMessage:
     '"{title}" will be permanently deleted. This cannot be undone.',
 
-  // --- New note ---
-  newNoteHeadTitle: "New note",
-  newNoteHeading: "New note",
-  newNoteDesc: "The title is shown in the header; nodes are added afterwards.",
-  titleLabel: "Title",
-  titleExample: "e.g. Project plan",
-  makePublic: "Make public",
-  makePublicDesc: "Anyone with the link can view it",
+  // --- New note (created in place from "+ New note" in the list) ---
   creating: "Creating...",
-  createAndEdit: "Create and edit",
   starterTopics: "Topic 1\nTopic 2",
 
   // --- Application-layer strings ---
