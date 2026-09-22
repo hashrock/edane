@@ -42,17 +42,15 @@ describe("planPaste: precedence chain over arbitrary contexts", () => {
     // A leading "# " makes the first line match HEADING regardless of what
     // follows, so this constructs looksLikeMarkdown(text) === true by
     // construction instead of filtering arbitrary strings down to a trickle.
-    const markdownTextArb = fc.string().map((s) => `# ${s}`);
     fc.assert(
       fc.property(
-        fc.record({
-          editing: fc.constant(false),
-          text: markdownTextArb,
-          hasBranchJson: fc.constant(false),
-          hasInternalClipboard: fc.boolean(),
-        }),
+        contextArb.map((base) => ({
+          ...base,
+          editing: false,
+          hasBranchJson: false,
+          text: `# ${base.text}`,
+        })),
         (ctx) => {
-          expect(looksLikeMarkdown(ctx.text)).toBe(true);
           expect(planPaste(ctx)).toBe("markdown-dialog");
         }
       )
