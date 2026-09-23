@@ -11,10 +11,8 @@ import fc from "fast-check";
 import {
   findNode,
   getFlatOrder,
-  locateNode,
-  nextCheckedStateForGroup,
-  subtreeIds,
   type MindMapDocument,
+  type MindMapModel,
 } from "../domain/model";
 import { allIds, modelArb, pick } from "../domain/model.arb";
 import { supportsCheckbox } from "./nodeUtils";
@@ -37,27 +35,44 @@ const idsArb = (doc: MindMapDocument) =>
 
 const docAndIdsArb = modelArb.chain((doc) => idsArb(doc).map((ids) => ({ doc, ids })));
 
+/**
+ * The ids that still name a node, resolved once (`Map` preserves the ids'
+ * relative order) — every test below that needs "which of these ids exist,
+ * and what do they look like" shares this single walk instead of each
+ * re-running `findNode` per id, sometimes more than once.
+ */
+function existingNodes(doc: MindMapDocument, ids: readonly string[]): Map<string, MindMapModel> {
+  const found = new Map<string, MindMapModel>();
+  for (const id of ids) {
+    if (found.has(id)) continue;
+    const n = findNode(doc, id);
+    if (n) found.set(id, n);
+  }
+  return found;
+}
+
 describe("nextMultiSelection", () => {
-  it("with no modifier held, always clears (regardless of doc/ids)", () => {
+  it("with no modifier held, always clears (regardless of doc/ids/active node)", () => {
+    const withActiveArb = docAndIdsArb.chain(({ doc, ids }) =>
+      fc.constantFrom(null, ...ids).map((activeId) => ({ doc, ids, activeId }))
+    );
     fc.assert(
-      fc.property(docAndIdsArb, fc.string(), ({ doc, ids }, clickedId) => {
-        const current = ids;
-        for (const activeId of [null, ...ids]) {
-          expect(
-            nextMultiSelection(doc, activeId, current, clickedId, {
-              shiftKey: false,
-              toggleKey: false,
-            })
-          ).toEqual([]);
-        }
+      fc.property(withActiveArb, fc.string(), ({ doc, ids, activeId }, clickedId) => {
+        expect(
+          nextMultiSelection(doc, activeId, ids, clickedId, {
+            shiftKey: false,
+            toggleKey: false,
+          })
+        ).toEqual([]);
       })
     );
   });
 
-  it("shift-click range doesn't depend on which end is the anchor, and is exactly the flat-order slice between the two", () => {
+  it("shift-click range doesn't depend on which end is the anchor, and selects exactly the ids between anchor and clicked in flat order", () => {
     fc.assert(
       fc.property(modelArb, fc.nat(), fc.nat(), (doc, aIdx, cIdx) => {
         const order = getFlatOrder(doc);
+        const indexOf = new Map(order.map((id, i) => [id, i]));
         const anchor = pick(order, aIdx);
         const clicked = pick(order, cIdx);
         const forward = nextMultiSelection(doc, anchor, [], clicked, {
@@ -70,9 +85,16 @@ describe("nextMultiSelection", () => {
         });
         expect(forward).toEqual(backward);
 
-        const lo = Math.min(order.indexOf(anchor), order.indexOf(clicked));
-        const hi = Math.max(order.indexOf(anchor), order.indexOf(clicked));
-        expect(forward).toEqual(order.slice(lo, hi + 1));
+        const lo = Math.min(indexOf.get(anchor)!, indexOf.get(clicked)!);
+        const hi = Math.max(indexOf.get(anchor)!, indexOf.get(clicked)!);
+        const forwardSet = new Set(forward);
+        // Independent of the slice the implementation itself takes: an id
+        // belongs in the range iff its OWN flat-order position falls between
+        // the two endpoints — which also pins down contiguity and order,
+        // since `order` is already flat order.
+        for (const id of order) {
+          expect(forwardSet.has(id)).toBe(indexOf.get(id)! >= lo && indexOf.get(id)! <= hi);
+        }
       })
     );
   });
@@ -113,26 +135,24 @@ describe("checkboxMenuTargets", () => {
         const { plain, tasked } = checkboxMenuTargets(doc, ids);
         expect(plain.filter((id) => tasked.includes(id))).toEqual([]);
 
-        const eligible = ids.filter((id) => {
-          const n = findNode(doc, id);
-          return !!n && supportsCheckbox(n.type ?? "text");
-        });
-        expect(new Set([...plain, ...tasked])).toEqual(new Set(eligible));
+        const nodes = existingNodes(doc, ids);
+        const eligible = [...nodes.values()].filter((n) => supportsCheckbox(n.type ?? "text"));
+        expect(new Set([...plain, ...tasked])).toEqual(new Set(eligible.map((n) => n.id)));
 
-        for (const id of plain) expect(findNode(doc, id)!.checked).toBeUndefined();
-        for (const id of tasked) expect(findNode(doc, id)!.checked).not.toBeUndefined();
+        for (const id of plain) expect(nodes.get(id)!.checked).toBeUndefined();
+        for (const id of tasked) expect(nodes.get(id)!.checked).not.toBeUndefined();
       })
     );
   });
 });
 
 describe("planGroupCheckToggle", () => {
-  it("agrees with findNode/supportsCheckbox/nextCheckedStateForGroup on which ids qualify and the target state", () => {
+  it("agrees with findNode/supportsCheckbox on which ids qualify, and moves a mixed group to done, an all-done group to open", () => {
     fc.assert(
       fc.property(docAndIdsArb, fc.boolean(), ({ doc, ids }, requireExisting) => {
-        const eligible = ids
-          .map((id) => findNode(doc, id))
-          .filter((n): n is NonNullable<typeof n> => !!n && supportsCheckbox(n.type ?? "text"))
+        const nodes = existingNodes(doc, ids);
+        const eligible = [...nodes.values()]
+          .filter((n) => supportsCheckbox(n.type ?? "text"))
           .filter((n) => !requireExisting || n.checked !== undefined);
 
         const result = planGroupCheckToggle(doc, ids, { requireExisting });
@@ -141,19 +161,21 @@ describe("planGroupCheckToggle", () => {
           return;
         }
         expect(result!.nodeIds).toEqual(eligible.map((n) => n.id));
-        expect(result!.checked).toBe(nextCheckedStateForGroup(eligible.map((n) => n.checked)));
+        // Stated independently of nextCheckedStateForGroup's own formula, so
+        // a bug in that shared helper can't cancel out against this check.
+        const allAlreadyDone = eligible.every((n) => n.checked === true);
+        expect(result!.checked).toBe(!allAlreadyDone);
       })
     );
   });
 });
 
 describe("planGroupCollapse", () => {
-  it("agrees with findNode/nextCheckedStateForGroup's shape on which ids can fold and the target state", () => {
+  it("agrees with findNode on which ids can fold, and folds a mixed group, unfolds an all-folded group", () => {
     fc.assert(
       fc.property(docAndIdsArb, ({ doc, ids }) => {
-        const parents = ids
-          .map((id) => findNode(doc, id))
-          .filter((n): n is NonNullable<typeof n> => !!n && n.children.length > 0);
+        const nodes = existingNodes(doc, ids);
+        const parents = [...nodes.values()].filter((n) => n.children.length > 0);
 
         const result = planGroupCollapse(doc, ids);
         if (parents.length === 0) {
@@ -161,7 +183,10 @@ describe("planGroupCollapse", () => {
           return;
         }
         expect(result!.nodeIds).toEqual(parents.map((n) => n.id));
-        expect(result!.collapsed).toBe(!parents.every((n) => n.collapsed === true));
+        // Stated as "some parent is still open" rather than the implementation's
+        // own `!every(...)` line, so a bug there wouldn't just mirror through.
+        const someStillOpen = parents.some((n) => n.collapsed !== true);
+        expect(result!.collapsed).toBe(someStillOpen);
       })
     );
   });
@@ -175,24 +200,35 @@ describe("outermostBranches", () => {
         const resultSet = new Set(result);
         expect(resultSet.size).toBe(result.length); // no duplicates
 
-        const existing = new Set(ids.filter((id) => findNode(doc, id)));
-        const selectedAncestor = (id: string): boolean => {
-          let p = locateNode(doc, id)?.parent ?? null;
+        // One DFS builds the whole parent map, so checking every existing
+        // id's ancestor chain below is O(depth) lookups each rather than a
+        // fresh tree walk per id.
+        const parentOf = new Map<string, string | null>();
+        (function record(nodes: MindMapModel[], parent: string | null) {
+          for (const n of nodes) {
+            parentOf.set(n.id, parent);
+            record(n.children, n.id);
+          }
+        })(doc.roots, null);
+
+        const existing = new Set(ids.filter((id) => parentOf.has(id)));
+        const hasSelectedAncestor = (id: string): boolean => {
+          let p = parentOf.get(id) ?? null;
           while (p) {
-            if (existing.has(p.id)) return true;
-            p = locateNode(doc, p.id)?.parent ?? null;
+            if (existing.has(p)) return true;
+            p = parentOf.get(p) ?? null;
           }
           return false;
         };
 
         // Membership: exactly the existing ids without a selected ancestor.
         for (const id of existing) {
-          expect(resultSet.has(id)).toBe(!selectedAncestor(id));
+          expect(resultSet.has(id)).toBe(!hasSelectedAncestor(id));
         }
         for (const id of result) expect(existing.has(id)).toBe(true);
 
         // Order: the document's own DFS order, restricted to the result.
-        const docOrder = doc.roots.flatMap(subtreeIds);
+        const docOrder = allIds(doc);
         expect(result).toEqual(docOrder.filter((id) => resultSet.has(id)));
 
         // Idempotent: the outermost set has nothing left to collapse further.
