@@ -13,7 +13,7 @@
  * Markdown dialog.
  */
 
-import type { MindMapModel } from "../domain/model";
+import { generateId, type MindMapModel } from "../domain/model";
 import { normalizeTree } from "./persistence";
 
 /** Custom clipboard MIME carrying the JSON branch. Only edane reads it. */
@@ -35,6 +35,14 @@ export function serializeBranch(node: MindMapModel): string {
  * outside its declared type is dropped rather than smuggled into the model —
  * a hand-edited or foreign payload under this MIME could otherwise carry
  * anything.
+ *
+ * A branch is always pasted by NESTING it under the active node (see
+ * `pasteBranch` in editorReducer.ts) — it never lands as a document root
+ * directly — so `normalizeTree` is called with `isRoot: false`: `position` is
+ * meaningful only on a root, and a branch is never one. `nestUnder` would
+ * drop a smuggled `position` at paste time anyway, but asserting `isRoot:
+ * false` here means that holds by construction rather than by relying on
+ * every future caller of a parsed branch to route through `nestUnder`.
  */
 export function parseBranch(text: string): MindMapModel | null {
   if (!text) return null;
@@ -44,5 +52,5 @@ export function parseBranch(text: string): MindMapModel | null {
   } catch {
     return null;
   }
-  return normalizeTree(data, new Set());
+  return normalizeTree(data, new Set(), generateId, false);
 }

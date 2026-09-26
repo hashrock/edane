@@ -102,11 +102,20 @@ export function textToDocument(
  * model is a genuine well-formed, unique-id tree. Returns null when the value
  * isn't a usable node at all (caller then falls back to the legacy text
  * parser).
+ *
+ * `position` is kept only when `isRoot` — it is meaningful on a root alone
+ * (see `MindMapModel.position`), and every in-app path that nests a node
+ * drops it via `nestUnder`. Untrusted JSON has no such gate, so a `position`
+ * planted on a DESCENDANT here would otherwise survive normalization and
+ * resurface later (e.g. once the node is dedented back to a root); `isRoot`
+ * is true only for the node normalizeTree was called ON, never for a child
+ * reached through the recursion below.
  */
 export function normalizeTree(
   value: unknown,
   seen: Set<string>,
-  nextId: IdSource = generateId
+  nextId: IdSource = generateId,
+  isRoot: boolean = true
 ): MindMapModel | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -127,6 +136,7 @@ export function normalizeTree(
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
   if (
+    isRoot &&
     v.position &&
     typeof v.position === "object" &&
     Number.isFinite((v.position as { x?: unknown }).x) &&
@@ -137,7 +147,7 @@ export function normalizeTree(
   }
 
   for (const child of v.children) {
-    const normalized = normalizeTree(child, seen, nextId);
+    const normalized = normalizeTree(child, seen, nextId, false);
     if (normalized) node.children.push(normalized);
   }
   return node;

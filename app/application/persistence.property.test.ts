@@ -7,7 +7,14 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { isStoredNodeType, type MindMapDocument, type MindMapModel } from "../domain/model";
-import { allIds, expectUniqueIds, modelArb, nodeArb, sequentialIds } from "../domain/model.arb";
+import {
+  allIds,
+  expectUniqueIds,
+  modelArb,
+  nodeArb,
+  positionArb,
+  sequentialIds,
+} from "../domain/model.arb";
 import {
   modelToText,
   normalizeDocument,
@@ -57,10 +64,13 @@ describe("JSON round trips", () => {
     );
   });
 
-  it("parseBranch(serializeBranch(n)) === n for every well-formed branch", () => {
+  it("parseBranch(serializeBranch(n)) === n for every well-formed branch, minus a root-only `position`", () => {
     fc.assert(
       fc.property(nodeArb, (node) => {
-        expect(parseBranch(serializeBranch(node))).toEqual(node);
+        // A branch is never a document root (see branchClipboard.ts), so a
+        // `position` that only made sense on the copied node as a root does
+        // not survive the round trip.
+        expect(parseBranch(serializeBranch(node))).toEqual({ ...node, position: undefined });
       })
     );
   });
@@ -97,6 +107,32 @@ describe("normalization on untrusted input", () => {
       fc.property(fc.jsonValue(), fc.string(), (value, title) => {
         const out = normalizeDocument(value, title);
         if (out !== null) expectWellFormed(out);
+      })
+    );
+  });
+
+  it("strips `position` from any node that isn't the one normalizeTree was called on, even in untrusted JSON", () => {
+    // `position` is only ever meaningful on a document root (see
+    // `MindMapModel.position`); every in-app nesting path drops it via
+    // `nestUnder`. Untrusted JSON bypasses that gate, so plant a position on
+    // EVERY node — root and every descendant — and check normalizeTree keeps
+    // it on the root alone.
+    fc.assert(
+      fc.property(nodeArb, positionArb, (node, stolenPosition) => {
+        const plant = (n: MindMapModel): MindMapModel => ({
+          ...n,
+          position: stolenPosition,
+          children: n.children.map(plant),
+        });
+        const out = normalizeTree(plant(node), new Set())!;
+        expect(out.position).toEqual(stolenPosition);
+        const expectNoDescendantPosition = (n: MindMapModel) => {
+          for (const child of n.children) {
+            expect(child.position).toBeUndefined();
+            expectNoDescendantPosition(child);
+          }
+        };
+        expectNoDescendantPosition(out);
       })
     );
   });
