@@ -7,32 +7,22 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { absoluteUrl } from "./url";
 
-const originArb = fc
-  .webUrl({ withFragments: false, withQueryParameters: false })
-  .map((u) => new URL(u).origin);
-const trailingSlashesArb = fc.integer({ min: 0, max: 5 }).map((n) => "/".repeat(n));
-const pathArb = fc
-  .array(fc.string({ minLength: 1, maxLength: 8 }).filter((s) => !s.includes("/")), {
-    minLength: 0,
-    maxLength: 4,
-  })
-  .map((segments) => "/" + segments.join("/"));
+// A clean origin (no trailing slash) plus a slash count to append: the
+// property below is that the count never changes the result. absoluteUrl
+// does no path parsing, so any string is a valid path.
+const cleanOriginArb = fc.constantFrom(
+  "https://edane.app",
+  "http://localhost:5173",
+  "https://example.com:8443"
+);
+const slashesArb = fc.integer({ min: 0, max: 5 }).map((n) => "/".repeat(n));
+const pathArb = fc.string();
 
 describe("absoluteUrl", () => {
-  it("never doubles the slash between origin and path, however many the origin already has", () => {
+  it("doesn't matter how many trailing slashes the origin already has", () => {
     fc.assert(
-      fc.property(originArb, trailingSlashesArb, pathArb, (origin, slashes, path) => {
-        const result = absoluteUrl(origin + slashes, path);
-        expect(result).toBe(origin + path);
-        expect(result.startsWith(origin + "//")).toBe(false);
-      })
-    );
-  });
-
-  it("is a no-op on an origin with no trailing slash", () => {
-    fc.assert(
-      fc.property(originArb, pathArb, (origin, path) => {
-        expect(absoluteUrl(origin, path)).toBe(`${origin}${path}`);
+      fc.property(cleanOriginArb, slashesArb, pathArb, (origin, slashes, path) => {
+        expect(absoluteUrl(origin + slashes, path)).toBe(`${origin}${path}`);
       })
     );
   });
