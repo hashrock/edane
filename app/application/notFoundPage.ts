@@ -10,6 +10,7 @@
  */
 
 import { MESSAGES_JA } from "./messages";
+import { escapeHtml } from "../lib/escapeHtml";
 
 /** API / feed routes answer 404 as JSON; everything else gets the HTML page. */
 export function wantsJsonNotFound(pathname: string, accept: string | undefined): boolean {
@@ -17,14 +18,6 @@ export function wantsJsonNotFound(pathname: string, accept: string | undefined):
   if (/^\/pub\/[^/]+\.(json|md)$/.test(pathname)) return true;
   if (accept && accept.includes("application/json") && !accept.includes("text/html")) return true;
   return false;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 /**

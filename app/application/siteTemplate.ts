@@ -11,6 +11,7 @@
  */
 import { shapeRecords, type SiteSchema } from "./siteSchema";
 import type { SiteNode } from "./siteNode";
+import { escapeHtml } from "../lib/escapeHtml";
 
 /** テンプレートが `import { data } from './data.js'` で読む仮想ファイル。 */
 export const SITE_DATA_FILE = "data.js";
@@ -89,12 +90,6 @@ export function exceedsBytes(limit: number, ...parts: string[]): boolean {
   let bytes = 0;
   for (const p of parts) bytes += utf8ByteLength(p);
   return bytes > limit;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"]/g, (ch) =>
-    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : "&quot;"
-  );
 }
 
 /**
