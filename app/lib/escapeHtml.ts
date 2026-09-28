@@ -5,17 +5,13 @@
  * a future third call site could easily add a variant that misses one of the
  * four characters below (a real XSS gap, not just a style nit).
  */
+const HTML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+
 export function escapeHtml(s: string): string {
-  return s.replace(/[&<>"]/g, (ch) => {
-    switch (ch) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      default:
-        return "&quot;";
-    }
-  });
+  return s.replace(/[&<>"]/g, (ch) => HTML_ENTITIES[ch]);
 }
