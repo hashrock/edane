@@ -25,7 +25,8 @@ export const nodeTextArb = fc.string({ maxLength: 12 });
 /** A node before ids are assigned. */
 type Draft = Omit<MindMapModel, "id" | "children"> & { children: Draft[] };
 
-const positionArb = fc.record({
+/** A canvas position (the shape stored in `MindMapModel.position`). */
+export const positionArb = fc.record({
   x: fc.integer({ min: -2000, max: 2000 }),
   y: fc.integer({ min: -2000, max: 2000 }),
 });
