@@ -16,6 +16,7 @@
  */
 
 import type { MindMapDocument, MindMapModel } from "../domain/model";
+import { absoluteUrl } from "../lib/url";
 
 /** 非公開ノートでノード公開を断るときの理由（UIとAPIエラーで共用）。 */
 export const PRIVATE_NOTE_PUBLISH_REASON =
@@ -32,7 +33,7 @@ export interface PublicationUrls {
  * 末尾スラッシュ付きでも二重スラッシュにしない（publicNoteUrl と同じ流儀）。
  */
 export function publicationUrls(origin: string, pubId: string): PublicationUrls {
-  const base = `${origin.replace(/\/+$/, "")}/pub/${encodeURIComponent(pubId)}`;
+  const base = absoluteUrl(origin, `/pub/${encodeURIComponent(pubId)}`);
   return { json: `${base}.json`, md: `${base}.md` };
 }
 

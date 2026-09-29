@@ -6,6 +6,7 @@ import type { SessionUser } from "../user";
 import type { AuthProvider } from "../auth/provider";
 import { findScenario, type ScenarioDefinition } from "./catalog";
 import { scenarioTitle, type ScenarioPlan } from "./plan";
+import { absoluteUrl } from "../lib/url";
 
 /** `?format=json` か `Accept: application/json` なら JSON。ブラウザの既定 Accept には含まれない。 */
 export function wantsJson(format: string | undefined, accept: string | undefined): boolean {
@@ -89,7 +90,7 @@ export function describePlan(
   actor: ScenarioActor,
   origin: string
 ): ScenarioResult {
-  const abs = (path: string) => `${origin.replace(/\/+$/, "")}${path}`;
+  const abs = (path: string) => absoluteUrl(origin, path);
   return {
     scenario: scenario.name,
     description: scenario.description,
