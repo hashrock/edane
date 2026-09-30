@@ -86,6 +86,13 @@ function splitTopLevel(text: string): string[] | null {
 
 const FIELD_RE = /^([^:\s[\]{}]+)\s*(\[\])?\s*(?::\s*([A-Za-z]+)|\{([\s\S]*)\})?$/;
 
+/** キーとして使えない理由（使えるなら null）。パーサと UI の編集で共有する。 */
+export function keyError(key: string): string | null {
+  if (!KEY_RE.test(key)) return key === "" ? "キーが空です" : `キーに使えない名前: "${key}"`;
+  if ((RESERVED_KEYS as readonly string[]).includes(key)) return `"${key}" は予約されています`;
+  return null;
+}
+
 export function parseSchema(text: string): ParseSchemaResult {
   const parts = splitTopLevel(text);
   if (!parts) return { ok: false, error: "括弧 { } の対応が取れていません" };
@@ -97,10 +104,8 @@ export function parseSchema(text: string): ParseSchemaResult {
     const m = part.match(FIELD_RE);
     if (!m) return { ok: false, error: `フィールドの書式が不正: "${part}"` };
     const [, key, listMark, type, inner] = m;
-    if (!KEY_RE.test(key)) return { ok: false, error: `キーに使えない名前: "${key}"` };
-    if ((RESERVED_KEYS as readonly string[]).includes(key)) {
-      return { ok: false, error: `"${key}" は予約されています` };
-    }
+    const bad = keyError(key);
+    if (bad) return { ok: false, error: bad };
     if (seen.has(key)) return { ok: false, error: `キーが重複: "${key}"` };
     if (type !== undefined && !isFieldType(type)) {
       return { ok: false, error: `不明な型: "${type}"（${FIELD_TYPES.join(" / ")}）` };

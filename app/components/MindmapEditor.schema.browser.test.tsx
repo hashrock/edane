@@ -1,6 +1,7 @@
 /**
  * 枝のスキーマのエディタ側動線（browser e2e）:
- *  - canvas: 右クリック「Set schema…」→ ダイアログで保存 → ノードに載る
+ *  - canvas: 右クリック「Set schema…」→ フィールド行を足して保存 → ノードに載る
+ *  - テキストタブ: 行と同じ内容を書式で見せ、不正なら保存できない
  *  - canvas: スキーマのある枝でレコードを Enter で作ると、型付きの空フィールドが付く
  *  - outline: フィールド名のラベルと、型が合わないノードの ⚠
  */
@@ -74,11 +75,26 @@ describe("branch schema (canvas)", () => {
 
     rightClickNode("books");
     (await waitFor(() => button("Set schema"))).click();
-    const input = await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid="schema-input"]'));
-    await userEvent.fill(input, "author, cover:image, done:check");
+    // Fields tab: add three rows, then name and type them.
+    const add = await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid="schema-add"]'));
+    add.click();
+    add.click();
+    add.click();
+    const keys = await waitFor(() => {
+      const k = document.querySelectorAll<HTMLInputElement>('[data-testid="schema-key"]');
+      return k.length === 3 ? k : null;
+    });
+    // A blank key blocks saving.
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="schema-save"]')!.disabled).toBe(true);
+    await userEvent.fill(keys[0], "author");
+    await userEvent.fill(keys[1], "cover");
+    await userEvent.fill(keys[2], "done");
+    const kinds = [...document.querySelectorAll('[data-testid="schema-kind"]')] as HTMLElement[];
+    await userEvent.selectOptions(kinds[1], "image");
+    await userEvent.selectOptions(kinds[2], "check");
     (await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid="schema-save"]:not([disabled])'))).click();
     await waitFor(() => findNode(api().getModel(), "books")?.schema === "author, cover:image, done:check");
-    expect(document.querySelector('[data-testid="schema-input"]')).toBeNull();
+    expect(document.querySelector('[data-testid="schema-key"]')).toBeNull();
 
     // Select the record and add a sibling record (Enter in selection mode).
     const p = await waitFor(() => api().getNodeClickPoint("a"));
@@ -101,15 +117,28 @@ describe("branch schema (canvas)", () => {
     expect(records[0].children).toHaveLength(2);
   });
 
-  it("rejects an invalid schema in the dialog", async () => {
-    render(<MindmapEditor initialContent={content(ROOTS)} initialTitle="Shelf" />);
+  it("the text tab mirrors the rows and rejects an invalid schema", async () => {
+    const roots: MindMapModel[] = [{ ...ROOTS[0], schema: "author, ch[]{page:number}" }];
+    render(<MindmapEditor initialContent={content(roots)} initialTitle="Shelf" />);
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
     rightClickNode("books");
     (await waitFor(() => button("Set schema"))).click();
+    // Nested fields show as indented rows.
+    await waitFor(() => document.querySelectorAll('[data-testid="schema-row"]').length === 3);
+    (await waitFor(() => button("Text"))).click();
     const input = await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid="schema-input"]'));
+    expect(input.value).toBe("author, ch[]{page:number}");
     await userEvent.fill(input, "a[]{b");
     await waitFor(() => document.querySelector('[data-testid="schema-error"]'));
     expect(document.querySelector<HTMLButtonElement>('[data-testid="schema-save"]')!.disabled).toBe(true);
+    // Fixing the text and switching back rebuilds the rows from it.
+    await userEvent.fill(input, "x:date, y");
+    button("Fields")!.click();
+    const keys = await waitFor(() => {
+      const k = [...document.querySelectorAll<HTMLInputElement>('[data-testid="schema-key"]')].map((e) => e.value);
+      return k.length === 2 ? k : null;
+    });
+    expect(keys).toEqual(["x", "y"]);
   });
 });
 
