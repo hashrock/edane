@@ -32,31 +32,33 @@ describe("sampleItems", () => {
 
 describe("buildSuggestMessages", () => {
   it("has a system prompt with the runtime contract and a user turn with data + instruction", () => {
-    const m = buildSuggestMessages({ data: root, currentTemplate: "TPL", instruction: "  dark theme ", schema: "area, url:link" });
+    const m = buildSuggestMessages({ data: { ...root, schema: "area, url:link, done:check, ch[]{page:number}" }, currentTemplate: "TPL", instruction: "  dark theme " });
     expect(m[0].role).toBe("system");
     expect(m[0].content).toContain("data-search");
-    expect(m[1].content).toContain("Schema (field order = child order): area, url:link");
-    expect(m[1].content).toContain("url: string | undefined  // link URL");
+    expect(m[1].content).toContain("Schema (field order = child order): area, url:link, done:check, ch[]{page:number}");
+    expect(m[1].content).toContain("url: string | undefined  // URL");
+    expect(m[1].content).toContain("done: boolean | undefined");
+    expect(m[1].content).toContain("page: number | undefined");
     expect(m[1].content).toContain('"area": "desc"');
     expect(m[1].content).not.toContain("children");
     expect(m[1].content).toContain("Author's request: dark theme");
     expect(m[1].content).toContain("TPL");
   });
   it("omits the request line when no instruction", () => {
-    expect(buildSuggestMessages({ data: root, currentTemplate: "", instruction: "", schema: "" })[1].content).not.toContain("Author's request");
+    expect(buildSuggestMessages({ data: root, currentTemplate: "", instruction: "" })[1].content).not.toContain("Author's request");
   });
   it("treats the default template as no template", () => {
-    const m = buildSuggestMessages({ data: root, currentTemplate: defaultTemplate(inferSchema(root)), instruction: "", schema: "" });
+    const m = buildSuggestMessages({ data: root, currentTemplate: defaultTemplate(inferSchema(root)), instruction: "" });
     expect(m[1].content).not.toContain("Current template");
-    const m2 = buildSuggestMessages({ data: root, currentTemplate: "export default function X(){}", instruction: "", schema: "" });
+    const m2 = buildSuggestMessages({ data: root, currentTemplate: "export default function X(){}", instruction: "" });
     expect(m2[1].content).toContain("Current template");
   });
 });
 
 describe("validateSuggestRequest", () => {
   it("defaults non-string fields", () => {
-    expect(validateSuggestRequest(null)).toEqual({ instruction: "", currentTemplate: "", schema: "" });
-    expect(validateSuggestRequest({ instruction: 1, template: "t", schema: "a" })).toEqual({ instruction: "", currentTemplate: "t", schema: "a" });
+    expect(validateSuggestRequest(null)).toEqual({ instruction: "", currentTemplate: "" });
+    expect(validateSuggestRequest({ instruction: 1, template: "t", schema: "a" })).toEqual({ instruction: "", currentTemplate: "t" });
   });
 });
 

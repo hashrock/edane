@@ -128,6 +128,16 @@ export const MESSAGES_JA = {
   menuUploadImage: "画像をアップロード",
   menuCopyBranchText: "枝をテキストコピー",
   menuPublishNode: "Web公開（JSON / Markdown）…",
+  menuSetSchema: "スキーマを設定…",
+  schemaDialogTitle: "枝のスキーマ",
+  schemaDialogHint:
+    "子 = レコード、レコードの子の順番 = フィールド。例: author, cover:image, done:check, price:number, on:date, tags[], chapters[]{name, page:number}",
+  schemaDialogTypes: "型: text / image / link / markdown / check / number / date",
+  schemaDialogPlaceholder: "推定: {schema}",
+  schemaDialogAdopt: "推定を採用",
+  schemaDialogSave: "保存",
+  schemaDialogRemove: "スキーマを外す",
+  schemaMismatch: "{key} は {type} のはず",
   menuDeleteNode: "ノードを削除",
 
   // --- コマンドパレット ---
@@ -238,10 +248,10 @@ export const MESSAGES_JA = {
   siteAiFailed: "AIの提案に失敗しました",
   siteAiUndo: "AI提案前に戻す",
   siteSchemaLabel: "スキーマ",
-  siteSchemaPlaceholder: "推定: {schema}",
+  siteSchemaInferred: "（推定）",
   siteSchemaHint:
-    "フィールドの位置に名前を付けます（例: description, url:link, image:image, tags[]）。空なら実データから推定。テンプレートでは items[i].キー で読めます。",
-  siteSchemaAdopt: "推定を採用",
+    "スキーマは枝に持ちます。ノートでこの枝を右クリック →「スキーマを設定…」で編集。テンプレートでは items[i].キー で読めます。",
+  siteSchemaInvalid: "枝のスキーマが読めないので推定を使っています: {error}",
   siteSchemaWarnings: "データとのずれ",
 
   // --- 公開ドロップダウン ---
@@ -465,6 +475,16 @@ export const MESSAGES_EN = {
   menuUploadImage: "Upload image",
   menuCopyBranchText: "Copy branch as text",
   menuPublishNode: "Publish to web (JSON / Markdown)…",
+  menuSetSchema: "Set schema…",
+  schemaDialogTitle: "Branch schema",
+  schemaDialogHint:
+    "Children = records, the order of a record's children = fields. e.g. author, cover:image, done:check, price:number, on:date, tags[], chapters[]{name, page:number}",
+  schemaDialogTypes: "Types: text / image / link / markdown / check / number / date",
+  schemaDialogPlaceholder: "Inferred: {schema}",
+  schemaDialogAdopt: "Use inferred",
+  schemaDialogSave: "Save",
+  schemaDialogRemove: "Remove schema",
+  schemaMismatch: "{key} should be {type}",
   menuDeleteNode: "Delete node",
 
   // --- Command palette ---
@@ -575,10 +595,10 @@ export const MESSAGES_EN = {
   siteAiFailed: "AI suggestion failed",
   siteAiUndo: "Undo AI suggestion",
   siteSchemaLabel: "Schema",
-  siteSchemaPlaceholder: "Inferred: {schema}",
+  siteSchemaInferred: "(inferred)",
   siteSchemaHint:
-    "Name the field positions (e.g. description, url:link, image:image, tags[]). Empty = inferred from the data. Templates read them as items[i].key.",
-  siteSchemaAdopt: "Use inferred",
+    "The schema lives on the branch. Right-click this branch in the note → \"Set schema…\" to edit it. Templates read fields as items[i].key.",
+  siteSchemaInvalid: "The branch schema can't be read, so an inferred one is used: {error}",
   siteSchemaWarnings: "Mismatches with the data",
 
   // --- Publicity dropdown ---

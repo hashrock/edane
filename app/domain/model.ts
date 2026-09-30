@@ -85,6 +85,12 @@ export interface MindMapModel {
    */
   checked?: boolean;
   /**
+   * Branch schema (see domain/branchSchema.ts): names and types the fields of
+   * this node's records — children are records, a record's i-th child is
+   * field i. Stored as the schema text; absent = no schema.
+   */
+  schema?: string;
+  /**
    * Canvas position of this node's tree, world coordinates of the box's left
    * edge (x) and vertical centre (y) — the same point the layout assigns.
    * Only meaningful on a ROOT (see {@link MindMapDocument.roots}): a placed
@@ -515,6 +521,23 @@ export function setCollapsedMany(
 ): MindMapDocument {
   return updateNodes(doc, nodeIds, (node) => {
     node.collapsed = collapsed;
+  });
+}
+
+/**
+ * Set a node's branch schema text. Blank (or `null`) removes it. The text is
+ * stored as given (trimmed); an unparsable one reads as "no schema" (see
+ * `ownSchema` in domain/branchSchema.ts). Returns a new document.
+ */
+export function setNodeSchema(
+  doc: MindMapDocument,
+  nodeId: string,
+  schema: string | null
+): MindMapDocument {
+  const text = schema?.trim() ?? "";
+  return updateNodes(doc, [nodeId], (node) => {
+    if (text) node.schema = text;
+    else delete node.schema;
   });
 }
 

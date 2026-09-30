@@ -17,6 +17,10 @@ export interface SiteNode {
   /** ノード種別。`text` 以外は `text` の中身が URL / Markdown 本文になる。 */
   type: NodeType;
   text: string;
+  /** タスクのチェック（`check` フィールドの値）。無ければタスクではない。 */
+  checked?: boolean;
+  /** 枝のスキーマ文字列（domain/branchSchema.ts）。公開した枝の根が持つ。 */
+  schema?: string;
   children: SiteNode[];
 }
 
@@ -25,6 +29,8 @@ export function toSiteNode(node: MindMapModel): SiteNode {
     id: node.id,
     type: node.type ?? "text",
     text: node.text,
+    ...(node.checked !== undefined ? { checked: node.checked } : {}),
+    ...(node.schema ? { schema: node.schema } : {}),
     children: node.children.map(toSiteNode),
   };
 }

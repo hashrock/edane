@@ -43,6 +43,10 @@
 - 不変条件の node での総当たりは `app/application/editorKeymap.property.test.ts`（任意の木 × キャレット位置 × 方向 × layout × arrowBehavior）。
 - 実挙動の検証は `app/components/keyboardEscape.browser.test.tsx`。NodeType × レイアウト × 方向を総当たりし、編集中に規定回数以内の矢印キーで隣ノードへ到達することをフォーカス位置に依存せず検証する。**`NodeType` を追加するとフィクスチャの `TARGETS` もコンパイルエラーになるので、必ずフィクスチャを追加する。** 実行: `pnpm vitest run --project browser app/components/keyboardEscape.browser.test.tsx`
 
+### 枝のスキーマ
+
+コレクションノードが `schema` 属性（`app/domain/branchSchema.ts` の書式 `author, cover:image, done:check, tags[], ch[]{page:number}`）を持つと、子 = レコード、レコードの子の index i = フィールド i として読む。型は注釈で、強制はしない（`fieldIssue` で不一致を報告するだけ）。レコードの位置に入ってきたノードへの雛形補完は `editorReducer` の入口にある `conformEntering` の1箇所で行う。個々の操作に補完を書き足さないこと。対象の操作は `conformsToSchema` で列挙している。公開サイトも同じスキーマを読む（`sites.schema` は旧形式で、サイトエディタを開いたときに枝へ遅延移行する）。詳細は `docs/adr/0003-branch-schema.md`。
+
 ### テスト
 
 - 単体・ロジック: `pnpm test`（node project）

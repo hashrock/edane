@@ -7,7 +7,7 @@ import {
   type SiteBuild,
 } from "../application/siteTemplate";
 import type { SiteNode } from "../application/siteNode";
-import { parseSchema, inferSchema, formatSchema, shapeRecords, defaultTemplate } from "../application/siteSchema";
+import { parseSchema, formatSchema, shapeRecords, defaultTemplate } from "../application/siteSchema";
 import { effectiveSchema } from "../application/siteAi";
 import { t } from "../application/i18n";
 import { copyText } from "../lib/clipboard";
@@ -21,8 +21,6 @@ export interface SiteEditorProps {
   /** 公開している枝（/pub/:id.json と同じ内容を薄くしたもの）。 */
   data: SiteNode;
   template: string;
-  /** スキーマ文字列（siteSchema.ts の書式）。空なら推定。 */
-  schema: string;
   /** サーバーに公開済みのビルドがあるか。 */
   published: boolean;
 }
@@ -65,12 +63,10 @@ export default function SiteEditor({
   noteId,
   data,
   template: initialTemplate,
-  schema: initialSchema,
   published: initiallyPublished,
 }: SiteEditorProps) {
   useLocale();
   const [template, setTemplate] = useState(initialTemplate);
-  const [schemaText, setSchemaText] = useState(initialSchema);
   const [build, setBuild] = useState<SiteBuild | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [compiling, setCompiling] = useState(false);
@@ -83,11 +79,11 @@ export default function SiteEditor({
 
   const published = initiallyPublished || publish.kind === "done";
 
-  // スキーマ: 不正なら直前の有効なものではなく推定にフォールバックし、エラーだけ見せる。
-  const inferredText = useMemo(() => formatSchema(inferSchema(data)), [data]);
-  const parsedSchema = useMemo(() => parseSchema(schemaText), [schemaText]);
+  // スキーマは枝（data.schema）に持つ。無い・不正なら推定にフォールバックし、エラーだけ見せる。
+  const parsedSchema = useMemo(() => parseSchema(data.schema ?? ""), [data]);
   const schemaError = parsedSchema.ok ? null : parsedSchema.error;
-  const schema = useMemo(() => effectiveSchema(schemaText, data), [schemaText, data]);
+  const schema = useMemo(() => effectiveSchema(data), [data]);
+  const schemaInferred = !parsedSchema.ok || parsedSchema.schema.length === 0;
   const schemaWarnings = useMemo(() => shapeRecords(data, schema).warnings, [data, schema]);
   const dataModule = useMemo(() => siteDataModule(data, schema), [data, schema]);
   const apiBase = `/api/sites/${encodeURIComponent(publicationId)}`;
@@ -136,16 +132,16 @@ export default function SiteEditor({
   const doPublish = useCallback(async () => {
     if (!build) return;
     setPublish({ kind: "busy" });
-    const r = await siteApi(apiBase, "PUT", { template, schema: schemaText, ...build }, t("sitePublishFailed"));
+    const r = await siteApi(apiBase, "PUT", { template, ...build }, t("sitePublishFailed"));
     setPublish(r.ok ? { kind: "done" } : { kind: "error", message: r.error });
-  }, [apiBase, build, template, schemaText]);
+  }, [apiBase, build, template]);
 
   const doSuggest = useCallback(async () => {
     setAi({ kind: "busy" });
     const r = await siteApi<{ template?: string }>(
       `${apiBase}/suggest`,
       "POST",
-      { instruction: aiInstruction, template, schema: schemaText },
+      { instruction: aiInstruction, template },
       t("siteAiFailed")
     );
     if (!r.ok || !r.body.template) {
@@ -155,7 +151,7 @@ export default function SiteEditor({
     setAiUndo(template);
     setTemplate(r.body.template);
     setAi({ kind: "done" });
-  }, [apiBase, aiInstruction, template, schemaText]);
+  }, [apiBase, aiInstruction, template]);
 
   // `undefined` はパスセグメントにできない id のときだけ（実際の pubId は
   // UUID なので来ない）。リンクとコピーが無効になるだけ。
@@ -218,30 +214,16 @@ export default function SiteEditor({
       </p>
       <div className="border-b border-slate-200 bg-white px-3 py-1.5">
         <div className="flex items-center gap-2">
-          <label className="shrink-0 text-xs font-medium text-slate-600" htmlFor="site-schema">
-            {t("siteSchemaLabel")}
-          </label>
-          <input
-            id="site-schema"
-            value={schemaText}
-            onChange={(e) => setSchemaText(e.target.value)}
-            placeholder={t("siteSchemaPlaceholder", { schema: inferredText })}
-            spellCheck={false}
-            data-testid="site-schema"
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 font-mono text-xs outline-none focus:border-slate-400"
-          />
-          {!schemaText && inferredText && (
-            <button
-              type="button"
-              onClick={() => setSchemaText(inferredText)}
-              className="shrink-0 text-xs text-slate-500 hover:underline"
-            >
-              {t("siteSchemaAdopt")}
-            </button>
-          )}
+          <span className="shrink-0 text-xs font-medium text-slate-600">{t("siteSchemaLabel")}</span>
+          <code data-testid="site-schema" className="min-w-0 flex-1 truncate font-mono text-xs text-slate-800">
+            {formatSchema(schema)}
+          </code>
+          {schemaInferred && <span className="shrink-0 text-xs text-slate-400">{t("siteSchemaInferred")}</span>}
         </div>
         {schemaError ? (
-          <p className="mt-1 text-xs text-red-600" data-testid="site-schema-error">{schemaError}</p>
+          <p className="mt-1 text-xs text-red-600" data-testid="site-schema-error">
+            {t("siteSchemaInvalid", { error: schemaError })}
+          </p>
         ) : (
           <p className="mt-1 text-xs text-slate-400">{t("siteSchemaHint")}</p>
         )}

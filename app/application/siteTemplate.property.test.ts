@@ -23,7 +23,6 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
   SITE_BUILD_MAX_BYTES,
-  SITE_SCHEMA_MAX_BYTES,
   SITE_SEARCH_SCRIPT,
   SITE_TEMPLATE_MAX_BYTES,
   renderSiteResponse,
@@ -262,12 +261,12 @@ describe("validateSiteSave", () => {
         (ch, delta) => {
           const bytesOf = (s: string) => new TextEncoder().encode(s).length;
           // ちょうど上限に収まる個数 ± 1 文字。
-          const count = Math.floor(SITE_SCHEMA_MAX_BYTES / bytesOf(ch)) + delta;
-          const schema = ch.repeat(count);
-          const r = validateSiteSave({ template: "", schema, html: "", css: "" });
-          expect(r.ok).toBe(bytesOf(schema) <= SITE_SCHEMA_MAX_BYTES);
+          const count = Math.floor(SITE_TEMPLATE_MAX_BYTES / bytesOf(ch)) + delta;
+          const template = ch.repeat(count);
+          const r = validateSiteSave({ template, html: "", css: "" });
+          expect(r.ok).toBe(bytesOf(template) <= SITE_TEMPLATE_MAX_BYTES);
           // 旧実装（UTF-16 長で比較）なら全部通っていたことを対比として固定する。
-          expect(schema.length).toBeLessThanOrEqual(SITE_SCHEMA_MAX_BYTES);
+          expect(template.length).toBeLessThanOrEqual(SITE_TEMPLATE_MAX_BYTES);
         }
       )
     );
@@ -277,20 +276,15 @@ describe("validateSiteSave", () => {
     fc.assert(
       fc.property(
         around(SITE_TEMPLATE_MAX_BYTES),
-        around(SITE_SCHEMA_MAX_BYTES),
         around(SITE_BUILD_MAX_BYTES),
         fc.nat({ max: 2 }),
-        (t, s, h, css) => {
-          const body = { template: filler(t), schema: filler(s), html: filler(h), css: filler(css) };
+        (t, h, css) => {
+          const body = { template: filler(t), html: filler(h), css: filler(css) };
           const r = validateSiteSave(body);
-          const fits =
-            t <= SITE_TEMPLATE_MAX_BYTES &&
-            s <= SITE_SCHEMA_MAX_BYTES &&
-            h + css <= SITE_BUILD_MAX_BYTES;
+          const fits = t <= SITE_TEMPLATE_MAX_BYTES && h + css <= SITE_BUILD_MAX_BYTES;
           expect(r.ok).toBe(fits);
           if (r.ok) {
             expect(r.template).toBe(body.template);
-            expect(r.schema).toBe(body.schema);
             expect(r.build).toEqual({ html: body.html, css: body.css });
           } else {
             expect(r.error).not.toBe("");
@@ -301,7 +295,7 @@ describe("validateSiteSave", () => {
     );
   });
 
-  it("never throws on arbitrary JSON, and what it accepts is four strings", () => {
+  it("never throws on arbitrary JSON, and what it accepts is three strings", () => {
     fc.assert(
       fc.property(fc.jsonValue(), (body) => {
         const r = validateSiteSave(body);
@@ -310,27 +304,21 @@ describe("validateSiteSave", () => {
           return;
         }
         expect(typeof r.template).toBe("string");
-        expect(typeof r.schema).toBe("string");
         expect(typeof r.build.html).toBe("string");
         expect(typeof r.build.css).toBe("string");
       })
     );
   });
 
-  it("requires all four fields to be strings, defaulting only a missing schema", () => {
+  it("requires all three fields to be strings and ignores a legacy schema field", () => {
     const fieldArb = fc.oneof(fc.string({ maxLength: 4 }), fc.jsonValue(), fc.constant(undefined));
     fc.assert(
       fc.property(fieldArb, fieldArb, fieldArb, fieldArb, (template, schema, html, css) => {
         const body: Record<string, unknown> = { template, html, css };
         if (schema !== undefined) body.schema = schema;
         const r = validateSiteSave(body);
-        expect(r.ok).toBe(
-          typeof template === "string" &&
-            typeof html === "string" &&
-            typeof css === "string" &&
-            (schema === undefined || typeof schema === "string")
-        );
-        if (r.ok && schema === undefined) expect(r.schema).toBe("");
+        expect(r.ok).toBe(typeof template === "string" && typeof html === "string" && typeof css === "string");
+        if (r.ok) expect("schema" in r).toBe(false);
       })
     );
   });

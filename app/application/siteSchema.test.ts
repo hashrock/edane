@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSchema, formatSchema, inferSchema, shapeRecords, defaultTemplate } from "./siteSchema";
+import { parseSchema, formatSchema, inferSchema, shapeRecords, defaultTemplate, migrateSiteSchema } from "./siteSchema";
 import type { SiteNode } from "./siteNode";
 
 const n = (id: string, text: string, type: SiteNode["type"] = "text", children: SiteNode[] = []): SiteNode => ({
@@ -94,5 +94,43 @@ describe("parseSchema against prototype names", () => {
     for (const name of ["toString", "constructor", "hasOwnProperty", "valueOf"]) {
       expect(parseSchema(`a:${name}`).ok).toBe(false);
     }
+  });
+});
+
+describe("shapeRecords with value types and nesting", () => {
+  it("reads check as boolean, number as number and nested collections as records", () => {
+    const schema = parseSchema("done:check, price:number, ch[]{page:number}");
+    if (!schema.ok) throw new Error();
+    const r = n("r", "Books", "text", [
+      n("a", "A", "text", [
+        { ...n("a0", "read"), checked: true },
+        n("a1", " 12.5 "),
+        n("a2", "chapters", "text", [n("s1", "Intro", "text", [n("p1", "3")]), n("s2", "Body", "text", [n("p2", "x")])]),
+      ]),
+    ]);
+    const { items, warnings } = shapeRecords(r, schema.schema);
+    expect(items[0]).toEqual({
+      id: "a",
+      title: "A",
+      done: true,
+      price: 12.5,
+      ch: [
+        { id: "s1", title: "Intro", page: 3 },
+        { id: "s2", title: "Body", page: undefined },
+      ],
+    });
+    expect(warnings).toEqual(['Body: page は number のはずが "x"']);
+  });
+});
+
+describe("migrateSiteSchema", () => {
+  const doc = { title: "", roots: [{ id: "c", text: "C", children: [] }] };
+  it("moves the legacy site schema onto the published node", () => {
+    expect(migrateSiteSchema(doc, "c", " a, b:image ")?.roots[0].schema).toBe("a, b:image");
+  });
+  it("does nothing when blank, the node is gone, or the node already has one", () => {
+    expect(migrateSiteSchema(doc, "c", "  ")).toBeNull();
+    expect(migrateSiteSchema(doc, "zz", "a")).toBeNull();
+    expect(migrateSiteSchema({ title: "", roots: [{ id: "c", text: "", schema: "x", children: [] }] }, "c", "a")).toBeNull();
   });
 });

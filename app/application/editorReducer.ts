@@ -66,7 +66,9 @@ import {
   moveNodeUp,
   moveNodeDown,
   moveBranch,
+  setNodeSchema,
 } from "../domain/model";
+import { conformEntering } from "../domain/branchSchema";
 import { assertNever } from "../lib/assertNever";
 
 export interface DocumentState {
@@ -148,7 +150,8 @@ export type UndoType =
   | "paste"
   | "link-meta"
   | "check"
-  | "set-type";
+  | "set-type"
+  | "schema";
 
 export type EditorAction =
   // --- structural keyboard edits ---
@@ -264,6 +267,8 @@ export type EditorAction =
     }
   // Task checkbox; `null` removes it (the node stops being a task).
   | { type: "setChecked"; nodeId: string; checked: boolean | null }
+  // Branch schema text (domain/branchSchema.ts); blank / `null` removes it.
+  | { type: "setSchema"; nodeId: string; schema: string | null }
   // --- multi-select ---
   // Replace the whole multi-selection set (ctrl/cmd-click toggle, shift-click
   // range — computed by the caller; see application/selection.ts). Empty
@@ -662,6 +667,13 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
+    case "setSchema": {
+      const node = findNode(document.model, action.nodeId);
+      if (!node) return { document };
+      const newModel = setNodeSchema(document.model, action.nodeId, action.schema);
+      return { document: { ...document, model: newModel } };
+    }
+
     case "setCheckedMany": {
       if (action.nodeIds.length === 0) return { document };
       const newModel = setCheckedMany(document.model, action.nodeIds, action.checked);
@@ -979,6 +991,7 @@ function viewReducer(
     case "setLinkMeta":
     case "setChecked":
     case "setCheckedMany":
+    case "setSchema":
     case "copyBranch":
       return view;
 
@@ -1365,6 +1378,29 @@ function findNearestSurvivor(
   return rootId;
 }
 
+/**
+ * The gestures that put a node into a record / field position on purpose:
+ * creating (Enter, Tab-created children, insert/add child), pasting, and
+ * moving (Tab / Shift+Tab, drag & drop). Merges (Backspace / Delete joins)
+ * are left out — joining a record into its collection promotes its fields into
+ * record positions, and padding those with blank fields would only add
+ * clutter the user never asked for.
+ */
+function conformsToSchema(type: EditorAction["type"]): boolean {
+  switch (type) {
+    case "enter":
+    case "tab":
+    case "insertSiblingAfter":
+    case "addChild":
+    case "pasteBranch":
+    case "insertNodes":
+    case "moveBranch":
+      return true;
+    default:
+      return false;
+  }
+}
+
 // --- Reducer ---
 
 export function editorReducer(
@@ -1401,6 +1437,16 @@ export function editorReducer(
     const model = ensureRoot(docResult.document.model, nextId);
     docResult.document = { ...docResult.document, model };
     docResult.focusId = firstRootId(model);
+  }
+  // Records that entered a schema'd collection get their missing fields, and
+  // a new blank field its type — once, here, for every gesture that creates
+  // or moves nodes into place (see conformEntering), so no single path can
+  // forget it. Part of the same state change, hence the same undo entry.
+  if (conformsToSchema(action.type) && docResult.document.model !== state.document.model) {
+    const model = conformEntering(state.document.model, docResult.document.model, nextId);
+    if (model !== docResult.document.model) {
+      docResult.document = { ...docResult.document, model };
+    }
   }
   let nextView = withCaretInBuffer(
     viewReducer(

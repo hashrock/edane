@@ -10,13 +10,20 @@ import { authMiddleware, selectAuth } from "./auth";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
+import {
+  encrypt,
+  decrypt,
+  isEncrypted,
+  decodeStoredNoteContent,
+  encodeNoteContentForStorage,
+  noteStorageMode,
+} from "./utils/crypto";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
 import { findNode } from "./domain/model";
-import { parseContent } from "./application/persistence";
+import { parseContent, serializeDocument } from "./application/persistence";
 import { modelToMarkdown } from "./application/markdown";
 import {
   PRIVATE_NOTE_PUBLISH_REASON,
@@ -27,7 +34,7 @@ import {
 } from "./application/nodePublication";
 import { renderSiteResponse, validateSiteSave } from "./application/siteTemplate";
 import { toSiteNode } from "./application/siteNode";
-import { defaultTemplate } from "./application/siteSchema";
+import { defaultTemplate, migrateSiteSchema } from "./application/siteSchema";
 import {
   SITE_AI_MODEL,
   buildSuggestMessages,
@@ -394,9 +401,10 @@ async function loadOwnedPublicationNode(
     encryptionKey
   );
   if (content === null) return { error: "decrypt" as const };
-  const node = findNode(parseContent(content, note.title), pub.nodeId);
+  const doc = parseContent(content, note.title);
+  const node = findNode(doc, pub.nodeId);
   if (!node) return { error: "not-found" as const };
-  return { pub, note, node };
+  return { pub, note, doc, node };
 }
 
 app.get("/pub/:file", async (c) => {
@@ -573,7 +581,6 @@ app.put("/api/sites/:pubId", async (c) => {
     publicationId: pubId,
     userId: user.id,
     template: parsed.template,
-    schema: parsed.schema,
     html: parsed.build.html,
     css: parsed.build.css,
     updatedAt,
@@ -846,15 +853,32 @@ const routes = app
     if ("error" in owned) {
       return owned.error === "decrypt" ? c.text("Decryption failed", 500) : c.notFound();
     }
-    const data = toSiteNode(owned.node);
-    const schema = site?.schema ?? "";
+    let node = owned.node;
+    // 遅延移行: スキーマは枝（ノート）側に一本化した。サイト側に残っている
+    // 旧スキーマは、ここで一度だけ枝へ書き込み、サイト側を空にする。
+    if (site?.schema) {
+      const migrated = migrateSiteSchema(owned.doc, owned.pub.nodeId, site.schema);
+      if (migrated) {
+        const stored = await encodeNoteContentForStorage(
+          serializeDocument(migrated),
+          noteStorageMode(owned.note.isPublic),
+          c.env.ENCRYPTION_KEY
+        );
+        await db
+          .update(notes)
+          .set({ content: stored, updatedAt: new Date().toISOString() })
+          .where(eq(notes.id, owned.note.id));
+        node = findNode(migrated, owned.pub.nodeId) ?? node;
+      }
+      await db.update(sites).set({ schema: "" }).where(eq(sites.publicationId, pubId));
+    }
+    const data = toSiteNode(node);
     return c.render("Sites/Edit", {
       user,
       publicationId: pubId,
       noteId: owned.note.id,
       data,
-      schema,
-      template: site?.template ?? defaultTemplate(effectiveSchema(schema, data)),
+      template: site?.template ?? defaultTemplate(effectiveSchema(data)),
       published: !!site,
     });
   })

@@ -57,7 +57,6 @@ export interface SiteUpsert {
   publicationId: string;
   userId: string;
   template: string;
-  schema: string;
   html: string;
   css: string;
   updatedAt: string;

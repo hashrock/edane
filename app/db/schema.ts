@@ -90,7 +90,7 @@ export const sites = sqliteTable("sites", {
     .notNull()
     .references(() => users.id),
   template: text("template").notNull(),
-  /** フィールド定義（application/siteSchema.ts の書式）。空なら実データから推定。 */
+  /** 廃止予定: 旧スキーマ。スキーマは枝（ノート）側に移した。サイトエディタを開くと枝へ移して空にする（server.ts の遅延移行）。 */
   schema: text("schema").notNull().default(""),
   html: text("html").notNull(),
   css: text("css").notNull(),

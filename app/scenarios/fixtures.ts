@@ -233,7 +233,6 @@ export function buildSite({ tag, nextId }: ScenarioContext): ScenarioPlan {
   const site = {
     publicationId: publication.id,
     template: defaultTemplate(inferSchema(toSiteNode(branch))),
-    schema: "",
     html: SITE_GOLDEN.html,
     css: SITE_GOLDEN.css,
   };

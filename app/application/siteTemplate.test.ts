@@ -59,15 +59,13 @@ describe("site urls", () => {
 
 describe("validateSiteSave", () => {
   it("accepts a well-formed body", () => {
-    const r = validateSiteSave({ template: "x", schema: "a, b", html: "<p>", css: "" });
-    expect(r).toMatchObject({ ok: true, schema: "a, b" });
-    expect(validateSiteSave({ template: "x", html: "", css: "" })).toMatchObject({ ok: true, schema: "" });
+    const r = validateSiteSave({ template: "x", html: "<p>", css: "" });
+    expect(r).toEqual({ ok: true, template: "x", build: { html: "<p>", css: "" } });
   });
   it("rejects missing fields and oversized payloads", () => {
     expect(validateSiteSave(null).ok).toBe(false);
     expect(validateSiteSave({ template: "x" }).ok).toBe(false);
     expect(validateSiteSave({ template: "x".repeat(70_000), html: "", css: "" }).ok).toBe(false);
     expect(validateSiteSave({ template: "", html: "x".repeat(3_000_000), css: "" }).ok).toBe(false);
-    expect(validateSiteSave({ template: "", schema: "x".repeat(5000), html: "", css: "" }).ok).toBe(false);
   });
 });

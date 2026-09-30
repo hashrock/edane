@@ -19,6 +19,7 @@ import {
   type SiteSchema,
 } from "./siteSchema";
 import { siteDataModule } from "./siteTemplate";
+import { fieldIssue } from "../domain/branchSchema";
 
 const KEY_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -81,6 +82,8 @@ describe("toSiteNode", () => {
           id: n.id,
           type: n.type ?? "text",
           text: n.text,
+          ...(n.checked !== undefined ? { checked: n.checked } : {}),
+          ...(n.schema ? { schema: n.schema } : {}),
           children: n.children.map(expected),
         });
         expect(toSiteNode(model)).toEqual(expected(model));
@@ -129,19 +132,22 @@ describe("inferSchema / shapeRecords", () => {
     );
   });
 
-  it("a typed schema warns exactly for the fields whose node kind differs", () => {
+  it("a typed schema warns exactly for the values the domain's fieldIssue rejects", () => {
     fc.assert(
       fc.property(nodeArb, schemaArb, (model, schema) => {
-        const root = toSiteNode(model);
-        const { warnings } = shapeRecords(root, schema);
-        let expectedTypeWarnings = 0;
-        for (const rec of root.children) {
+        const { warnings } = shapeRecords(toSiteNode(model), schema);
+        let scalar = 0;
+        let items = 0;
+        for (const rec of model.children) {
           schema.forEach((f, i) => {
             const node = rec.children[i];
-            if (node && f.type && node.type !== f.type) expectedTypeWarnings++;
+            if (!node) return;
+            if (f.list) items += node.children.filter((c) => fieldIssue(c, f.type)).length;
+            else if (fieldIssue(node, f.type)) scalar++;
           });
         }
-        expect(warnings.filter((w) => /のはずが/.test(w)).length).toBe(expectedTypeWarnings);
+        expect(warnings.filter((w) => /のはずが/.test(w)).length).toBe(scalar);
+        expect(warnings.filter((w) => /の要素 .* のはず$/.test(w)).length).toBe(items);
       })
     );
   });

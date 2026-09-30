@@ -12,6 +12,7 @@ import type { UndoType } from "../application/editorReducer";
 import { pasteCommand } from "../application/editorCommands";
 import { serializeDocument } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
+import { schemaDecorations } from "../application/schemaDecorations";
 import { supportsCheckbox } from "../application/nodeUtils";
 import {
   buildKeymap,
@@ -111,6 +112,8 @@ export default function OutlineEditor({
   } = state;
 
   const rows = useMemo(() => outlineRows(model), [model]);
+  // Branch-schema labels / marks, the same derivation the canvas draws.
+  const schemaDeco = useMemo(() => schemaDecorations(model), [model]);
   // The root is the note title (edited in the header); it is not an outline
   // row — the rows start at the top-level nodes. See outlineRows().
   const title = model.title;
@@ -428,6 +431,7 @@ export default function OutlineEditor({
                 node.checked !== undefined && supportsCheckbox(type);
               const isDone = node.checked === true;
               const displayText = isEditingThis ? editingText : node.text;
+              const deco = schemaDeco.get(node.id);
 
               return (
                 <li key={node.id}>
@@ -503,6 +507,33 @@ export default function OutlineEditor({
                       >
                         ✓
                       </button>
+                    )}
+
+                    {/* Branch schema: field name (amber ⚠ when the node
+                        can't be read as its type) and the collection tag.
+                        Plain spans — never focusable, like the checkbox. */}
+                    {(deco?.label || deco?.issue) && (
+                      <span
+                        data-testid="schema-label"
+                        title={
+                          deco.issue
+                            ? t("schemaMismatch", { key: deco.label ?? "", type: deco.issue })
+                            : undefined
+                        }
+                        className={`mt-1 shrink-0 rounded px-1 text-[10px] leading-4 ${
+                          deco.issue ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {`${deco.issue ? "⚠ " : ""}${deco.label ?? ""}`.trim()}
+                      </span>
+                    )}
+                    {deco?.collection && (
+                      <span
+                        title={node.schema}
+                        className="mt-1 shrink-0 rounded bg-violet-600 px-1 font-mono text-[9px] leading-4 text-white"
+                      >
+                        {"{…}"}
+                      </span>
                     )}
 
                     {/* Content */}

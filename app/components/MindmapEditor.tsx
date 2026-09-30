@@ -119,6 +119,8 @@ import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
 import MarkdownPasteDialog from "./MarkdownPasteDialog";
 import PublishNodeDialog from "./PublishNodeDialog";
+import SchemaDialog from "./SchemaDialog";
+import { schemaDecorations } from "../application/schemaDecorations";
 import type { EditorState, ViewState } from "../application/editorReducer";
 import {
   buildKeymap,
@@ -469,6 +471,8 @@ export function MindmapEditorView({
   // expose the URL in a visible input below the node — mirroring the outline
   // view — instead of swapping the canvas node to raw-text editing.
   const activeModelNode = activeNodeId ? findNode(model, activeNodeId) : null;
+  // Branch-schema labels / mismatch marks / badges (application/schemaDecorations.ts).
+  const schemaDeco = useMemo(() => schemaDecorations(model), [model]);
   const activeIsCustom =
     !!activeModelNode && isAuxInputSurface("canvas", activeModelNode.type ?? "text");
   const urlEditing = editing && !!activeNodeId && activeIsCustom;
@@ -535,6 +539,8 @@ export function MindmapEditorView({
     text: string;
     targetId: string;
   } | null>(null);
+  // 枝のスキーマ編集ダイアログの対象ノード id（null = 閉）。
+  const [schemaTarget, setSchemaTarget] = useState<string | null>(null);
   // ノードのWeb公開ダイアログの対象（null = 閉）。noteId のある編集画面限定。
   const [publishTarget, setPublishTarget] = useState<{
     nodeId: string;
@@ -1497,6 +1503,17 @@ export function MindmapEditorView({
       });
     }
     groups.push(formatGroup);
+
+    // --- Branch schema (domain/branchSchema.ts): this node's children are
+    // records. One node — a schema describes one collection. ---
+    const schemaGroup: ContextMenuAction[] = [];
+    if (!readOnly) {
+      schemaGroup.push({
+        label: t("menuSetSchema"),
+        onSelect: () => setSchemaTarget(nodeId),
+      });
+    }
+    groups.push(schemaGroup);
 
     // --- Media: image upload (R2). Replaces the node's content ---
     const mediaGroup: ContextMenuAction[] = [];
@@ -2770,6 +2787,65 @@ export function MindmapEditorView({
       // the node's own resting colors are — root, markdown card, or plain.
       // Solid, never dashed: the canvas draws no other dashed stroke, and a
       // dashed ring read as "provisional" next to the crisp box it hugs.
+      // Branch schema: the field name sits in the connector gap just left of
+      // the box (above it would collide — siblings are only VERTICAL_GAP
+      // apart), amber with a ⚠ when the node can't be read as its type; a
+      // node holding a schema gets a "{…}" tag on its top-right corner.
+      const deco = schemaDeco.get(node.id);
+      if (deco?.label || deco?.issue) {
+        const warn = !!deco.issue;
+        const text = new Konva.Text({
+          text: `${warn ? "⚠ " : ""}${deco.label ?? ""}`.trim(),
+          fontSize: 10,
+          fontFamily: "sans-serif",
+          fill: warn ? "#b45309" : "#64748b",
+          padding: 3,
+          listening: false,
+        });
+        const w = text.width();
+        const h = text.height();
+        text.position({ x: node.x - 6 - w, y: node.y - h / 2 });
+        group.add(
+          new Konva.Rect({
+            x: node.x - 6 - w,
+            y: node.y - h / 2,
+            width: w,
+            height: h,
+            cornerRadius: 4,
+            fill: warn ? "#fffbeb" : "#f8fafc",
+            listening: false,
+            perfectDrawEnabled: false,
+          })
+        );
+        group.add(text);
+      }
+      if (deco?.collection) {
+        const tag = new Konva.Text({
+          text: "{…}",
+          fontSize: 9,
+          fontFamily: "monospace",
+          fill: "#ffffff",
+          padding: 2,
+          listening: false,
+        });
+        const tx = node.x + rectWidth - tag.width() - 6;
+        const ty = node.y - rectHeight / 2 - tag.height() / 2;
+        group.add(
+          new Konva.Rect({
+            x: tx,
+            y: ty,
+            width: tag.width(),
+            height: tag.height(),
+            cornerRadius: 4,
+            fill: "#7c3aed",
+            listening: false,
+            perfectDrawEnabled: false,
+          })
+        );
+        tag.position({ x: tx, y: ty });
+        group.add(tag);
+      }
+
       if (isMultiSelected) {
         group.add(
           new Konva.Rect({
@@ -3288,7 +3364,7 @@ export function MindmapEditorView({
   // locale: キャンバスに直接描く文言（読み込み中 / 行数バッジ / フィールド追加
   // ボタンなど）を言語切り替えで描き直す。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale]);
+  }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale, schemaDeco]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -4000,6 +4076,21 @@ export function MindmapEditorView({
             isPublic={isPublic}
             onClose={() => {
               setPublishTarget(null);
+              focusEditorSoon();
+            }}
+          />
+        )}
+        {schemaTarget && findNode(model, schemaTarget) && (
+          <SchemaDialog
+            node={findNode(model, schemaTarget)!}
+            onSave={(schema) => {
+              const next = dispatch({ type: "setSchema", nodeId: schemaTarget, schema }, "schema");
+              if (noteId) saveNote(next.document.model);
+              setSchemaTarget(null);
+              focusEditorSoon();
+            }}
+            onClose={() => {
+              setSchemaTarget(null);
               focusEditorSoon();
             }}
           />
