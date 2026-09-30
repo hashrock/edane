@@ -32,6 +32,7 @@ import {
   siteUrl,
   validateSiteSave,
 } from "./siteTemplate";
+import { unescapeHtml } from "../lib/escapeHtml.testHelpers";
 
 /**
  * Text built out of random strings and fragments that are dangerous in one of
@@ -77,14 +78,6 @@ function elementText(body: string, tag: string): string {
 
 /** Inverse of the `</style` escaping, case preserved. */
 const unescapeStyle = (s: string) => s.replace(/<\\\/style/gi, (m) => "<" + m.slice(2));
-
-/** Inverse of escapeHtml: `&amp;` must be undone last. */
-const unescapeHtml = (s: string) =>
-  s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&");
 
 describe("renderSiteResponse", () => {
   it("closes the style block itself: the CSS can never contain `</style`, whatever the case", () => {
