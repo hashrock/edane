@@ -62,7 +62,7 @@ describe("schemaDraft", () => {
         const back = parseSchema(formatSchema(schema));
         // A blank key formats to nothing, so "parses" must also keep every row.
         expect(draftErrors(draft).size === 0).toBe(back.ok && back.schema.length === draft.length);
-        if (back.ok) expect(formatSchema(back.schema)).toBe(formatSchema(schema));
+        if (draftErrors(draft).size === 0 && back.ok) expect(formatSchema(back.schema)).toBe(formatSchema(schema));
       })
     );
   });

@@ -153,7 +153,7 @@ export function keymapFor(prefs: EditorPreferences, layout: EditorLayout): KeyBi
 
 const SCHEMA_SAMPLES = [
   "area, url:link, cover:image",
-  "done:check, price:number, on:date, tags[]",
+  "done:check, price:number, on:date, tags",
   "name, chapters, cover:image",
   "",
   "broken{",
@@ -377,7 +377,7 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
     case "setChecked":
       return { type: kind, nodeId: vis(a), checked: flag ? null : c % 2 === 0 };
     case "setSchema":
-      // Valid schemas (every value type, a legacy `[]` mark) so later structural
+      // Valid schemas (every value type) so later structural
       // steps exercise conformEntering — set on any node, which also nests
       // schemas — plus a blank and an unparsable one.
       return { type: kind, nodeId: vis(a), schema: flag ? null : pick(SCHEMA_SAMPLES, b) };

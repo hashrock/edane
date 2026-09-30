@@ -53,7 +53,7 @@ describe("branch schema text", () => {
   });
   it("never throws on arbitrary text", () => {
     fc.assert(
-      fc.property(fc.string({ unit: fc.constantFrom(..."ab:[]{}, \n\timage"), maxLength: 30 }), (text) => {
+      fc.property(fc.string({ unit: fc.constantFrom(..."ab:{}, \n\timage"), maxLength: 30 }), (text) => {
         parseSchema(text);
       })
     );

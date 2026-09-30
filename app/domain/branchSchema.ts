@@ -15,7 +15,6 @@
  *   - `number` / `date` … text ノードの中身の形（数値 / `YYYY-MM-DD`）
  * - 入れ子にしたいときは、フィールドノードに別のスキーマを付ける。スキーマを
  *   持つノードはどの位置にいても、子をそのスキーマのレコードとして読む
- * - 旧書式の `key[]`（並び）は読み込み時に `[]` を捨てて普通のフィールドとして読む
  *
  * エディタは新しく入ってきたレコードに足りないフィールドを型付きで補い
  * （{@link conformEntering}）、各ノードの役割（{@link schemaRoles}）から
@@ -60,8 +59,8 @@ const KEY_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 export type ParseSchemaResult = { ok: true; schema: BranchSchema } | { ok: false; error: string };
 
-/** `key` / `key:type`。`(\[\])?` は旧書式の並びの印で、読んで捨てる。 */
-const FIELD_RE = /^([^:\s[\]{}]+)\s*(?:\[\])?\s*(?::\s*([A-Za-z]+))?$/;
+/** `key` / `key:type`。 */
+const FIELD_RE = /^([^:\s]+?)\s*(?::\s*([A-Za-z]+))?$/;
 
 /** キーとして使えない理由（使えるなら null）。パーサと UI の編集で共有する。 */
 export function keyError(key: string): string | null {

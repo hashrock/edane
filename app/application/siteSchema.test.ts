@@ -12,8 +12,8 @@ const root = n("r", "Cafes", "text", [
 ]);
 
 describe("parseSchema", () => {
-  it("parses keys and type annotations, dropping a legacy list mark", () => {
-    expect(parseSchema("area, url:link, tags[], image: image")).toEqual({
+  it("parses keys and type annotations", () => {
+    expect(parseSchema("area, url:link, tags, image: image")).toEqual({
       ok: true,
       schema: [
         { key: "area", type: undefined },

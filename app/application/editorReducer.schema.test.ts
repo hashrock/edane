@@ -10,7 +10,7 @@ const n = (id: string, text: string, children: MindMapModel[] = [], extra: Parti
   children,
   ...extra,
 });
-const schema = "author, cover:image, done:check, tags[]";
+const schema = "author, cover:image, done:check, tags";
 const base: MindMapDocument = {
   title: "",
   roots: [n("c", "Books", [n("r1", "A", [n("a1", "Alice")])], { schema })],

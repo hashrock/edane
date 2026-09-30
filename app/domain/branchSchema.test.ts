@@ -30,12 +30,8 @@ describe("parseSchema", () => {
       ],
     });
   });
-  it("reads the legacy list mark `key[]` as a plain field", () => {
-    const p = parseSchema("area, tags[], links[]:link");
-    expect(p.ok && formatSchema(p.schema)).toBe("area, tags, links:link");
-  });
-  it("rejects braces, bad keys and unknown types", () => {
-    expect(parseSchema("a[]{b}").ok).toBe(false);
+  it("rejects bad keys and unknown types", () => {
+    expect(parseSchema("a[]").ok).toBe(false);
     expect(parseSchema("a{b}").ok).toBe(false);
     expect(parseSchema("title").ok).toBe(false);
     expect(parseSchema("a:bool").ok).toBe(false);
