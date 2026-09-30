@@ -89,6 +89,7 @@ const READ_ONLY_ALLOWED = {
   setNodeStyle: false,
   setLinkMeta: false,
   setChecked: false,
+  setSchema: false,
   setCheckedMany: false,
   setNodeTypeMany: false,
   setNodeStyleMany: false,

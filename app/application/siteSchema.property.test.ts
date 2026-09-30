@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { NODE_TYPES, type MindMapModel } from "../domain/model";
-import { nodeArb } from "../domain/model.arb";
+import { nodeArb as anyNodeArb } from "../domain/model.arb";
 import { toSiteNode, type SiteNode } from "./siteNode";
 import {
   formatSchema,
@@ -19,8 +19,21 @@ import {
   type SiteSchema,
 } from "./siteSchema";
 import { siteDataModule } from "./siteTemplate";
+import { fieldIssue } from "../domain/branchSchema";
 
 const KEY_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Branches without schemas on their inner nodes: a field node with its own
+ * schema reads as nested records (covered by siteSchema.test.ts), which these
+ * flat-shape properties don't model. The published root's own schema is
+ * irrelevant here — shapeRecords takes the schema as an argument.
+ */
+const stripSchemas = (n: MindMapModel): MindMapModel => {
+  const { schema: _schema, ...rest } = n;
+  return { ...rest, children: n.children.map(stripSchemas) };
+};
+const nodeArb = anyNodeArb.map(stripSchemas);
 
 const fieldArb = fc.record(
   {
@@ -28,9 +41,8 @@ const fieldArb = fc.record(
       .stringMatching(/^[A-Za-z_][A-Za-z0-9_]{0,6}$/)
       .filter((k) => !(RESERVED_KEYS as readonly string[]).includes(k)),
     type: fc.constantFrom(...NODE_TYPES),
-    list: fc.boolean(),
   },
-  { requiredKeys: ["key", "list"] }
+  { requiredKeys: ["key"] }
 );
 const schemaArb: fc.Arbitrary<SiteSchema> = fc.uniqueArray(fieldArb, {
   selector: (f) => f.key,
@@ -39,7 +51,7 @@ const schemaArb: fc.Arbitrary<SiteSchema> = fc.uniqueArray(fieldArb, {
 
 /** formatSchema writes `text` as "no annotation", so that is what comes back. */
 const normalize = (s: SiteSchema): SiteSchema =>
-  s.map(({ key, type, list }) => ({ key, type: type === "text" ? undefined : type, list }));
+  s.map(({ key, type }) => ({ key, type: type === "text" ? undefined : type }));
 
 function expectWellFormedSchema(schema: SiteSchema) {
   const keys = schema.map((f) => f.key);
@@ -81,6 +93,8 @@ describe("toSiteNode", () => {
           id: n.id,
           type: n.type ?? "text",
           text: n.text,
+          ...(n.checked !== undefined ? { checked: n.checked } : {}),
+          ...(n.schema ? { schema: n.schema } : {}),
           children: n.children.map(expected),
         });
         expect(toSiteNode(model)).toEqual(expected(model));
@@ -110,7 +124,7 @@ describe("inferSchema / shapeRecords", () => {
           schema.forEach((f, j) => {
             const node = rec.children[j];
             expect(item[f.key]).toEqual(
-              node === undefined ? undefined : f.list ? node.children.map((c) => c.text) : node.text
+              node === undefined ? undefined : node.text
             );
           });
         });
@@ -123,25 +137,24 @@ describe("inferSchema / shapeRecords", () => {
       fc.property(nodeArb, fc.nat({ max: 3 }), (model, extra) => {
         const root = toSiteNode(model);
         const width = Math.max(0, ...root.children.map((r) => r.children.length)) + extra;
-        const schema: SiteSchema = Array.from({ length: width }, (_, i) => ({ key: `f${i}`, list: i % 2 === 0 }));
+        const schema: SiteSchema = Array.from({ length: width }, (_, i) => ({ key: `f${i}` }));
         expect(shapeRecords(root, schema).warnings).toEqual([]);
       })
     );
   });
 
-  it("a typed schema warns exactly for the fields whose node kind differs", () => {
+  it("a typed schema warns exactly for the values the domain's fieldIssue rejects", () => {
     fc.assert(
       fc.property(nodeArb, schemaArb, (model, schema) => {
-        const root = toSiteNode(model);
-        const { warnings } = shapeRecords(root, schema);
-        let expectedTypeWarnings = 0;
-        for (const rec of root.children) {
+        const { warnings } = shapeRecords(toSiteNode(model), schema);
+        let expected = 0;
+        for (const rec of model.children) {
           schema.forEach((f, i) => {
             const node = rec.children[i];
-            if (node && f.type && node.type !== f.type) expectedTypeWarnings++;
+            if (node && fieldIssue(node, f.type)) expected++;
           });
         }
-        expect(warnings.filter((w) => /のはずが/.test(w)).length).toBe(expectedTypeWarnings);
+        expect(warnings.filter((w) => /のはずが/.test(w)).length).toBe(expected);
       })
     );
   });

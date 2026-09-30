@@ -31,7 +31,6 @@ export interface PlannedPublication {
 export interface PlannedSite {
   publicationId: string;
   template: string;
-  schema: string;
   html: string;
   css: string;
 }

@@ -4,7 +4,16 @@
  * （server.ts の /api/sites/:pubId/suggest）にあり、ここは純粋関数だけ。
  */
 import type { SiteNode } from "./siteNode";
-import { defaultTemplate, formatSchema, parseSchema, inferSchema, shapeRecords, type SiteSchema, type SiteItem } from "./siteSchema";
+import {
+  defaultTemplate,
+  formatSchema,
+  parseSchema,
+  inferSchema,
+  shapeRecords,
+  type SiteSchema,
+  type SiteItem,
+  type SiteValue,
+} from "./siteSchema";
 
 export const SITE_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 
@@ -24,11 +33,13 @@ export interface ChatMessage {
  */
 export function sampleItems(items: SiteItem[], maxChars = SITE_AI_DATA_MAX_CHARS): string {
   const clip = (v: string) => (v.length > 120 ? v.slice(0, 120) + "…" : v);
-  const shown = items.slice(0, 5).map((item) =>
-    Object.fromEntries(
-      Object.entries(item).map(([k, v]) => [k, Array.isArray(v) ? v.slice(0, 8).map(clip) : v === undefined ? undefined : clip(v)])
-    )
-  );
+  const shrink = (v: SiteValue | undefined): unknown => {
+    if (typeof v === "string") return clip(v);
+    if (Array.isArray(v)) return v.slice(0, 8).map(shrinkItem);
+    return v;
+  };
+  const shrinkItem = (item: SiteItem) => Object.fromEntries(Object.entries(item).map(([k, v]) => [k, shrink(v)]));
+  const shown = items.slice(0, 5).map(shrinkItem);
   const json = JSON.stringify(shown, null, 1);
   const note = items.length > 5 ? `\n…(+${items.length - 5} more items)` : "";
   return (json.length > maxChars ? json.slice(0, maxChars) + "\n…(truncated)" : json) + note;
@@ -55,8 +66,6 @@ export interface SuggestRequest {
   instruction: string;
   /** 作者のテンプレート。既定のまま／空なら「まだ何もない」として扱う。 */
   currentTemplate: string;
-  /** スキーマ文字列（空なら推定）。 */
-  schema: string;
 }
 
 /** `/api/sites/:id/suggest` のボディ。型が違えば黙って既定値にする（内容は AI が読むだけ）。 */
@@ -65,7 +74,6 @@ export function validateSuggestRequest(body: unknown): SuggestRequest {
   return {
     instruction: typeof b.instruction === "string" ? b.instruction : "",
     currentTemplate: typeof b.template === "string" ? b.template : "",
-    schema: typeof b.schema === "string" ? b.schema : "",
   };
 }
 
@@ -78,22 +86,34 @@ function authoredTemplate(template: string, schema: SiteSchema): string {
   return t === defaultTemplate(schema).trim() ? "" : t;
 }
 
-/** 空／不正なスキーマは推定で補う（サーバーもエディタも同じ規則）。 */
-export function effectiveSchema(schemaText: string, data: SiteNode): SiteSchema {
-  const parsed = parseSchema(schemaText);
+/**
+ * 枝（公開した枝の根）のスキーマ。無い／空／不正なら推定で補う（サーバーも
+ * エディタも同じ規則）。
+ */
+export function effectiveSchema(data: SiteNode): SiteSchema {
+  const parsed = parseSchema(data.schema ?? "");
   return parsed.ok && parsed.schema.length ? parsed.schema : inferSchema(data);
 }
 
-function describeItems(schema: SiteSchema): string {
-  const fields = schema
-    .map((f) => `  ${f.key}: ${f.list ? "string[]" : "string"} | undefined${f.type && f.type !== "text" ? `  // ${f.type} URL` : ""}`)
+const VALUE_TS: Record<string, string> = { check: "boolean", number: "number" };
+const VALUE_NOTE: Record<string, string> = { image: "image URL", link: "URL", markdown: "Markdown", date: "YYYY-MM-DD" };
+
+function describeFields(schema: SiteSchema, indent: string): string {
+  return schema
+    .map((f) => {
+      const note = f.type && VALUE_NOTE[f.type] ? `  // ${VALUE_NOTE[f.type]}` : "";
+      return `${indent}${f.key}: ${(f.type && VALUE_TS[f.type]) ?? "string"} | undefined${note}`;
+    })
     .join("\n");
-  return `{\n  id: string,\n  title: string,\n${fields}\n}`;
+}
+
+function describeItems(schema: SiteSchema): string {
+  return `{\n  id: string,\n  title: string,\n${describeFields(schema, "  ")}\n}`;
 }
 
 export function buildSuggestMessages(input: SuggestRequest & { data: SiteNode }): ChatMessage[] {
   const instruction = input.instruction.trim().slice(0, SITE_AI_INSTRUCTION_MAX_CHARS);
-  const schema = effectiveSchema(input.schema, input.data);
+  const schema = effectiveSchema(input.data);
   const current = authoredTemplate(input.currentTemplate, schema);
   const user =
     `Schema (field order = child order): ${formatSchema(schema) || "(none)"}\n` +

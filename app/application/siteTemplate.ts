@@ -58,7 +58,6 @@ export interface SiteBuild {
 }
 
 export const SITE_TEMPLATE_MAX_BYTES = 64 * 1024;
-export const SITE_SCHEMA_MAX_BYTES = 4 * 1024;
 export const SITE_BUILD_MAX_BYTES = 2 * 1024 * 1024;
 
 function utf8ByteLength(s: string): number {
@@ -176,17 +175,19 @@ export function renderSiteResponse(
   };
 }
 
-/** 保存リクエストの検証。サイズと型だけ（内容は CSP で守る）。 */
+/**
+ * 保存リクエストの検証。サイズと型だけ（内容は CSP で守る）。スキーマは
+ * 枝（ノート）の側にあるので、ここでは受け取らない。
+ */
 export function validateSiteSave(body: unknown):
-  | { ok: true; template: string; schema: string; build: SiteBuild }
+  | { ok: true; template: string; build: SiteBuild }
   | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: false, error: "Invalid body" };
-  const { template, schema = "", html, css } = body as Record<string, unknown>;
-  if (typeof template !== "string" || typeof html !== "string" || typeof css !== "string" || typeof schema !== "string") {
+  const { template, html, css } = body as Record<string, unknown>;
+  if (typeof template !== "string" || typeof html !== "string" || typeof css !== "string") {
     return { ok: false, error: "template, html and css are required" };
   }
   if (exceedsBytes(SITE_TEMPLATE_MAX_BYTES, template)) return { ok: false, error: "Template too large" };
-  if (exceedsBytes(SITE_SCHEMA_MAX_BYTES, schema)) return { ok: false, error: "Schema too large" };
   if (exceedsBytes(SITE_BUILD_MAX_BYTES, html, css)) return { ok: false, error: "Build too large" };
-  return { ok: true, template, schema, build: { html, css } };
+  return { ok: true, template, build: { html, css } };
 }

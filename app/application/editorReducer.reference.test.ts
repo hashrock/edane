@@ -279,7 +279,15 @@ const KINDS: RefAction["kind"][] = [
 ];
 const stepArb = fc.record({ kind: fc.constantFrom(...KINDS), n: fc.nat() });
 
-const openModelArb = modelArb.map(uncollapsedDocument);
+// The reference models plain structural editing; the schema's field padding
+// (conformEntering) is covered by its own tests, so schemas are dropped here.
+const withoutSchemas = (node: MindMapModel): MindMapModel => {
+  const { schema: _schema, ...rest } = node;
+  return { ...rest, children: node.children.map(withoutSchemas) };
+};
+const openModelArb = modelArb
+  .map(uncollapsedDocument)
+  .map((doc) => ({ ...doc, roots: doc.roots.map(withoutSchemas) }));
 
 describe("editorReducer vs. flat-outline reference", () => {
   it("agrees on rows, active node and edit mode after every structural keyboard edit", () => {

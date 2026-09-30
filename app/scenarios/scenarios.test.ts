@@ -166,7 +166,7 @@ describe("individual scenarios", () => {
   it("site: a built site whose payload passes the save validation and keeps the search contract", () => {
     const [site] = plans.site.sites;
     expect(site.publicationId).toBe(plans.site.publications[0].id);
-    expect(validateSiteSave({ template: site.template, schema: site.schema, html: site.html, css: site.css }).ok).toBe(
+    expect(validateSiteSave({ template: site.template, html: site.html, css: site.css }).ok).toBe(
       true
     );
     expect(site.html).toContain("data-search");

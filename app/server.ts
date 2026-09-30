@@ -573,7 +573,6 @@ app.put("/api/sites/:pubId", async (c) => {
     publicationId: pubId,
     userId: user.id,
     template: parsed.template,
-    schema: parsed.schema,
     html: parsed.build.html,
     css: parsed.build.css,
     updatedAt,
@@ -841,20 +840,18 @@ const routes = app
     const pubId = c.req.param("pubId");
     const [owned, site] = await Promise.all([
       loadOwnedPublicationNode(db, pubId, user.id, c.env.ENCRYPTION_KEY),
-      db.select({ template: sites.template, schema: sites.schema }).from(sites).where(eq(sites.publicationId, pubId)).get(),
+      db.select({ template: sites.template }).from(sites).where(eq(sites.publicationId, pubId)).get(),
     ]);
     if ("error" in owned) {
       return owned.error === "decrypt" ? c.text("Decryption failed", 500) : c.notFound();
     }
     const data = toSiteNode(owned.node);
-    const schema = site?.schema ?? "";
     return c.render("Sites/Edit", {
       user,
       publicationId: pubId,
       noteId: owned.note.id,
       data,
-      schema,
-      template: site?.template ?? defaultTemplate(effectiveSchema(schema, data)),
+      template: site?.template ?? defaultTemplate(effectiveSchema(data)),
       published: !!site,
     });
   })

@@ -49,6 +49,7 @@ const draftArb: fc.Arbitrary<Draft> = fc.letrec<{ draft: Draft }>((tie) => ({
       linkTitle: fc.string({ maxLength: 8 }),
       favicon: fc.string({ maxLength: 8 }),
       checked: fc.boolean(),
+      schema: fc.constantFrom("a, b:image", "x:check, y:link", "p:number, q:date, r"),
       position: positionArb,
     },
     { requiredKeys: ["text", "children"] }
