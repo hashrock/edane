@@ -6,6 +6,7 @@
  */
 
 import { t } from "./i18n";
+import { absoluteUrl } from "../lib/url";
 
 /**
  * 非公開ノートでコピー動線を無効化するときに添える理由（現在言語で解決）。
@@ -40,5 +41,5 @@ export function copyLinkFailure(): string {
  * @param noteId ノートID。
  */
 export function publicNoteUrl(origin: string, noteId: string): string {
-  return `${origin.replace(/\/+$/, "")}/notes/${encodeURIComponent(noteId)}`;
+  return absoluteUrl(origin, `/notes/${encodeURIComponent(noteId)}`);
 }

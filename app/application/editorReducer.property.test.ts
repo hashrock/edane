@@ -24,11 +24,12 @@ import {
   isRoot,
   type MindMapDocument,
 } from "../domain/model";
-import { modelAndVisibleArb, modelArb, nodeArb, sequentialIds } from "../domain/model.arb";
+import { modelAndVisibleArb, modelArb, sequentialIds } from "../domain/model.arb";
 import { pasteCommand, type PasteSource } from "./editorCommands";
 import { editorReducer, reconcileView, type EditorState } from "./editorReducer";
 import {
   actionStepArb,
+  branchPasteSourceArb,
   editorStateAt,
   expectFocusInvariant,
   initialEditorState,
@@ -251,7 +252,7 @@ const pasteSourceArb: fc.Arbitrary<PasteSource> = fc.oneof(
   fc
     .tuple(markdownArb, fc.constantFrom("decompose", "node", "plain") as fc.Arbitrary<"decompose" | "node" | "plain">)
     .map(([text, mode]) => ({ kind: "markdown", text, mode }) as PasteSource),
-  fc.option(nodeArb, { nil: undefined }).map((node) => ({ kind: "branch", node }) as PasteSource)
+  branchPasteSourceArb
 );
 
 type SeqStep = { kind: "action"; step: ActionStep } | { kind: "paste"; source: PasteSource };

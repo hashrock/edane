@@ -21,6 +21,7 @@ import { modelArb, nodeArb, nodeIds, pick } from "../domain/model.arb";
 import { assertNever } from "../lib/assertNever";
 import type { EditorAction, EditorState } from "./editorReducer";
 import { buildKeymap, type KeyBinding } from "./editorKeymap";
+import type { PasteSource } from "./editorCommands";
 import {
   ARROW_BEHAVIORS,
   ENTER_BEHAVIORS,
@@ -28,6 +29,17 @@ import {
   type EditorPreferences,
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
+
+/**
+ * The `{kind:"branch"}` arm of `PasteSource`: the clipboard's own subtree (a
+ * random node), or absent (falls back to the internal branch clipboard —
+ * see pasteCommand). Shared by editorReducer.property.test.ts and
+ * editorCommands.property.test.ts so the two files can't drift on how this
+ * arm of the union is generated.
+ */
+export const branchPasteSourceArb: fc.Arbitrary<
+  Extract<PasteSource, { kind: "branch" }>
+> = fc.option(nodeArb, { nil: undefined }).map((node) => ({ kind: "branch", node }));
 
 /**
  * An editor state with `nodeId` active. `pos` may be any natural (an

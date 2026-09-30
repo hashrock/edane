@@ -12,6 +12,7 @@
 import { shapeRecords, type SiteSchema } from "./siteSchema";
 import type { SiteNode } from "./siteNode";
 import { escapeHtml } from "../lib/escapeHtml";
+import { absoluteUrl } from "../lib/url";
 
 /** テンプレートが `import { data } from './data.js'` で読む仮想ファイル。 */
 export const SITE_DATA_FILE = "data.js";
@@ -120,7 +121,7 @@ export function siteEditPath(pubId: string): string | undefined {
 }
 export function siteUrl(origin: string, pubId: string): string | undefined {
   const seg = encodePathSegment(pubId);
-  return seg === undefined ? undefined : `${origin.replace(/\/+$/, "")}/sites/${seg}`;
+  return seg === undefined ? undefined : absoluteUrl(origin, `/sites/${seg}`);
 }
 
 /**
