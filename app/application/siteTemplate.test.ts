@@ -11,7 +11,7 @@ describe("siteDataModule", () => {
   it("emits data, items and schema, escaping `<` so `</script>` can't close a tag", () => {
     const src = siteDataModule(
       { id: "r", type: "text", text: "</script>", children: [{ id: "a", type: "text", text: "A", children: [{ id: "a1", type: "text", text: "x", children: [] }] }] },
-      [{ key: "f", list: false }]
+      [{ key: "f" }]
     );
     expect(src.startsWith("export const data = ")).toBe(true);
     expect(src).toContain('export const items = [{"id":"a","title":"A","f":"x"}];');

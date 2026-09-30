@@ -1,6 +1,6 @@
 /**
  * Property-based tests for branch schemas: the text format round-trips
- * (nesting included) and never throws, and conformEntering only ever ADDS —
+ * and never throws, and conformEntering only ever ADDS —
  * blank fields at the end of entering records, a type on a new blank node —
  * never touching what was already there.
  */
@@ -14,7 +14,6 @@ import {
   RESERVED_KEYS,
   schemaRoles,
   type BranchSchema,
-  type SchemaField,
 } from "./branchSchema";
 import { cloneWithNewIds, findNode, type MindMapDocument, type MindMapModel } from "./model";
 import { allIds, expectUniqueIds, modelArb, nodeArb, pick, sequentialIds } from "./model.arb";
@@ -23,27 +22,14 @@ const keyArb = fc
   .stringMatching(/^[A-Za-z_][A-Za-z0-9_]{0,5}$/)
   .filter((k) => !(RESERVED_KEYS as readonly string[]).includes(k));
 
-const schemaArb: fc.Arbitrary<BranchSchema> = fc.letrec<{ schema: BranchSchema }>((tie) => ({
-  schema: fc.uniqueArray(
-    fc.oneof(
-      { depthSize: "small" },
-      fc
-        .record({ key: keyArb, type: fc.constantFrom(...FIELD_TYPES), list: fc.boolean() }, { requiredKeys: ["key", "list"] })
-        .map((f): SchemaField => f),
-      fc.record({ key: keyArb, fields: tie("schema") }).map((f): SchemaField => ({ key: f.key, type: undefined, list: true, fields: f.fields }))
-    ),
-    { selector: (f) => f.key, maxLength: 4 }
-  ),
-})).schema;
+const schemaArb: fc.Arbitrary<BranchSchema> = fc.uniqueArray(
+  fc.record({ key: keyArb, type: fc.constantFrom(...FIELD_TYPES) }, { requiredKeys: ["key"] }),
+  { selector: (f) => f.key, maxLength: 5 }
+);
 
 /** formatSchema writes `text` as "no annotation", so that is what comes back. */
 function normalize(schema: BranchSchema): BranchSchema {
-  return schema.map((f) => ({
-    key: f.key,
-    type: f.fields || f.type === "text" ? undefined : f.type,
-    list: f.list,
-    ...(f.fields ? { fields: normalize(f.fields) } : {}),
-  }));
+  return schema.map((f) => ({ key: f.key, type: f.type === "text" ? undefined : f.type }));
 }
 
 /** Every node of `doc` as id → node, for "what happened to this node" checks. */

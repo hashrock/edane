@@ -15,6 +15,7 @@ import {
   fieldIssue,
   formatSchema,
   isNumberText,
+  ownSchema,
   parseSchema,
   RESERVED_KEYS,
   type BranchSchema,
@@ -57,18 +58,20 @@ export function inferSchema(root: SiteNode): SiteSchema {
     const count = (pred: (n: SiteNode) => boolean) => at.filter(pred).length;
     const majority = (n: number) => n * 2 > at.length;
     const type = STORED_NODE_TYPES.find((t) => majority(count((n) => n.type === t)));
-    const list = majority(count((n) => n.children.length > 0));
-    let base = type === "image" ? "image" : type === "link" ? "url" : type === "markdown" ? "body" : list ? "items" : "field";
+    const base = type === "image" ? "image" : type === "link" ? "url" : type === "markdown" ? "body" : "field";
     let key = base === "field" ? `field${i + 1}` : base;
     for (let n = 2; used.has(key); n++) key = `${base}${n}`;
     used.add(key);
-    schema.push({ key, type, list });
+    schema.push({ key, type });
   }
   return schema;
 }
 
-/** レコードのフィールド値。`check` は真偽、`number` は数値、入れ子はレコードの並び。 */
-export type SiteValue = string | number | boolean | string[] | SiteItem[];
+/**
+ * レコードのフィールド値。`check` は真偽、`number` は数値。フィールドノード
+ * 自身がスキーマを持てば、その子をレコードとして読んだ配列（入れ子）。
+ */
+export type SiteValue = string | number | boolean | SiteItem[];
 
 /** テンプレートが `items` として受け取る 1 レコード。 */
 export type SiteItem = { id: string; title: string } & { [key: string]: SiteValue | undefined };
@@ -94,15 +97,9 @@ export function shapeRecords(root: SiteNode, schema: SiteSchema): { items: SiteI
     fields.forEach((f, i) => {
       const node = rec.children[i];
       if (!node) return;
-      if (f.list && f.fields) {
-        item[f.key] = node.children.map((c) => shape(c, f.fields!));
-        return;
-      }
-      if (f.list) {
-        node.children.forEach((c) => {
-          if (issueOf(c, f.type)) warnings.push(`${rec.text}: ${f.key} の要素 "${c.text}" は ${f.type} のはず`);
-        });
-        item[f.key] = node.children.map((c) => c.text);
+      const nested = ownSchema(node);
+      if (nested) {
+        item[f.key] = node.children.map((c) => shape(c, nested));
         return;
       }
       if (issueOf(node, f.type)) warnings.push(`${rec.text}: ${f.key} は ${f.type} のはずが ${describeValue(node)}`);
@@ -147,15 +144,7 @@ const FIELD_RENDERERS = {
  * 並べるだけの素直なカード一覧。スキーマが空なら title だけのカード。
  */
 export function defaultTemplate(schema: SiteSchema): string {
-  const field = (f: SchemaField): string => {
-    if (f.list && f.fields) {
-      return `      {(item.${f.key} ?? []).map((v) => <p class="text-slate-600 text-sm">・{v.title}</p>)}`;
-    }
-    if (f.list) {
-      return `      {(item.${f.key} ?? []).map((v) => <span class="mr-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{v}</span>)}`;
-    }
-    return FIELD_RENDERERS[f.type ?? "text"](f.key);
-  };
+  const field = (f: SchemaField): string => FIELD_RENDERERS[f.type ?? "text"](f.key);
   return `import { items, title } from './data.js';
 
 function Card({ item }) {

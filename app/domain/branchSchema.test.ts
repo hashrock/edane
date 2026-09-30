@@ -19,35 +19,25 @@ const n = (id: string, text: string, children: MindMapModel[] = [], extra: Parti
 const doc = (...roots: MindMapModel[]): MindMapDocument => ({ title: "", roots });
 
 describe("parseSchema", () => {
-  it("parses the value types, list items and nested collections", () => {
-    expect(parseSchema("done:check, price:number, tags[]:link, ch[]{name, page:number}")).toEqual({
+  it("parses keys and value types", () => {
+    expect(parseSchema("author, done:check, price:number, on: date")).toEqual({
       ok: true,
       schema: [
-        { key: "done", type: "check", list: false },
-        { key: "price", type: "number", list: false },
-        { key: "tags", type: "link", list: true },
-        {
-          key: "ch",
-          type: undefined,
-          list: true,
-          fields: [
-            { key: "name", type: undefined, list: false },
-            { key: "page", type: "number", list: false },
-          ],
-        },
+        { key: "author", type: undefined },
+        { key: "done", type: "check" },
+        { key: "price", type: "number" },
+        { key: "on", type: "date" },
       ],
     });
   });
-  it("splits only at the top level and round-trips nesting", () => {
-    const text = "a, b[]{c, d[]{e:image}}, f:date";
-    const p = parseSchema(text);
-    expect(p.ok && formatSchema(p.schema)).toBe(text);
+  it("reads the legacy list mark `key[]` as a plain field", () => {
+    const p = parseSchema("area, tags[], links[]:link");
+    expect(p.ok && formatSchema(p.schema)).toBe("area, tags, links:link");
   });
-  it("rejects unbalanced braces, {…} without [] and bad nested fields", () => {
-    expect(parseSchema("a[]{b").ok).toBe(false);
-    expect(parseSchema("a}").ok).toBe(false);
+  it("rejects braces, bad keys and unknown types", () => {
+    expect(parseSchema("a[]{b}").ok).toBe(false);
     expect(parseSchema("a{b}").ok).toBe(false);
-    expect(parseSchema("a[]{title}").ok).toBe(false);
+    expect(parseSchema("title").ok).toBe(false);
     expect(parseSchema("a:bool").ok).toBe(false);
   });
 });
@@ -65,17 +55,18 @@ describe("schemaRoles", () => {
     n("r1", "Book A", [
       n("f0", "Alice"),
       n("f1", "https://x/c.png", [], { type: "image" }),
-      n("f2", "chapters", [n("s1", "Intro", [n("p1", "3")])]),
+      n("f2", "chapters", [n("s1", "Intro", [n("p1", "3")])], { schema: "page:number" }),
       n("extra", "?"),
     ]),
-  ], { schema: "author, cover:image, chapters[]{page:number}" });
+  ], { schema: "author, cover:image, chapters" });
   const roles = schemaRoles(doc(tree));
 
-  it("marks records, fields by index and records of nested collections", () => {
+  it("marks records, fields by index, and nests under a field node that has its own schema", () => {
     expect(roles.get("c")).toBeUndefined();
     expect(roles.get("r1")).toMatchObject({ kind: "record", collectionId: "c" });
     expect(roles.get("f0")).toMatchObject({ kind: "field", index: 0, field: { key: "author" } });
     expect(roles.get("f1")).toMatchObject({ kind: "field", index: 1, field: { key: "cover" } });
+    expect(roles.get("f2")).toMatchObject({ kind: "field", index: 2, field: { key: "chapters" } });
     expect(roles.get("s1")).toMatchObject({ kind: "record", collectionId: "f2" });
     expect(roles.get("p1")).toMatchObject({ kind: "field", index: 0, field: { key: "page" } });
   });
@@ -102,7 +93,7 @@ describe("fieldIssue", () => {
 });
 
 describe("conformEntering", () => {
-  const schema = "author, cover:image, done:check, tags[]";
+  const schema = "author, cover:image, done:check, tags";
   const base = doc(n("c", "Books", [n("r1", "A", [n("a1", "Alice")])], { schema }));
 
   it("pads a new record with typed blank fields", () => {

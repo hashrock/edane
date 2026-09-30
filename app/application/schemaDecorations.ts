@@ -15,7 +15,7 @@ import {
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 
 export interface SchemaDecoration {
-  /** Field key of a field node (`tags[]` for a list field). */
+  /** Field key of a field node. */
   label?: string;
   /** Set when the node can't be read as this type (see `fieldIssue`). */
   issue?: FieldType;
@@ -29,7 +29,7 @@ export function schemaDecorations(doc: MindMapDocument): Map<string, SchemaDecor
   const walk = (node: MindMapModel) => {
     const deco: SchemaDecoration = {};
     const role = roles.get(node.id);
-    if (role?.kind === "field") deco.label = role.field.list ? `${role.field.key}[]` : role.field.key;
+    if (role?.kind === "field") deco.label = role.field.key;
     if (role) {
       const issue = fieldIssue(node, valueTypeOf(role));
       if (issue) deco.issue = issue;

@@ -10,20 +10,24 @@ const n = (id: string, text: string, children: MindMapModel[] = [], extra: Parti
 });
 
 describe("schemaDecorations", () => {
-  it("labels fields, flags mismatches (items included) and tags the collection", () => {
+  it("labels fields, flags mismatches and tags collections (nested ones included)", () => {
     const deco = schemaDecorations({
       title: "",
       roots: [
-        n("c", "Books", [n("r", "A", [n("f0", "Alice"), n("f1", "not a url"), n("f2", "", [n("i1", "x")])])], {
-          schema: "author, cover:image, links[]:link",
-        }),
+        n("c", "Books", [
+          n("r", "A", [
+            n("f0", "Alice"),
+            n("f1", "not a url"),
+            n("f2", "", [n("s", "Intro", [n("p", "x")])], { schema: "page:number" }),
+          ]),
+        ], { schema: "author, cover:image, chapters" }),
       ],
     });
     expect(deco.get("c")).toEqual({ collection: true });
     expect(deco.get("r")).toBeUndefined();
     expect(deco.get("f0")).toEqual({ label: "author" });
     expect(deco.get("f1")).toEqual({ label: "cover", issue: "image" });
-    expect(deco.get("f2")).toEqual({ label: "links[]" });
-    expect(deco.get("i1")).toEqual({ issue: "link" });
+    expect(deco.get("f2")).toEqual({ label: "chapters", collection: true });
+    expect(deco.get("p")).toEqual({ label: "page", issue: "number" });
   });
 });

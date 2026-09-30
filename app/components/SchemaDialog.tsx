@@ -14,8 +14,8 @@ import {
   toDraft,
   updateField,
   type DraftField,
-  type DraftKind,
 } from "../application/schemaDraft";
+import type { FieldType } from "../domain/branchSchema";
 import type { MindMapModel } from "../domain/model";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
@@ -31,8 +31,8 @@ interface Props {
 type Tab = "fields" | "text";
 
 /**
- * 枝のスキーマ編集ダイアログ。既定はフィールド行のリスト（キー・型・配列・
- * 並べ替え・入れ子）で、テキスト書式（domain/branchSchema.ts）のタブにも
+ * 枝のスキーマ編集ダイアログ。既定はフィールド行のリスト（キー・型・
+ * 並べ替え）で、テキスト書式（domain/branchSchema.ts）のタブにも
  * 切り替えられる。どちらのタブも最後は同じ文字列として保存する。行の操作と
  * 検証は application/schemaDraft.ts。
  */
@@ -84,13 +84,13 @@ export default function SchemaDialog({ node, onSave, onClose }: Props) {
     setText(formatSchema(inferred));
   };
 
-  const renderRows = (rows: DraftField[], depth: number, parentRid: string | null) => (
+  const renderRows = (rows: DraftField[]) => (
     <>
       {rows.map((row, i) => {
         const error = errors.get(row.rid);
         return (
           <li key={row.rid} data-testid="schema-row">
-            <div className="flex items-center gap-1.5" style={{ paddingLeft: depth * 20 }}>
+            <div className="flex items-center gap-1.5">
               <div className="flex shrink-0 flex-col">
                 <button
                   type="button"
@@ -124,26 +124,16 @@ export default function SchemaDialog({ node, onSave, onClose }: Props) {
               />
               <select
                 value={row.kind}
-                onChange={(e) => setDraft((d) => updateField(d, row.rid, { kind: e.target.value as DraftKind }))}
+                onChange={(e) => setDraft((d) => updateField(d, row.rid, { kind: e.target.value as FieldType }))}
                 data-testid="schema-kind"
                 className="shrink-0 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-sm outline-none focus:border-slate-400"
               >
                 {DRAFT_KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {k === "records" ? t("schemaKindRecords") : k}
+                    {k}
                   </option>
                 ))}
               </select>
-              <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
-                <input
-                  type="checkbox"
-                  checked={row.list}
-                  disabled={row.kind === "records"}
-                  onChange={(e) => setDraft((d) => updateField(d, row.rid, { list: e.target.checked }))}
-                  data-testid="schema-list"
-                />
-                {t("schemaListLabel")}
-              </label>
               <button
                 type="button"
                 aria-label={t("schemaRemoveField")}
@@ -154,21 +144,20 @@ export default function SchemaDialog({ node, onSave, onClose }: Props) {
               </button>
             </div>
             {error && (
-              <p className="mt-0.5 text-xs text-red-600" style={{ paddingLeft: depth * 20 + 22 }}>
+              <p className="mt-0.5 pl-[22px] text-xs text-red-600">
                 {error}
               </p>
             )}
-            {row.kind === "records" && <ul className="mt-1 space-y-1">{renderRows(row.fields, depth + 1, row.rid)}</ul>}
           </li>
         );
       })}
       <li>
         <button
           type="button"
-          onClick={() => setDraft((d) => addField(d, parentRid, blankField(rid)))}
+          onClick={() => setDraft((d) => addField(d, blankField(rid)))}
           data-testid="schema-add"
           className="rounded-md px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
-          style={{ marginLeft: depth * 20 + 22 }}
+          style={{ marginLeft: 22 }}
         >
           {t("schemaAddField")}
         </button>
@@ -223,7 +212,7 @@ export default function SchemaDialog({ node, onSave, onClose }: Props) {
           {tab === "fields" ? (
             <>
               {draft.length === 0 && <p className="mb-2 text-xs text-slate-400">{t("schemaNoFields")}</p>}
-              <ul className="space-y-1">{renderRows(draft, 0, null)}</ul>
+              <ul className="space-y-1">{renderRows(draft)}</ul>
             </>
           ) : (
             <>

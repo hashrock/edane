@@ -35,7 +35,7 @@ export function sampleItems(items: SiteItem[], maxChars = SITE_AI_DATA_MAX_CHARS
   const clip = (v: string) => (v.length > 120 ? v.slice(0, 120) + "…" : v);
   const shrink = (v: SiteValue | undefined): unknown => {
     if (typeof v === "string") return clip(v);
-    if (Array.isArray(v)) return v.slice(0, 8).map((e) => (typeof e === "string" ? clip(e) : shrinkItem(e)));
+    if (Array.isArray(v)) return v.slice(0, 8).map(shrinkItem);
     return v;
   };
   const shrinkItem = (item: SiteItem) => Object.fromEntries(Object.entries(item).map(([k, v]) => [k, shrink(v)]));
@@ -102,11 +102,7 @@ function describeFields(schema: SiteSchema, indent: string): string {
   return schema
     .map((f) => {
       const note = f.type && VALUE_NOTE[f.type] ? `  // ${VALUE_NOTE[f.type]}` : "";
-      if (f.list && f.fields) {
-        return `${indent}${f.key}: Array<{\n${indent}  id: string,\n${indent}  title: string,\n${describeFields(f.fields, indent + "  ")}\n${indent}}> | undefined`;
-      }
-      const base = (f.type && VALUE_TS[f.type]) ?? "string";
-      return `${indent}${f.key}: ${f.list ? `${base}[]` : base} | undefined${note}`;
+      return `${indent}${f.key}: ${(f.type && VALUE_TS[f.type]) ?? "string"} | undefined${note}`;
     })
     .join("\n");
 }

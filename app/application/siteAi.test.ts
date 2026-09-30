@@ -16,7 +16,7 @@ const root: SiteNode = {
 
 describe("sampleItems", () => {
   it("shows at most 5 items, clips long values and notes the rest", () => {
-    const items = Array.from({ length: 7 }, (_, i) => ({ id: `i${i}`, title: `T${i}`, body: "x".repeat(200), tags: ["a"] }));
+    const items = Array.from({ length: 7 }, (_, i) => ({ id: `i${i}`, title: `T${i}`, body: "x".repeat(200) }));
     const s = sampleItems(items);
     expect(s).toContain('"T4"');
     expect(s).not.toContain('"T5"');
@@ -32,10 +32,10 @@ describe("sampleItems", () => {
 
 describe("buildSuggestMessages", () => {
   it("has a system prompt with the runtime contract and a user turn with data + instruction", () => {
-    const m = buildSuggestMessages({ data: { ...root, schema: "area, url:link, done:check, ch[]{page:number}" }, currentTemplate: "TPL", instruction: "  dark theme " });
+    const m = buildSuggestMessages({ data: { ...root, schema: "area, url:link, done:check, page:number" }, currentTemplate: "TPL", instruction: "  dark theme " });
     expect(m[0].role).toBe("system");
     expect(m[0].content).toContain("data-search");
-    expect(m[1].content).toContain("Schema (field order = child order): area, url:link, done:check, ch[]{page:number}");
+    expect(m[1].content).toContain("Schema (field order = child order): area, url:link, done:check, page:number");
     expect(m[1].content).toContain("url: string | undefined  // URL");
     expect(m[1].content).toContain("done: boolean | undefined");
     expect(m[1].content).toContain("page: number | undefined");

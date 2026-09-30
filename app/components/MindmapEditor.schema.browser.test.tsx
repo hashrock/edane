@@ -118,17 +118,16 @@ describe("branch schema (canvas)", () => {
   });
 
   it("the text tab mirrors the rows and rejects an invalid schema", async () => {
-    const roots: MindMapModel[] = [{ ...ROOTS[0], schema: "author, ch[]{page:number}" }];
+    const roots: MindMapModel[] = [{ ...ROOTS[0], schema: "author, page:number" }];
     render(<MindmapEditor initialContent={content(roots)} initialTitle="Shelf" />);
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
     rightClickNode("books");
     (await waitFor(() => button("Set schema"))).click();
-    // Nested fields show as indented rows.
-    await waitFor(() => document.querySelectorAll('[data-testid="schema-row"]').length === 3);
+    await waitFor(() => document.querySelectorAll('[data-testid="schema-row"]').length === 2);
     (await waitFor(() => button("Text"))).click();
     const input = await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid="schema-input"]'));
-    expect(input.value).toBe("author, ch[]{page:number}");
-    await userEvent.fill(input, "a[]{b");
+    expect(input.value).toBe("author, page:number");
+    await userEvent.fill(input, "a:bool");
     await waitFor(() => document.querySelector('[data-testid="schema-error"]'));
     expect(document.querySelector<HTMLButtonElement>('[data-testid="schema-save"]')!.disabled).toBe(true);
     // Fixing the text and switching back rebuilds the rows from it.
