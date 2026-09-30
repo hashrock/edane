@@ -90,8 +90,6 @@ export const sites = sqliteTable("sites", {
     .notNull()
     .references(() => users.id),
   template: text("template").notNull(),
-  /** 廃止予定: 旧スキーマ。スキーマは枝（ノート）側に移した。サイトエディタを開くと枝へ移して空にする（server.ts の遅延移行）。 */
-  schema: text("schema").notNull().default(""),
   html: text("html").notNull(),
   css: text("css").notNull(),
   updatedAt: text("updated_at")

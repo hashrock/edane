@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSchema, formatSchema, inferSchema, shapeRecords, defaultTemplate, migrateSiteSchema } from "./siteSchema";
+import { parseSchema, formatSchema, inferSchema, shapeRecords, defaultTemplate } from "./siteSchema";
 import type { SiteNode } from "./siteNode";
 
 const n = (id: string, text: string, type: SiteNode["type"] = "text", children: SiteNode[] = []): SiteNode => ({
@@ -122,17 +122,5 @@ describe("shapeRecords with value types and nesting", () => {
       ],
     });
     expect(warnings).toEqual(['Body: page は number のはずが "x"']);
-  });
-});
-
-describe("migrateSiteSchema", () => {
-  const doc = { title: "", roots: [{ id: "c", text: "C", children: [] }] };
-  it("moves the legacy site schema onto the published node", () => {
-    expect(migrateSiteSchema(doc, "c", " a, b:image ")?.roots[0].schema).toBe("a, b:image");
-  });
-  it("does nothing when blank, the node is gone, or the node already has one", () => {
-    expect(migrateSiteSchema(doc, "c", "  ")).toBeNull();
-    expect(migrateSiteSchema(doc, "zz", "a")).toBeNull();
-    expect(migrateSiteSchema({ title: "", roots: [{ id: "c", text: "", schema: "x", children: [] }] }, "c", "a")).toBeNull();
   });
 });

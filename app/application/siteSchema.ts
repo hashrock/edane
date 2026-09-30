@@ -10,7 +10,7 @@
  * 同じスキーマでフィールドのラベル・雛形・不一致の印を出すので、書く側と
  * 読む側の食い違いが無い。枝にスキーマが無ければ実データから推定する。
  */
-import { findNode, setNodeSchema, STORED_NODE_TYPES, type MindMapDocument } from "../domain/model";
+import { STORED_NODE_TYPES } from "../domain/model";
 import {
   fieldIssue,
   formatSchema,
@@ -26,22 +26,6 @@ import type { SiteNode } from "./siteNode";
 
 export { formatSchema, parseSchema, RESERVED_KEYS, type SchemaField };
 export type SiteSchema = BranchSchema;
-
-/**
- * 旧 `sites.schema`（サイト側に持っていたスキーマ）を公開した枝へ移した文書。
- * 枝が既にスキーマを持っていれば枝が勝つ。移すものが無ければ null。
- * サーバーがサイトエディタを開いたときに一度だけ呼ぶ（遅延移行）。
- */
-export function migrateSiteSchema(
-  doc: MindMapDocument,
-  nodeId: string,
-  legacySchema: string
-): MindMapDocument | null {
-  if (!legacySchema.trim()) return null;
-  const node = findNode(doc, nodeId);
-  if (!node || node.schema) return null;
-  return setNodeSchema(doc, nodeId, legacySchema);
-}
 
 /**
  * 実データからスキーマの下書きを推定する。各位置について、レコードの過半で
