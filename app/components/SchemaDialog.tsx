@@ -31,7 +31,7 @@ interface Props {
 type Tab = "fields" | "text";
 
 /**
- * 枝のスキーマ編集ダイアログ。既定はフィールド行のリスト（キー・型・並び・
+ * 枝のスキーマ編集ダイアログ。既定はフィールド行のリスト（キー・型・配列・
  * 並べ替え・入れ子）で、テキスト書式（domain/branchSchema.ts）のタブにも
  * 切り替えられる。どちらのタブも最後は同じ文字列として保存する。行の操作と
  * 検証は application/schemaDraft.ts。
