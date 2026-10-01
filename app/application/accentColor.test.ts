@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import fc from "fast-check";
+import { readFileSync } from "node:fs";
 import {
   ACCENT_KEY,
   DEFAULT_ACCENT,
@@ -63,5 +64,12 @@ describe("accent color", () => {
         expect(withAlpha(c, a)).toMatch(/^#[0-9a-f]{8}$/);
       })
     );
+  });
+});
+
+describe("styles.css", () => {
+  it("declares the same default accent as DEFAULT_ACCENT (SSR paints the CSS one)", () => {
+    const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    expect(css.match(/--accent:\s*(#[0-9a-f]{6})/)?.[1]).toBe(DEFAULT_ACCENT);
   });
 });

@@ -14,6 +14,7 @@ import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
 
 export const ACCENT_KEY = "edane:accent-color";
 /** emerald-500 — the colour the UI had before this was configurable. */
+// Keep in sync with `--accent` in styles.css (SSR paints the CSS value).
 export const DEFAULT_ACCENT = "#10b981";
 
 /** `#rrggbb`, lowercase — the only form `<input type="color">` produces. */
