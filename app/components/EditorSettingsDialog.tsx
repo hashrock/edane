@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 import type { EditorPreferences } from "../application/editorPreferences";
 import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
+import {
+  DEFAULT_ACCENT,
+  setAccent,
+} from "../application/accentColor";
+import { useAccent } from "./useAccent";
 import { useLocale } from "./useLocale";
 
 interface Props {
@@ -25,6 +30,7 @@ export default function EditorSettingsDialog({
   onClose,
 }: Props) {
   const locale = useLocale();
+  const accent = useAccent();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -117,6 +123,28 @@ export default function EditorSettingsDialog({
                   {LOCALE_LABELS[l]}
                 </label>
               ))}
+            </div>
+          </section>
+          <section>
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {t("accentHeading")}
+            </h3>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={accent}
+                onChange={(e) => setAccent(e.target.value)}
+                aria-label={t("accentHeading")}
+                className="h-8 w-12 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+              />
+              <button
+                type="button"
+                onClick={() => setAccent(DEFAULT_ACCENT)}
+                disabled={accent === DEFAULT_ACCENT}
+                className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+              >
+                {t("accentReset")}
+              </button>
             </div>
           </section>
           <section>

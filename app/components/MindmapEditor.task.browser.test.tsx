@@ -6,6 +6,7 @@ import MindmapEditor, {
   type NodeRender,
 } from "./MindmapEditor";
 import { findNode, type MindMapModel } from "../domain/model";
+import { DEFAULT_ACCENT } from "../application/accentColor";
 import { NODE_PADDING } from "../lib/measureText";
 import {
   CHECKBOX_SIZE,
@@ -132,7 +133,7 @@ describe("task checkbox (browser e2e)", () => {
 
   it("paints a done task filled and struck through", async () => {
     const done = await rendered("done");
-    expect(checkbox(done).fill).toBe("#10b981");
+    expect(checkbox(done).fill).toBe(DEFAULT_ACCENT);
     expect(done.texts[0].textDecoration).toContain("line-through");
 
     const open = await rendered("open");

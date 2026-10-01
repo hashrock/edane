@@ -100,6 +100,8 @@ export const MESSAGES_JA = {
   arrowNavigateLabel: "親子への移動を優先",
   arrowNavigateDesc: "→ で子ノードへ、← で親ノードへ。開閉は ⌘/Ctrl + .",
   languageHeading: "言語 / Language",
+  accentHeading: "アクセントカラー",
+  accentReset: "既定に戻す",
 
   // --- コンテキストメニュー（MindmapEditor） ---
   nodeTypeText: "テキストにする",
@@ -456,6 +458,8 @@ export const MESSAGES_EN = {
   arrowNavigateLabel: "Prefer parent/child navigation",
   arrowNavigateDesc: "→ moves to a child, ← to the parent; fold with ⌘/Ctrl + .",
   languageHeading: "Language / 言語",
+  accentHeading: "Accent color",
+  accentReset: "Reset to default",
 
   // --- Context menu ---
   nodeTypeText: "Convert to text",
