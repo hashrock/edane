@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @source "./";
 
+/* Accent colour: the UI's accent is the emerald ramp, derived from --accent
+   (set from the user's preference, see application/accentColor.ts). Unlayered,
+   so it overrides Tailwind's theme-layer defaults. */
+:root {
+  --accent: #10b981;
+  --color-emerald-50: color-mix(in oklab, var(--accent) 8%, white);
+  --color-emerald-100: color-mix(in oklab, var(--accent) 16%, white);
+  --color-emerald-200: color-mix(in oklab, var(--accent) 30%, white);
+  --color-emerald-500: var(--accent);
+  --color-emerald-600: color-mix(in oklab, var(--accent) 88%, black);
+  --color-emerald-700: color-mix(in oklab, var(--accent) 72%, black);
+  --color-emerald-800: color-mix(in oklab, var(--accent) 58%, black);
+}
+
 .konvajs-content {
   touch-action: none;
 }

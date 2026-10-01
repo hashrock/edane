@@ -91,6 +91,8 @@ import {
 import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
 import { useLocale } from "./useLocale";
+import { useAccent } from "./useAccent";
+import { getAccent, withAlpha } from "../application/accentColor";
 import { resolveDropTarget, type DropTarget } from "../application/dragDrop";
 import {
   nodeRect,
@@ -448,6 +450,7 @@ export function MindmapEditorView({
   // UI言語。t() を使うラベル群（メニュー・パレット・キャンバス描画）を言語
   // 切り替えで作り直すため、useMemo / 再描画エフェクトの依存にも入れる。
   const locale = useLocale();
+  const accent = useAccent(); // キャンバスは CSS 変数を読めないので再描画の依存に入れる
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
@@ -1822,8 +1825,8 @@ export function MindmapEditorView({
             width: w + 6,
             height: h + 6,
             cornerRadius: 14,
-            fill: "rgba(16, 185, 129, 0.12)",
-            stroke: "#10b981",
+            fill: withAlpha(getAccent(), 0.12),
+            stroke: getAccent(),
             strokeWidth: 2,
             listening: false,
           });
@@ -1837,12 +1840,12 @@ export function MindmapEditorView({
           g.add(
             new Konva.Line({
               points: [target.x - 4, y, target.x + w + 4, y],
-              stroke: "#10b981",
+              stroke: getAccent(),
               strokeWidth: 3,
               lineCap: "round",
             })
           );
-          g.add(new Konva.Circle({ x: target.x - 4, y, radius: 3.5, fill: "#10b981" }));
+          g.add(new Konva.Circle({ x: target.x - 4, y, radius: 3.5, fill: getAccent() }));
           marker = g;
         }
         dragLayer.add(marker);
@@ -2759,7 +2762,7 @@ export function MindmapEditorView({
         // Root's fill is near-black, so its selection stroke goes white instead
         // of the usual black to stay visible against it.
         stroke: isEditing
-          ? "#10b981"
+          ? getAccent()
           : isSelected
             ? isRoot
               ? "#ffffff"
@@ -2952,8 +2955,8 @@ export function MindmapEditorView({
             width: CHECKBOX_SIZE,
             height: CHECKBOX_SIZE,
             cornerRadius: 4,
-            fill: isDone ? "#10b981" : "#ffffff",
-            stroke: isDone ? "#10b981" : "#94a3b8",
+            fill: isDone ? getAccent() : "#ffffff",
+            stroke: isDone ? getAccent() : "#94a3b8",
             strokeWidth: 1.5,
           });
           if (!readOnly) {
@@ -3364,7 +3367,7 @@ export function MindmapEditorView({
   // locale: キャンバスに直接描く文言（読み込み中 / 行数バッジ / フィールド追加
   // ボタンなど）を言語切り替えで描き直す。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale, schemaDeco]);
+  }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale, accent, schemaDeco]);
 
   // --- Cursor layer (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
@@ -3425,7 +3428,7 @@ export function MindmapEditorView({
               height: caretHalf * 2,
               fill: isRoot
                 ? "rgba(255, 255, 255, 0.3)"
-                : "rgba(16, 185, 129, 0.18)",
+                : withAlpha(getAccent(), 0.18),
               listening: false,
             })
           );
