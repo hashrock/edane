@@ -1386,19 +1386,61 @@ function findNearestSurvivor(
  * record positions, and padding those with blank fields would only add
  * clutter the user never asked for.
  */
+const CONFORMS_TO_SCHEMA = {
+  moveUp: false,
+  moveDown: false,
+  moveUpSiblingFirst: false,
+  moveDownSiblingFirst: false,
+  moveToParent: false,
+  moveToChild: false,
+  arrowLeftEdge: false,
+  arrowRightEdge: false,
+  cmdLeft: false,
+  cmdRight: false,
+  cmdShiftLeft: false,
+  cmdShiftRight: false,
+  setSelection: false,
+  activateNode: false,
+  setSelectedIds: false,
+  exitEditing: false,
+  toggleCollapse: false,
+  copyBranch: false,
+  startEditing: false,
+  selectAllInNode: false,
+  dragSelect: false,
+  typeText: false,
+  enter: true,
+  tab: true,
+  backspaceAtStart: false,
+  deleteAtEnd: false,
+  moveNodeUp: false,
+  moveNodeDown: false,
+  moveBranch: true,
+  placeBranchAt: false,
+  addRootAt: false,
+  insertSiblingAfter: true,
+  addChild: true,
+  deleteNode: false,
+  cutBranch: false,
+  pasteBranch: true,
+  setNodeType: false,
+  setNodeContent: false,
+  setNodeStyle: false,
+  setLinkMeta: false,
+  setChecked: false,
+  setSchema: false,
+  setCheckedMany: false,
+  setNodeTypeMany: false,
+  setNodeStyleMany: false,
+  setCollapsedMany: false,
+  deleteNodes: false,
+  insertNodes: true,
+  setTitle: false,
+  replace: false,
+} as const satisfies Record<EditorAction["type"], boolean>;
+
 function conformsToSchema(type: EditorAction["type"]): boolean {
-  switch (type) {
-    case "enter":
-    case "tab":
-    case "insertSiblingAfter":
-    case "addChild":
-    case "pasteBranch":
-    case "insertNodes":
-    case "moveBranch":
-      return true;
-    default:
-      return false;
-  }
+  return CONFORMS_TO_SCHEMA[type];
 }
 
 // --- Reducer ---
