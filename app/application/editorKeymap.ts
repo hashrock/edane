@@ -177,8 +177,10 @@ export function buildKeymap(
   // insert a child (handed straight into edit mode, pairing with Enter's
   // split) while Shift+Tab still outdents. One factory, two scopes, so Tab
   // does the same thing whether or not the caret is in the textarea.
+  // The outline layout is an outline editor: Tab always indents there, so the
+  // preference only picks between the two forms on the canvas.
   const tabBindings = (when: "selection" | "editing", prefix: string): KeyBinding[] =>
-    prefs.tabBehavior === "insert-child"
+    layout === "canvas" && prefs.tabBehavior === "insert-child"
       ? [
           {
             id: `${prefix}-insert-child`,

@@ -632,6 +632,11 @@ describe("preference: tabBehavior = insert-child", () => {
     expect(r.handled).toBe(true);
   });
 
+  it("the outline layout ignores it: Tab always indents", () => {
+    const r = run(state(model(), "a1", false), { key: "Tab" }, {}, prefs, "outline");
+    expect(r.dispatched).toEqual([{ type: "tab", shift: false }]);
+  });
+
   it("Shift+Tab still outdents", () => {
     const r = run(state(model(), "a1", false), { key: "Tab", shiftKey: true }, {}, prefs);
     expect(r.dispatched).toEqual([{ type: "tab", shift: true }]);
