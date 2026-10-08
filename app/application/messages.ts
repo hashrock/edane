@@ -87,7 +87,7 @@ export const MESSAGES_JA = {
   alwaysEditHintCollapse: "、枝の開閉は",
   alwaysEditHintHelp: "、ショートカット一覧は",
   alwaysEditHintSuffix: "",
-  tabKeyHeading: "選択中の Tab キー",
+  tabKeyHeading: "選択中の Tab キー（キャンバス。アウトラインは常にインデント）",
   enterKeyHeading: "選択中の Enter キー",
   arrowKeyHeading: "選択中の ← / → キー",
   tabIndentDesc: "選択ノードを直前のノードの子にする（Shift + Tab で戻す）",
@@ -443,7 +443,7 @@ export const MESSAGES_EN = {
   alwaysEditHintCollapse: ", fold or unfold a branch with",
   alwaysEditHintHelp: ", and open the shortcut list with",
   alwaysEditHintSuffix: ".",
-  tabKeyHeading: "Tab key while selected",
+  tabKeyHeading: "Tab key while selected (canvas; the outline always indents)",
   enterKeyHeading: "Enter key while selected",
   arrowKeyHeading: "← / → keys while selected",
   tabIndentDesc:
