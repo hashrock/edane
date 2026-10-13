@@ -1734,46 +1734,88 @@ export function MindmapEditorView({
         stage.container().style.cursor = "";
       };
 
+      // The ghost is the dragged branch itself: every visible node of the
+      // subtree at its real offset from the grabbed node, joined by connector
+      // lines, so a whole tree can be carried around with a live preview.
+      // Capped so dragging a huge tree stays cheap; any hidden remainder
+      // (collapsed or past the cap) is surfaced as a "+N" badge.
+      const GHOST_MAX_NODES = 150;
       const buildGhost = (nodeId: string, descendants: number) => {
-        const flat = nodesRef.current;
-        const node = flat.find((n) => n.id === nodeId);
+        const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+        const node = byId.get(nodeId);
         if (!node) return;
-        const w = nodeBoxWidth(node.width, false);
-        const h = nodeBoxHeight(node.height);
         const g = new Konva.Group({ opacity: 0.65, listening: false });
-        g.add(
-          new Konva.Rect({
-            width: w,
-            height: h,
-            cornerRadius: 12,
-            fill: "#ffffff",
-            stroke: "#94a3b8",
-            strokeWidth: 1.5,
-            shadowColor: "#0f172a",
-            shadowBlur: 12,
-            shadowOpacity: 0.25,
-            shadowOffsetY: 4,
-          })
-        );
-        const firstLine = node.text.split("\n")[0];
-        const label = !firstLine
-          ? t("nodeEmptyPlaceholder")
-          : firstLine.length > 24
-            ? firstLine.slice(0, 24) + "…"
-            : firstLine;
-        g.add(
-          new Konva.Text({
-            x: NODE_PADDING,
-            y: h / 2 - 7,
-            text: label,
-            fontSize: 14,
-            fontFamily: "sans-serif",
-            fill: firstLine ? "#0f172a" : "#94a3b8",
-            fontStyle: firstLine ? "normal" : "italic",
-          })
-        );
-        // Subtree travels along — surface its size like the collapse badge does.
-        if (descendants > 0) {
+        const w = nodeBoxWidth(node.width, node.depth === 0);
+        const h = nodeBoxHeight(node.height);
+        // Group origin = top-left of the grabbed node's box (see grabDX/DY).
+        const originX = node.x;
+        const originY = node.y - h / 2;
+        const edges = new Konva.Group({ listening: false });
+        g.add(edges);
+        let shown = 0;
+        const addBox = (n: typeof node) => {
+          const nw = nodeBoxWidth(n.width, n.depth === 0);
+          const nh = nodeBoxHeight(n.height);
+          const x = n.x - originX;
+          const y = n.y - nh / 2 - originY;
+          g.add(
+            new Konva.Rect({
+              x,
+              y,
+              width: nw,
+              height: nh,
+              cornerRadius: 12,
+              fill: "#ffffff",
+              stroke: "#94a3b8",
+              strokeWidth: 1.5,
+              shadowColor: "#0f172a",
+              shadowBlur: n === node ? 12 : 0,
+              shadowOpacity: 0.25,
+              shadowOffsetY: 4,
+            })
+          );
+          const firstLine = n.text.split("\n")[0];
+          const label = !firstLine
+            ? t("nodeEmptyPlaceholder")
+            : firstLine.length > 24
+              ? firstLine.slice(0, 24) + "…"
+              : firstLine;
+          g.add(
+            new Konva.Text({
+              x: x + NODE_PADDING,
+              y: y + nh / 2 - 7,
+              text: label,
+              fontSize: 14,
+              fontFamily: "sans-serif",
+              fill: firstLine ? "#0f172a" : "#94a3b8",
+              fontStyle: firstLine ? "normal" : "italic",
+            })
+          );
+          shown++;
+        };
+        (function walk(n: typeof node) {
+          addBox(n);
+          for (const cid of n.children) {
+            const c = byId.get(cid);
+            if (!c || shown >= GHOST_MAX_NODES) continue;
+            edges.add(
+              new Konva.Line({
+                points: [
+                  n.x - originX + nodeBoxWidth(n.width, n.depth === 0),
+                  n.y - originY,
+                  c.x - originX,
+                  c.y - originY,
+                ],
+                stroke: "#94a3b8",
+                strokeWidth: 1.5,
+                listening: false,
+              })
+            );
+            walk(c);
+          }
+        })(node);
+        const hidden = descendants - (shown - 1);
+        if (hidden > 0) {
           const badgeR = 9;
           g.add(
             new Konva.Circle({
@@ -1789,7 +1831,7 @@ export function MindmapEditorView({
               y: h / 2 - 5,
               width: badgeR * 2,
               align: "center",
-              text: `+${descendants}`,
+              text: `+${hidden}`,
               fontSize: 10,
               fontFamily: "sans-serif",
               fill: "#ffffff",
