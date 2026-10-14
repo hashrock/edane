@@ -7,6 +7,14 @@
  * favicon.ico fallback) are testable without a network call.
  */
 
+function resolveUrl(href: string, base: URL): string | null {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return null;
+  }
+}
+
 export function extractLinkPreview(html: string, target: URL): { title: string; favicon: string } {
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const title = titleMatch
@@ -15,13 +23,13 @@ export function extractLinkPreview(html: string, target: URL): { title: string; 
 
   let favicon: string | null = null;
   for (const tag of html.match(/<link[^>]+>/gi) ?? []) {
-    if (/rel=["'][^"']*icon[^"']*["']/i.test(tag)) {
-      const href = tag.match(/href=["']([^"']+)["']/i);
-      if (href) {
-        favicon = new URL(href[1], target).toString();
-        break;
-      }
-    }
+    if (!/rel=["'][^"']*icon[^"']*["']/i.test(tag)) continue;
+    const href = tag.match(/href=["']([^"']+)["']/i);
+    if (!href) continue;
+    // A malformed href (e.g. "http://[") must not sink the whole preview —
+    // the title is still good — so skip it and try the next icon link.
+    favicon = resolveUrl(href[1], target);
+    if (favicon) break;
   }
   if (!favicon) favicon = `${target.protocol}//${target.host}/favicon.ico`;
 

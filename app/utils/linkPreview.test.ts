@@ -38,4 +38,17 @@ describe("extractLinkPreview", () => {
     const { favicon } = extractLinkPreview(html, new URL("https://example.com/page"));
     expect(favicon).toBe("https://example.com/favicon.ico");
   });
+
+  it("skips a malformed icon href instead of throwing, using the next link or the fallback", () => {
+    const target = new URL("https://example.com/page");
+    const bad = `<link rel="icon" href="http://[">`;
+    expect(extractLinkPreview(`<title>T</title>${bad}`, target)).toEqual({
+      title: "T",
+      favicon: "https://example.com/favicon.ico",
+    });
+    const good = `<link rel="apple-touch-icon" href="/a.png">`;
+    expect(extractLinkPreview(bad + good, target).favicon).toBe(
+      "https://example.com/a.png"
+    );
+  });
 });
