@@ -53,6 +53,8 @@ interface Props {
    */
   layout?: EditorLayout;
   onLayoutChange?: (layout: EditorLayout) => void;
+  /** Start the slideshow (header button). Absent = no presentation mode. */
+  onPresent?: () => void;
 }
 
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
@@ -76,6 +78,7 @@ export default function OutlineEditor({
   onSaveToAccount,
   layout,
   onLayoutChange,
+  onPresent,
 }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const {
@@ -368,6 +371,7 @@ export default function OutlineEditor({
           <ViewControls
             layout={layout ?? "outline"}
             onLayoutChange={onLayoutChange}
+            onPresent={onPresent}
           />
         )}
         {noteId && !readOnly && (

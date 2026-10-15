@@ -33,6 +33,8 @@ interface Props {
    * must not land on a different control).
    */
   zoom?: ZoomControls;
+  /** Start the slideshow. Absent = no presentation button. */
+  onPresent?: () => void;
 }
 
 // label はカタログキー（描画時に t() で解決 — 言語切り替えに追従する）。
@@ -54,7 +56,7 @@ const LAYOUTS: {
  * Memoized because the canvas re-renders on every wheel/pan tick — with stable
  * props this skips the whole pill on gestures that don't change the zoom.
  */
-export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Props) {
+export default memo(function ViewControls({ layout, onLayoutChange, zoom, onPresent }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読; memo越しでも自前で購読する）
   const menu = useAnchoredPopover("down");
   const current = LAYOUTS.find((l) => l.value === layout) ?? LAYOUTS[0];
@@ -180,6 +182,23 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom }: Prop
             <span className="hidden md:inline">{t("zoomFit")}</span>
           </button>
         </div>
+      )}
+      {onPresent && (
+        <>
+          <div className="mx-0.5 h-4 w-px bg-slate-200" />
+          <button
+            type="button"
+            data-testid="view-present"
+            title={t("presentStartHint")}
+            onClick={onPresent}
+            className="flex h-6 items-center gap-1 whitespace-nowrap rounded-lg px-1.5 text-xs text-slate-600 hover:bg-slate-100"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M6 4l14 8-14 8z" />
+            </svg>
+            <span className="hidden md:inline">{t("presentStart")}</span>
+          </button>
+        </>
       )}
     </div>
   );

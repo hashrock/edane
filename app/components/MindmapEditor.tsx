@@ -408,6 +408,8 @@ interface ViewProps {
    */
   layout?: EditorLayout;
   onLayoutChange?: (layout: EditorLayout) => void;
+  /** Start the slideshow (header button, palette). Absent = no presentation mode. */
+  onPresent?: () => void;
 }
 
 /**
@@ -421,6 +423,7 @@ export function MindmapEditorView({
   onSaveToAccount,
   layout,
   onLayoutChange,
+  onPresent,
 }: ViewProps) {
   const {
     state,
@@ -1195,6 +1198,7 @@ export function MindmapEditorView({
     return [
       { id: "copy-all", label: t("cmdCopyAll"), action: copyAllText },
       { id: "copy-branch", label: t("cmdCopyBranch"), action: copyBranch },
+      ...(onPresent ? [{ id: "present", label: t("presentStartHint"), action: onPresent }] : []),
       ...(readOnly
         ? []
         : [{ id: "paste", label: t("cmdPasteText"), action: pasteAsNodes }]),
@@ -1221,7 +1225,7 @@ export function MindmapEditorView({
       { id: "settings", label: t("cmdEditorSettings"), action: () => setSettingsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pasteTextAsNodes, readOnly, locale]);
+  }, [pasteTextAsNodes, readOnly, locale, onPresent]);
 
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -3978,6 +3982,7 @@ export function MindmapEditorView({
             layout={layout ?? "canvas"}
             onLayoutChange={onLayoutChange}
             zoom={zoomControls}
+            onPresent={onPresent}
           />
           {noteId && !readOnly && (
             <>

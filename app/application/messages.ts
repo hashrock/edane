@@ -210,6 +210,13 @@ export const MESSAGES_JA = {
   layoutMindmap: "マインドマップ",
   layoutOutline: "アウトライン",
 
+  // --- プレゼンモード（SlideShow） ---
+  presentStart: "プレゼン",
+  presentStartHint: "選択中の項目からスライドショーを開始（F5）",
+  presentTitle: "スライドショー",
+  presentExit: "終了（Esc）",
+  presentEmpty: "スライドにする項目がありません",
+
   // --- Markdownパネル ---
   mdView: "表示",
   mdEdit: "編集",
@@ -567,6 +574,13 @@ export const MESSAGES_EN = {
   zoomUnavailableOutline: "Zoom isn't available in the outline view",
   layoutMindmap: "Mind map",
   layoutOutline: "Outline",
+
+  // --- Presentation mode (SlideShow) ---
+  presentStart: "Present",
+  presentStartHint: "Start a slideshow from the selected item (F5)",
+  presentTitle: "Slideshow",
+  presentExit: "Exit (Esc)",
+  presentEmpty: "Nothing to show as slides",
 
   // --- Markdown panel ---
   mdView: "View",
