@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { allIds, modelAndNodeArb, modelArb } from "../domain/model.arb";
 import { locateNode } from "../domain/model";
-import { buildSlides, slideIndexOf, SLIDE_MAX_ITEMS } from "./slides";
+import { ancestry, buildSlides, slideIndexOf, SLIDE_MAX_ITEMS } from "./slides";
 
 describe("buildSlides (property)", () => {
   it("presents each node on at most one slide, in outline order", () => {
@@ -41,8 +41,7 @@ describe("buildSlides (property)", () => {
         const slides = buildSlides(model);
         if (slides.length === 0) return;
         const ids = slides[slideIndexOf(slides, model, nodeId)].ids;
-        const chain: string[] = [];
-        for (let id: string | undefined = nodeId; id; id = locateNode(model, id)?.parent?.id) chain.push(id);
+        const chain = ancestry(model, nodeId);
         // A node under a skipped blank root has no slide at all: index 0 is the fallback.
         if (chain.some((id) => slides.some((s) => s.ids.includes(id)))) {
           expect(chain.some((id) => ids.includes(id))).toBe(true);

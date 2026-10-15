@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { buildSlides, slideIndexOf, type Slide } from "../application/slides";
-import { nodeDisplayText } from "../application/nodeUtils";
+import { nodeDisplayText, supportsCheckbox } from "../application/nodeUtils";
 import { renderMarkdownHtml } from "../lib/markdownHtml";
 import { t } from "../application/i18n";
 
@@ -26,35 +26,33 @@ const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace"]);
  */
 export default function SlideShow({ doc, startNodeId, onExit }: Props) {
   const slides = useMemo(() => buildSlides(doc), [doc]);
-  const [index, setIndex] = useState(() =>
-    startNodeId ? slideIndexOf(slides, doc, startNodeId) : 0
-  );
+  const [index, setIndex] = useState(() => slideIndexOf(slides, doc, startNodeId));
   const slide: Slide | undefined = slides[index];
   const last = slides.length - 1;
+  const go = (to: number) => setIndex(Math.max(0, Math.min(to, last)));
+  const exit = () => onExit(slide?.heading.id ?? null);
 
   useEffect(() => {
-    const exit = () => onExit(slide?.heading.id ?? null);
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "Escape") exit();
-      else if (NEXT_KEYS.has(e.key)) setIndex((i) => Math.min(i + 1, last));
-      else if (PREV_KEYS.has(e.key)) setIndex((i) => Math.max(i - 1, 0));
-      else if (e.key === "Home") setIndex(0);
-      else if (e.key === "End") setIndex(last);
+      else if (NEXT_KEYS.has(e.key)) go(index + 1);
+      else if (PREV_KEYS.has(e.key)) go(index - 1);
+      else if (e.key === "Home") go(0);
+      else if (e.key === "End") go(last);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [last, slide, onExit]);
+  });
 
   // Clicking the right two thirds advances, the left third goes back —
   // except on links, which keep their own click.
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("a")) return;
     const { left, width } = e.currentTarget.getBoundingClientRect();
-    const back = e.clientX - left < width / 3;
-    setIndex((i) => (back ? Math.max(i - 1, 0) : Math.min(i + 1, last)));
+    go(e.clientX - left < width / 3 ? index - 1 : index + 1);
   };
 
   return (
@@ -70,25 +68,29 @@ export default function SlideShow({ doc, startNodeId, onExit }: Props) {
         style={{ containerType: "inline-size", width: "min(100vw, calc(100vh * 16 / 9))" }}
         className="relative aspect-video cursor-pointer overflow-hidden bg-white text-slate-900"
       >
-        {slide ? <SlideBody slide={slide} /> : (
+        {slide ? (
+          <>
+            <SlideBody slide={slide} />
+            <div
+              className="absolute inset-x-0 bottom-0 h-[0.4cqw] bg-emerald-500 transition-[width]"
+              style={{ width: `${((index + 1) / slides.length) * 100}%` }}
+            />
+            <span
+              data-testid="slide-counter"
+              className="absolute bottom-[1.5cqw] right-[2cqw] text-[1.2cqw] tabular-nums text-slate-400"
+            >
+              {index + 1} / {slides.length}
+            </span>
+          </>
+        ) : (
           <p className="flex h-full items-center justify-center text-[3cqw] text-slate-400">
             {t("presentEmpty")}
           </p>
         )}
-        <div
-          className="absolute inset-x-0 bottom-0 h-[0.4cqw] bg-emerald-500 transition-[width]"
-          style={{ width: `${slides.length ? ((index + 1) / slides.length) * 100 : 0}%` }}
-        />
-        <span
-          data-testid="slide-counter"
-          className="absolute bottom-[1.5cqw] right-[2cqw] text-[1.2cqw] tabular-nums text-slate-400"
-        >
-          {slides.length ? `${index + 1} / ${slides.length}` : ""}
-        </span>
       </div>
       <button
         type="button"
-        onClick={() => onExit(slide?.heading.id ?? null)}
+        onClick={exit}
         className="absolute right-4 top-4 rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/10 hover:text-white"
       >
         {t("presentExit")}
@@ -164,7 +166,7 @@ function NodeContent({ node }: { node: MindMapModel }) {
   const text = nodeDisplayText(node);
   return (
     <span className={`whitespace-pre-wrap break-words ${node.bold ? "font-bold" : ""}`}>
-      {node.checked !== undefined && (
+      {node.checked !== undefined && supportsCheckbox(type) && (
         <span className={`mr-[0.6cqw] ${node.checked ? "text-emerald-500" : "text-slate-400"}`}>
           {node.checked ? "☑" : "☐"}
         </span>

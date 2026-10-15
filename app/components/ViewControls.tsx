@@ -3,7 +3,7 @@ import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 import type { EditorLayout } from "../application/editSurface";
 import { useAnchoredPopover } from "./useAnchoredPopover";
-import { MindmapIcon, OutlineIcon } from "./icons";
+import { MindmapIcon, OutlineIcon, PlayIcon } from "./icons";
 import type { MessageKey } from "../application/messages";
 
 /** Zoom section of the pill. Omit it entirely on layouts without zoom. */
@@ -193,9 +193,7 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom, onPres
             onClick={onPresent}
             className="flex h-6 items-center gap-1 whitespace-nowrap rounded-lg px-1.5 text-xs text-slate-600 hover:bg-slate-100"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M6 4l14 8-14 8z" />
-            </svg>
+            <PlayIcon width="11" height="11" />
             <span className="hidden md:inline">{t("presentStart")}</span>
           </button>
         </>

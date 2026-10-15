@@ -1621,10 +1621,11 @@ export function MindmapEditorView({
       saveNote: (m) => saveNote(m),
       openPalette: () => setCmdPaletteOpen(true),
       openHelp: () => setHelpOpen(true),
+      present: onPresent,
       undo,
       redo,
     }),
-    [dispatch, saveNote, undo, redo]
+    [dispatch, saveNote, undo, redo, onPresent]
   );
 
   const handleKeyDown = useCallback(

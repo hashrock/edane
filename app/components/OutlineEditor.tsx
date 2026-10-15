@@ -159,10 +159,11 @@ export default function OutlineEditor({
       // No command palette / help overlay on the mobile layout.
       openPalette: () => {},
       openHelp: () => {},
+      present: onPresent,
       undo,
       redo,
     }),
-    [dispatch, saveNote, undo, redo]
+    [dispatch, saveNote, undo, redo, onPresent]
   );
 
   const handleKeyDown = useCallback(

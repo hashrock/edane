@@ -16,6 +16,7 @@
  */
 import { locateNode, subtreeIds, type MindMapDocument, type MindMapModel } from "../domain/model";
 import { nodeDisplayText } from "./nodeUtils";
+import { markdownTitle } from "./markdownCard";
 
 /** Bullets that still fit on one slide; a bigger branch is split into a section. */
 export const SLIDE_MAX_ITEMS = 10;
@@ -36,6 +37,11 @@ export interface Slide {
   ids: string[];
 }
 
+/** A node as a breadcrumb label: what the canvas shows for it. */
+function label(n: MindMapModel): string {
+  return n.type === "markdown" ? markdownTitle(n.text) : nodeDisplayText(n);
+}
+
 function isBlankLeaf(n: MindMapModel): boolean {
   return (n.type ?? "text") === "text" && n.text.trim() === "" && n.children.length === 0;
 }
@@ -44,17 +50,26 @@ function contentChildren(n: MindMapModel): MindMapModel[] {
   return n.children.filter((c) => !isBlankLeaf(c));
 }
 
-function bullets(n: MindMapModel, depth = 0): SlideItem[] {
-  return contentChildren(n).flatMap((c) => [{ node: c, depth }, ...bullets(c, depth + 1)]);
+/**
+ * The nested bullets under `n`, or null as soon as there are more than fit on
+ * a slide — so deciding to split a big branch never walks all of it.
+ */
+function bullets(n: MindMapModel): SlideItem[] | null {
+  const items: SlideItem[] = [];
+  const walk = (node: MindMapModel, depth: number): boolean =>
+    contentChildren(node).every(
+      (c) => items.push({ node: c, depth }) <= SLIDE_MAX_ITEMS && walk(c, depth + 1)
+    );
+  return walk(n, 0) ? items : null;
 }
 
 function branchSlides(node: MindMapModel, trail: string[]): Slide[] {
   const items = bullets(node);
-  if (items.length <= SLIDE_MAX_ITEMS) {
+  if (items) {
     return [{ kind: "content", heading: node, trail, items, ids: subtreeIds(node) }];
   }
   const children = contentChildren(node);
-  const inner = [...trail, nodeDisplayText(node)];
+  const inner = [...trail, label(node)];
   return [
     {
       kind: "section",
@@ -72,17 +87,24 @@ export function buildSlides(doc: MindMapDocument): Slide[] {
     .filter((r) => !isBlankLeaf(r))
     .flatMap((root) => [
       { kind: "title" as const, heading: root, trail: [], items: [], ids: [root.id] },
-      ...contentChildren(root).flatMap((c) => branchSlides(c, [nodeDisplayText(root)])),
+      ...contentChildren(root).flatMap((c) => branchSlides(c, [label(root)])),
     ]);
+}
+
+/** `nodeId` and its ancestors, nearest first (empty for null). */
+export function ancestry(doc: MindMapDocument, nodeId: string | null): string[] {
+  const chain: string[] = [];
+  for (let id = nodeId ?? undefined; id; id = locateNode(doc, id)?.parent?.id) chain.push(id);
+  return chain;
 }
 
 /**
  * The slide that presents `nodeId`, or the one of its nearest ancestor that
  * has one (a skipped blank leaf); 0 when nothing matches.
  */
-export function slideIndexOf(slides: Slide[], doc: MindMapDocument, nodeId: string): number {
-  for (let id: string | undefined = nodeId; id; id = locateNode(doc, id)?.parent?.id) {
-    const i = slides.findIndex((s) => s.ids.includes(id!));
+export function slideIndexOf(slides: Slide[], doc: MindMapDocument, nodeId: string | null): number {
+  for (const id of ancestry(doc, nodeId)) {
+    const i = slides.findIndex((s) => s.ids.includes(id));
     if (i >= 0) return i;
   }
   return 0;

@@ -69,32 +69,24 @@ export default function NoteEditor(props: Props) {
   // Presentation mode: the node the show started from (null = not presenting).
   const [show, setShow] = useState<{ from: string | null } | null>(null);
   const { stateRef, dispatch } = engine;
-  const present = useCallback(() => {
-    (document.activeElement as HTMLElement | null)?.blur();
-    setShow({ from: stateRef.current.view.activeNodeId });
-  }, [stateRef]);
-  // Leaving the show selects the slide on screen, so the editor picks up there.
+  // The editor keeps its focus: the show swallows keys above it, and Esc hands
+  // the keyboard straight back.
+  const present = useCallback(
+    () => setShow({ from: stateRef.current.view.activeNodeId }),
+    [stateRef]
+  );
+  // Leaving the show moves to the slide on screen, in the mode the editor was
+  // in (the outline only takes keys while editing), so it picks up there.
   const endPresentation = useCallback(
     (nodeId: string | null) => {
       setShow(null);
       if (nodeId) {
-        dispatch({ type: "activateNode", nodeId, cursorPos: 0, selectionEnd: 0, editing: false });
+        const { editing } = stateRef.current.view;
+        dispatch({ type: "activateNode", nodeId, cursorPos: 0, selectionEnd: 0, editing });
       }
     },
-    [dispatch]
+    [dispatch, stateRef]
   );
-
-  // F5 starts the show, as in PowerPoint (and instead of reloading the page).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F5" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        present();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [present]);
 
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
   const layout: Layout = override ?? defaultLayout;
