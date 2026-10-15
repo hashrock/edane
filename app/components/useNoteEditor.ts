@@ -103,6 +103,9 @@ const SAVE_STATUS_PARAMS: Partial<
   "storage-limit": { limit: formatBytes(IMAGE_STORAGE_LIMIT_BYTES) },
 };
 
+/** 保存の応答がこれより遅いときだけ「保存中...」を出す（ms）。 */
+const SAVING_INDICATOR_DELAY_MS = 1000;
+
 export interface NoteEditorInit {
   noteId?: string;
   initialContent?: string;
@@ -250,25 +253,36 @@ export function useNoteEditor({
   );
 
   // --- Save ---
+  // いまステータス行に出しているコード。同じ表示への書き直しや、保存の
+  // 往復ごとの消える→出る（フェード）を避けるために覚えておく。
+  const currentStatusRef = useRef<SaveStatusText>("");
+  // 「保存中...」を遅らせて出すタイマー。速い保存では出さない。
+  const savingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
+    const prev = currentStatusRef.current;
+    currentStatusRef.current = status;
+    // 同じ表示の書き直しはしない（「保存済み」のままの保存で点滅させない）。
+    if (status === prev && el.textContent !== "") return;
     el.textContent =
       status === ""
         ? ""
         : t(SAVE_STATUS_MESSAGE[status], SAVE_STATUS_PARAMS[status]);
     el.style.transition = "opacity 300ms ease";
     if (status === "") {
-      // Hidden state (e.g. unsaved): drop out immediately, no fade.
+      // Hidden state: drop out immediately, no fade.
       el.style.opacity = "0";
-    } else if (status === "saved") {
-      // Fade the "saved" confirmation in so it appears gently.
+    } else if (status === "saved" && prev === "") {
+      // First appearance of "saved": fade in gently. Swapping from another
+      // visible state (saving… → saved) just replaces the text in place.
       el.style.opacity = "0";
       requestAnimationFrame(() => {
         if (saveStatusRef.current === el) el.style.opacity = "1";
       });
     } else {
-      // Transient states (saving / save-failed / etc.) show instantly.
       el.style.opacity = "1";
     }
   }, []);
@@ -296,13 +310,26 @@ export function useNoteEditor({
       const snapshot = saveSnapshot(currentModel);
       saveRef.current = beginSave(saveRef.current);
       const seq = saveRef.current.issued;
-      updateSaveStatus("saving");
+      // 通常の自動保存は一瞬で終わるので「保存中...」は出さない（毎回の
+      // 保存中→保存済みの切り替わりが視覚的ノイズになる）。応答が遅いとき
+      // だけ出して、保存が進んでいることを伝える。
+      if (savingIndicatorTimerRef.current)
+        clearTimeout(savingIndicatorTimerRef.current);
+      savingIndicatorTimerRef.current = setTimeout(() => {
+        savingIndicatorTimerRef.current = null;
+        if (saveRef.current.settled < seq) updateSaveStatus("saving");
+      }, SAVING_INDICATOR_DELAY_MS);
       // 結末の反映は一本化する。追い越された応答が表示を動かさない規則は
       // saveTracker が持っていて、ここは言われたとおり出すだけ。失敗理由も
       // 同じ規則に従う（追い越された失敗は理由も出さない）。
       const settle = (outcome: SaveOutcome) => {
         const { tracker, display } = settleSave(saveRef.current, seq, outcome);
         saveRef.current = tracker;
+        // 最新の保存の結末が出たら、遅延表示の「保存中...」は要らない。
+        if (seq === tracker.issued && savingIndicatorTimerRef.current) {
+          clearTimeout(savingIndicatorTimerRef.current);
+          savingIndicatorTimerRef.current = null;
+        }
         if (!display) return;
         updateSaveStatus(display);
         setSaveFailure(outcome.ok ? null : (outcome.reason ?? "other"));
@@ -353,10 +380,20 @@ export function useNoteEditor({
   useEffect(() => {
     if (!noteId || readOnly) return;
     // Don't surface the "unsaved" state as visible text — it's visual noise.
-    // Clear the status so the header stays quiet until the save itself flips
-    // this to saving → saved. A standing failure stays visible: the reason and
-    // the retry button must not vanish just because the user kept typing.
-    if (isDirty() && !saveFailureRef.current) updateSaveStatus("");
+    // A standing "saved" / "saving…" line stays put through the debounce so
+    // the header doesn't blink on every edit (the autosave follows right
+    // after, and the leave guard covers the gap). One-off notices (link
+    // copied, upload done…) are cleared once the user goes back to editing.
+    // A standing failure stays visible: the reason and the retry button must
+    // not vanish just because the user kept typing.
+    const shown = currentStatusRef.current;
+    if (
+      isDirty() &&
+      !saveFailureRef.current &&
+      shown !== "saved" &&
+      shown !== "saving"
+    )
+      updateSaveStatus("");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     let cancelled = false;
     // A failed autosave used to sit unsaved until the next edit or navigation.
