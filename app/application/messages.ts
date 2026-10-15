@@ -60,6 +60,7 @@ export const MESSAGES_JA = {
   kmDeleteBranch: "ノードを枝ごと削除",
   kmShortcutList: "ショートカット一覧",
   kmCommandPalette: "コマンドパレット",
+  kmPresent: "スライドショーを開始",
   kmUndo: "元に戻す",
   kmRedo: "やり直し",
   kmMoveNodeUp: "ノードを上へ移動",
@@ -209,6 +210,13 @@ export const MESSAGES_JA = {
   zoomUnavailableOutline: "アウトライン表示では拡大縮小できません",
   layoutMindmap: "マインドマップ",
   layoutOutline: "アウトライン",
+
+  // --- プレゼンモード（SlideShow） ---
+  presentStart: "プレゼン",
+  presentStartHint: "選択中の項目からスライドショーを開始（F5）",
+  presentTitle: "スライドショー",
+  presentExit: "終了（Esc）",
+  presentEmpty: "スライドにする項目がありません",
 
   // --- Markdownパネル ---
   mdView: "表示",
@@ -416,6 +424,7 @@ export const MESSAGES_EN = {
   kmDeleteBranch: "Delete node with its branch",
   kmShortcutList: "Keyboard shortcuts",
   kmCommandPalette: "Command palette",
+  kmPresent: "Start slideshow",
   kmUndo: "Undo",
   kmRedo: "Redo",
   kmMoveNodeUp: "Move node up",
@@ -567,6 +576,13 @@ export const MESSAGES_EN = {
   zoomUnavailableOutline: "Zoom isn't available in the outline view",
   layoutMindmap: "Mind map",
   layoutOutline: "Outline",
+
+  // --- Presentation mode (SlideShow) ---
+  presentStart: "Present",
+  presentStartHint: "Start a slideshow from the selected item (F5)",
+  presentTitle: "Slideshow",
+  presentExit: "Exit (Esc)",
+  presentEmpty: "Nothing to show as slides",
 
   // --- Markdown panel ---
   mdView: "View",

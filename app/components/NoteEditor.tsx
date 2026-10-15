@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MindmapEditorView } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
+import SlideShow from "./SlideShow";
 import { useNoteEditor } from "./useNoteEditor";
 import type { EditorLayout } from "../application/editSurface";
 
@@ -65,6 +66,28 @@ export default function NoteEditor(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Presentation mode: the node the show started from (null = not presenting).
+  const [show, setShow] = useState<{ from: string | null } | null>(null);
+  const { stateRef, dispatch } = engine;
+  // The editor keeps its focus: the show swallows keys above it, and Esc hands
+  // the keyboard straight back.
+  const present = useCallback(
+    () => setShow({ from: stateRef.current.view.activeNodeId }),
+    [stateRef]
+  );
+  // Leaving the show moves to the slide on screen, in the mode the editor was
+  // in (the outline only takes keys while editing), so it picks up there.
+  const endPresentation = useCallback(
+    (nodeId: string | null) => {
+      setShow(null);
+      if (nodeId) {
+        const { editing } = stateRef.current.view;
+        dispatch({ type: "activateNode", nodeId, cursorPos: 0, selectionEnd: 0, editing });
+      }
+    },
+    [dispatch, stateRef]
+  );
+
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
   const layout: Layout = override ?? defaultLayout;
 
@@ -73,24 +96,18 @@ export default function NoteEditor(props: Props) {
   const changeLayout = (next: Layout) =>
     setOverride(next === defaultLayout ? null : next);
 
-  if (layout === "outline") {
-    return (
-      <OutlineEditor
-        engine={engine}
-        embed={props.embed}
-        onSaveToAccount={props.onSaveToAccount}
-        layout={layout}
-        onLayoutChange={changeLayout}
-      />
-    );
-  }
+  const viewProps = {
+    engine,
+    embed: props.embed,
+    onSaveToAccount: props.onSaveToAccount,
+    layout,
+    onLayoutChange: changeLayout,
+    onPresent: present,
+  };
   return (
-    <MindmapEditorView
-      engine={engine}
-      embed={props.embed}
-      onSaveToAccount={props.onSaveToAccount}
-      layout={layout}
-      onLayoutChange={changeLayout}
-    />
+    <>
+      {layout === "outline" ? <OutlineEditor {...viewProps} /> : <MindmapEditorView {...viewProps} />}
+      {show && <SlideShow doc={engine.model} startNodeId={show.from} onExit={endPresentation} />}
+    </>
   );
 }

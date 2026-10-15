@@ -69,6 +69,8 @@ export type KeyEffect =
   | { kind: "flash"; ids: string[] | "active" }
   | { kind: "openPalette" }
   | { kind: "openHelp" }
+  /** Start the slideshow (application/slides.ts) from the active node. */
+  | { kind: "present" }
   | { kind: "undo" }
   | { kind: "redo" };
 
@@ -430,6 +432,15 @@ export function buildKeymap(
       when: "global",
       match: (e) => mod(e) && e.key.toLowerCase() === "k",
       run: () => handled({ kind: "openPalette" }),
+    },
+    {
+      // F5 as in PowerPoint — and instead of reloading the page.
+      id: "present",
+      label: "kmPresent",
+      keys: "F5",
+      when: "global",
+      match: (e) => e.key === "F5" && !mod(e) && !e.shiftKey && !e.altKey,
+      run: () => handled({ kind: "present" }),
     },
     {
       id: "undo",

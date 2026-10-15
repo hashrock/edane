@@ -24,6 +24,7 @@ export interface KeyEffectDeps {
   // Key-press only; a command runner (paste) leaves them out.
   openPalette?: () => void;
   openHelp?: () => void;
+  present?: () => void;
   undo?: () => void;
   redo?: () => void;
   /** Highlight nodes; absent where nothing is drawn (outline). */
@@ -61,6 +62,9 @@ export function applyKeyEffects(
         break;
       case "openHelp":
         deps.openHelp?.();
+        break;
+      case "present":
+        deps.present?.();
         break;
       case "undo":
         deps.undo?.();

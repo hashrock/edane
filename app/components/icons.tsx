@@ -94,6 +94,15 @@ export function LinkIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Play / start-presentation icon (filled triangle). */
+export function PlayIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg fill="currentColor" {...props}>
+      <path d="M6 4l14 8-14 8z" />
+    </IconSvg>
+  );
+}
+
 /** Mind-map icon (root with branching nodes). */
 export function MindmapIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
