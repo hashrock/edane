@@ -11,12 +11,18 @@ const originArb = fc.constantFrom(
   "https://edane.example",
   "http://localhost:5173"
 );
+// "." / ".." はURLのドットセグメントとして解決されて消える（%2E にエンコード
+// しても WHATWG URL は同じく解決する）ので往復できない。実際のノートIDは
+// UUID なのでこの2つにはならない。
+const noteIdArb = fc
+  .string({ unit: "binary-ascii" })
+  .filter((id) => id !== "." && id !== "..");
 const slashesArb = fc.nat(3).map((n) => "/".repeat(n));
 
 describe("publicNoteUrl properties", () => {
   it("round-trips any id through the URL path", () => {
     fc.assert(
-      fc.property(originArb, fc.string({ unit: "binary-ascii" }), (origin, id) => {
+      fc.property(originArb, noteIdArb, (origin, id) => {
         const url = new URL(publicNoteUrl(origin, id));
         expect(url.origin).toBe(origin);
         expect(url.search).toBe("");
