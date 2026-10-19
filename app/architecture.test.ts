@@ -58,6 +58,10 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   // stats = GET /api/stats (signup counts, Bearer STATS_TOKEN). Server
   // infrastructure on the user repository; deliberately independent of auth.
   stats: ["db", "utils"],
+  // mcp = the remote MCP server (POST /mcp, Bearer API token). Server
+  // infrastructure: tools built on the pure layers (noteEdits / persistence)
+  // plus the note repositories in utils. Independent of auth, like stats.
+  mcp: ["domain", "lib", "application", "db", "utils"],
 };
 
 const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));

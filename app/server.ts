@@ -39,6 +39,7 @@ import { extractLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
+import { mcpRoutes } from "./mcp";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
 
@@ -48,6 +49,11 @@ const app = new Hono<Env>();
 // Mounted before the session middleware on purpose: it must not depend on
 // cookies or the AuthProvider at all. Everything lives in app/stats/.
 app.route("/api/stats", statsRoutes());
+
+// --- Remote MCP server (Bearer API token only; see docs/mcp.md) ---
+// Also before the session middleware: a session cookie must never authorize
+// it, or any site could post a form that edits the signed-in user's notes.
+app.route("/mcp", mcpRoutes());
 
 // --- Session middleware ---
 // Who is signed in is decided by the AuthProvider selected from env (auth/):

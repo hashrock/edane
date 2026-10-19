@@ -405,6 +405,12 @@ export default function Settings({ user }: { user: User }) {
               <code className="block break-all rounded bg-white px-2 py-1 text-xs">
                 {newToken}
               </code>
+              <div className="mt-2 text-xs text-amber-800">
+                {t("mcpTokenHint", { url: `${window.location.origin}/mcp` })}
+              </div>
+              <code className="mt-1 block break-all rounded bg-white px-2 py-1 text-xs">
+                {`claude mcp add --transport http edane ${window.location.origin}/mcp --header "Authorization: Bearer ${newToken}"`}
+              </code>
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white">
