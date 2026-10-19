@@ -296,7 +296,9 @@ export type EditorAction =
   // the edits above this one drops the selection — the nodes it named are gone.
   | { type: "deleteNodes"; nodeIds: string[] }
   // --- bulk / misc ---
-  | { type: "insertNodes"; targetId: string; nodes: MindMapModel[] }
+  // Nodes land as siblings right after the target, or — with `into`, and
+  // always for a root target — as the target's last children.
+  | { type: "insertNodes"; targetId: string; nodes: MindMapModel[]; into?: boolean }
   | { type: "setTitle"; text: string }
   | { type: "replace"; state: EditorState };
 
@@ -530,16 +532,16 @@ function documentReducer(
     }
 
     case "insertNodes": {
-      const { targetId, nodes } = action;
+      const { targetId, nodes, into } = action;
       if (nodes.length === 0) return { document };
       const newModel = cloneDocument(document.model);
       const loc = locateNode(newModel, targetId);
       if (!loc) return { document };
       // Either way the nodes are nested (see nestUnder: visible, no position).
-      if (loc.parent === null) {
+      if (into || loc.parent === null) {
         // A root takes them as children, not as new trees (see isRoot).
-        const root = loc.siblings[loc.index];
-        for (const n of nodes) nestUnder(root, { ...n });
+        const target = loc.siblings[loc.index];
+        for (const n of nodes) nestUnder(target, { ...n });
       } else {
         const parent = loc.parent;
         nodes.forEach((n, i) => nestUnder(parent, { ...n }, loc.index + 1 + i));
@@ -1441,6 +1443,26 @@ const CONFORMS_TO_SCHEMA = {
 
 function conformsToSchema(type: EditorAction["type"]): boolean {
   return CONFORMS_TO_SCHEMA[type];
+}
+
+/**
+ * A fresh session on `model`: `activeNodeId` selected, nothing being edited,
+ * empty clipboard and navigation memory. Where the editor starts (see
+ * useNoteEditor) and what headless callers (application/noteEdits.ts) drive
+ * the reducer from.
+ */
+export function freshEditorState(model: MindMapDocument, activeNodeId: string): EditorState {
+  return {
+    document: { model, clipboard: null },
+    view: {
+      activeNodeId,
+      editing: false,
+      editingText: findNode(model, activeNodeId)?.text ?? "",
+      cursorPos: 0,
+      selectionEnd: 0,
+      lastChildByParent: {},
+    },
+  };
 }
 
 // --- Reducer ---

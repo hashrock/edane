@@ -9,7 +9,7 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "../global.d";
-import { getUserByToken } from "../utils/apiToken";
+import { getUserIdByToken } from "../utils/apiToken";
 import { handleMessage, PARSE_ERROR, INVALID_REQUEST } from "./protocol";
 import { NOTE_TOOLS, type ToolContext } from "./tools";
 import { d1NoteStore, type NoteStore } from "./noteStore";
@@ -21,7 +21,7 @@ export interface McpDeps {
 }
 
 const defaultDeps: McpDeps = {
-  resolveUserId: async (c) => (await getUserByToken(c))?.id ?? null,
+  resolveUserId: getUserIdByToken,
   store: (env) => d1NoteStore(env.DB, env.ENCRYPTION_KEY),
 };
 
@@ -58,20 +58,19 @@ export function mcpRoutes(deps: McpDeps = defaultDeps) {
 
     const ctx: ToolContext = { userId, store: deps.store(c.env), origin: new URL(c.req.url).origin };
 
-    if (Array.isArray(body)) {
-      if (body.length === 0 || body.length > MAX_BATCH) {
-        return c.json({ jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: "Invalid Request" } }, 400);
-      }
-      const responses = [];
-      for (const m of body) {
-        const res = await handleMessage(m, NOTE_TOOLS, ctx);
-        if (res) responses.push(res);
-      }
-      return responses.length > 0 ? c.json(responses) : c.body(null, 202);
+    const batch = Array.isArray(body);
+    const messages = batch ? (body as unknown[]) : [body];
+    if (messages.length === 0 || messages.length > MAX_BATCH) {
+      return c.json({ jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: "Invalid Request" } }, 400);
     }
-
-    const res = await handleMessage(body, NOTE_TOOLS, ctx);
-    return res ? c.json(res) : c.body(null, 202);
+    // In order: a later message in a batch may edit what an earlier one made.
+    const responses = [];
+    for (const m of messages) {
+      const res = await handleMessage(m, NOTE_TOOLS, ctx);
+      if (res) responses.push(res);
+    }
+    if (responses.length === 0) return c.body(null, 202);
+    return c.json(batch ? responses : responses[0]);
   });
 
   // サーバーから送るもの（SSE）もセッションも無い。

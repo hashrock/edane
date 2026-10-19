@@ -21,7 +21,7 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 | ツール | 内容 |
 |---|---|
 | `list_notes` | 自分のノート（ゴミ箱を除く）。ピン留め → 更新が新しい順。`query` でタイトルを部分一致検索 |
-| `read_note` | `outline`（既定）: 1 行 1 ノードのアウトラインで、各行末の `{id=…}` が編集ツールに渡すノード id。`json`: 保存形式 v2 |
+| `read_note` | `outline`（既定）: 「Markdownとしてコピー」と同じ箇条書き（`add_nodes` がそのまま読める形）で、各行末の `{id=…}` が編集ツールに渡すノード id。markdown ノードの複数行本文は 1 行に畳まれる。`json`: 保存形式 v2（省略なし） |
 | `create_note` | 非公開ノートを作る。`markdown` の最上位が 1 項目ならそれが木の根、複数ならタイトルを根にしてその下に並べる |
 | `rename_note` | タイトルを変える |
 | `add_nodes` | Markdown（見出し・箇条書き・`- [ ]` タスク）からノードを追加。`parentId` = その子の末尾、`afterId` = 直後の兄弟（ルートの直後なら子）、どちらも無し = 最初の木の根の子の末尾 |
@@ -34,8 +34,8 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 
 - `app/mcp/protocol.ts` — JSON-RPC（`initialize` / `ping` / `tools/list` / `tools/call`）。HTTP と DB に依存しない。
 - `app/mcp/tools.ts` — ツール定義。引数の検証 → 読み込み → 変換 → 保存だけを行う。
-- `app/mcp/noteStore.ts` — D1 への読み書き。公開 = 平文、非公開 = 暗号化の保存ポリシーはエディタの保存と同じ（`crypto.ts`）。
-- `app/application/noteEdits.ts` — アウトラインの生成と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
+- `app/mcp/noteStore.ts` — D1 への読み書き。一覧と更新は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）/ `updateLiveNote`（所有者とゴミ箱外を WHERE に含めた 1 文の UPDATE）。公開 = 平文、非公開 = 暗号化の保存ポリシーは `crypto.ts`。
+- `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
 
 ### HTTP の振る舞い
 

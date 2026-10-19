@@ -3,12 +3,12 @@ import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, desc, eq, isNull, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
-import { insertNote, insertPublication, upsertSite } from "./utils/noteRepository";
+import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
 import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
 import { resolveNoteContentAction } from "./utils/noteContentTransition";
@@ -680,21 +680,8 @@ const routes = app
   .get("/notes", async (c) => {
     const user = c.get("user");
     if (!user) return c.redirect("/");
-    const db = drizzle(c.env.DB);
-    const myNotes = await db
-      .select({
-        id: notes.id,
-        title: notes.title,
-        isPublic: notes.isPublic,
-        pinned: notes.pinned,
-        updatedAt: notes.updatedAt,
-      })
-      .from(notes)
-      // Exclude trashed notes; they live on the /trash page.
-      .where(and(eq(notes.userId, user.id), isNull(notes.deletedAt)))
-      // Pinned notes float to the top; ties (and everything else) fall back to
-      // most-recently-updated.
-      .orderBy(desc(notes.pinned), desc(notes.updatedAt));
+    // Trashed notes live on the /trash page.
+    const myNotes = await listLiveNotes(drizzle(c.env.DB), user.id);
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/trash", async (c) => {

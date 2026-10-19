@@ -41,7 +41,7 @@ describe("applyNoteEdit", () => {
         expectUniqueIds(r.document);
         expect(r.document.roots.length).toBeGreaterThan(0);
         expect(nestedPositions(r.document)).toBe(0);
-        for (const id of r.nodeIds) expect(allIds(r.document)).toContain(id);
+        for (const id of r.nodeIds ?? []) expect(allIds(r.document)).toContain(id);
       })
     );
   });

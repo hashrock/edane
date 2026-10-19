@@ -2,7 +2,8 @@
  * edane の MCP ツール。ノートの読み書きは application/noteEdits.ts（reducer 経由の純粋な
  * 変換）に任せ、ここは「引数を検証 → ノートを読む → 変換 → 保存 → 結果を文章で返す」だけ。
  */
-import { parseContent, serializeDocument } from "../application/persistence";
+import { CONTENT_FORMAT_VERSION, parseContent, serializeDocument } from "../application/persistence";
+import { absoluteUrl } from "../lib/url";
 import {
   applyNoteEdit,
   documentFromMarkdown,
@@ -10,7 +11,7 @@ import {
   nodesFromMarkdown,
   type NoteEdit,
 } from "../application/noteEdits";
-import { textResult, errorResult, ToolInputError, type McpTool, type ToolResult } from "./protocol";
+import { textResult, ToolInputError, type McpTool, type ToolResult } from "./protocol";
 import type { NoteStore, StoredNote } from "./noteStore";
 
 export interface ToolContext {
@@ -35,26 +36,24 @@ function requiredString(args: Args, key: string): string {
   return v;
 }
 
-const noteUrl = (ctx: ToolContext, id: string) => `${ctx.origin}/notes/${id}/edit`;
+const noteUrl = (ctx: ToolContext, id: string) => absoluteUrl(ctx.origin, `/notes/${id}/edit`);
 
-async function loadNote(ctx: ToolContext, noteId: string): Promise<StoredNote | ToolResult> {
+/** 見つからない・復号できないは ToolInputError（isError の結果になる）。 */
+async function loadNote(ctx: ToolContext, args: Args): Promise<StoredNote> {
+  const noteId = requiredString(args, "noteId");
   const note = await ctx.store.load(ctx.userId, noteId);
-  if (note === null) return errorResult(`Note not found: ${noteId}`);
-  if (note === "decrypt-failed") return errorResult(`Note could not be decrypted: ${noteId}`);
+  if (note === null) throw new ToolInputError(`Note not found: ${noteId}`);
+  if (note === "decrypt-failed") throw new ToolInputError(`Note could not be decrypted: ${noteId}`);
   return note;
 }
 
-const isResult = (v: StoredNote | ToolResult): v is ToolResult => "content" in v && Array.isArray(v.content);
-
 /** 読んで、編集を当てて、保存して、編集後のアウトラインを返す。 */
 async function editNote(ctx: ToolContext, args: Args, edit: NoteEdit): Promise<ToolResult> {
-  const loaded = await loadNote(ctx, requiredString(args, "noteId"));
-  if (isResult(loaded)) return loaded;
-  const doc = parseContent(loaded.content, loaded.title);
-  const result = applyNoteEdit(doc, edit);
-  if (!result.ok) return errorResult(result.error);
-  await ctx.store.save(ctx.userId, loaded.id, { content: serializeDocument(result.document) });
-  const created = result.nodeIds.length > 0 ? `Added node ids: ${result.nodeIds.join(", ")}\n\n` : "";
+  const note = await loadNote(ctx, args);
+  const result = applyNoteEdit(parseContent(note.content, note.title), edit);
+  if (!result.ok) throw new ToolInputError(result.error);
+  await ctx.store.saveContent(ctx.userId, note, serializeDocument(result.document));
+  const created = result.nodeIds ? `Added node ids: ${result.nodeIds.join(", ")}\n\n` : "";
   return textResult(`${created}${documentToOutline(result.document)}`);
 }
 
@@ -84,7 +83,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     name: "read_note",
     title: "ノートを読む",
     description:
-      "ノートの内容を返す。outline（既定）は 1 行 1 ノードのアウトラインで、各行末の {id=…} を編集ツールに渡す。json は保存形式（v2）そのもの。",
+      "ノートの内容を返す。outline（既定）は 1 行 1 ノードの Markdown アウトラインで、各行末の {id=…} を編集ツールに渡す。json は保存形式（v2）そのもので、複数行の本文も省略しない。",
     inputSchema: {
       type: "object",
       properties: { noteId: NOTE_ID, format: { type: "string", enum: ["outline", "json"] } },
@@ -94,13 +93,12 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     async call(args, ctx) {
       const format = optionalString(args, "format") ?? "outline";
       if (format !== "outline" && format !== "json") throw new ToolInputError("format must be outline or json");
-      const loaded = await loadNote(ctx, requiredString(args, "noteId"));
-      if (isResult(loaded)) return loaded;
-      const doc = parseContent(loaded.content, loaded.title);
+      const note = await loadNote(ctx, args);
+      const doc = parseContent(note.content, note.title);
       if (format === "json") {
-        return textResult(JSON.stringify({ title: doc.title, ...JSON.parse(serializeDocument(doc)) }, null, 2));
+        return textResult(JSON.stringify({ title: doc.title, version: CONTENT_FORMAT_VERSION, roots: doc.roots }, null, 2));
       }
-      return textResult(`${documentToOutline(doc)}\n\n(updatedAt: ${loaded.updatedAt}, url: ${noteUrl(ctx, loaded.id)})`);
+      return textResult(`${documentToOutline(doc)}\n\n(updatedAt: ${note.updatedAt}, url: ${noteUrl(ctx, note.id)})`);
     },
   },
   {
@@ -128,9 +126,8 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     annotations: { idempotentHint: true },
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
-      const loaded = await loadNote(ctx, requiredString(args, "noteId"));
-      if (isResult(loaded)) return loaded;
-      await ctx.store.save(ctx.userId, loaded.id, { title });
+      const noteId = requiredString(args, "noteId");
+      if (!(await ctx.store.rename(ctx.userId, noteId, title))) throw new ToolInputError(`Note not found: ${noteId}`);
       return textResult(`Renamed to "${title}"`);
     },
   },

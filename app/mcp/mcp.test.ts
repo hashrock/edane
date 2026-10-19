@@ -32,9 +32,15 @@ function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: 
       notes.set(id, { id, userId, title, content, isPublic: false, updatedAt: "t0" });
       return { id };
     },
-    async save(userId, noteId, patch) {
+    async saveContent(userId, note, content) {
+      const n = notes.get(note.id);
+      if (n && n.userId === userId) notes.set(note.id, { ...n, content, updatedAt: "t1" });
+    },
+    async rename(userId, noteId, title) {
       const n = notes.get(noteId);
-      if (n && n.userId === userId) notes.set(noteId, { ...n, ...patch, updatedAt: "t1" });
+      if (!n || n.userId !== userId) return false;
+      notes.set(noteId, { ...n, title, updatedAt: "t1" });
+      return true;
     },
   };
 }
@@ -196,6 +202,8 @@ describe("note tools", () => {
     expect(await call("delete_node", { noteId: "n1", nodeId: "ghost" })).toMatchObject({ isError: true });
     expect(await call("add_nodes", { noteId: "n1", markdown: "   " })).toMatchObject({ isError: true });
     expect(await call("read_note", {})).toMatchObject({ isError: true });
+    expect(await call("rename_note", { noteId: "n2", title: "mine" })).toMatchObject({ isError: true });
+    expect(store.notes.get("n2")!.title).toBe("Bob's");
     expect(store.notes.get("n1")!.content).toBe(before);
   });
 });

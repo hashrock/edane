@@ -24,7 +24,7 @@ const ok = (r: ReturnType<typeof applyNoteEdit>) => {
 };
 
 describe("documentToOutline", () => {
-  it("lists every node with its id, task marker, kind and folded state", () => {
+  it("lists every node as Markdown with its id and folded state", () => {
     const d = doc();
     d.roots[1].children.push(
       { id: "l", text: "https://x.test", type: "link", linkTitle: "X", children: [] },
@@ -38,9 +38,8 @@ describe("documentToOutline", () => {
         "    - A1 {id=a1}",
         "  - [ ] B {id=b}",
         "- Second {id=s}",
-        '  - [link] https://x.test "X" {id=l}',
-        "  - [markdown] # h {id=m}",
-        "    body",
+        "  - [X](https://x.test) {id=l}",
+        "  - # h body {id=m}",
       ].join("\n")
     );
   });

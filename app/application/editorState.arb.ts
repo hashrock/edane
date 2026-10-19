@@ -19,7 +19,7 @@ import {
 } from "../domain/model";
 import { modelArb, nodeArb, nodeIds, pick } from "../domain/model.arb";
 import { assertNever } from "../lib/assertNever";
-import type { EditorAction, EditorState } from "./editorReducer";
+import { freshEditorState, type EditorAction, type EditorState } from "./editorReducer";
 import { buildKeymap, type KeyBinding } from "./editorKeymap";
 import type { PasteSource } from "./editorCommands";
 import {
@@ -51,19 +51,9 @@ export function editorStateAt(
   nodeId: string,
   opts: { editing?: boolean; pos?: number } = {}
 ): EditorState {
-  const text = findNode(model, nodeId)?.text ?? "";
-  const pos = (opts.pos ?? 0) % (text.length + 1);
-  return {
-    document: { model, clipboard: null },
-    view: {
-      activeNodeId: nodeId,
-      editing: opts.editing ?? false,
-      editingText: text,
-      cursorPos: pos,
-      selectionEnd: pos,
-      lastChildByParent: {},
-    },
-  };
+  const state = freshEditorState(model, nodeId);
+  const pos = (opts.pos ?? 0) % (state.view.editingText.length + 1);
+  return { ...state, view: { ...state.view, editing: opts.editing ?? false, cursorPos: pos, selectionEnd: pos } };
 }
 
 /**
@@ -419,7 +409,7 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       }
     }
     case "insertNodes":
-      return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)] };
+      return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)], into: flag };
     case "setTitle":
       return { type: kind, text };
     case "replace": {

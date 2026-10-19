@@ -6,18 +6,18 @@
  * POST 1 回 = 応答 1 回で足りる。
  */
 
-export const SERVER_INFO = { name: "edane", version: "1.0.0" } as const;
+const SERVER_INFO = { name: "edane", version: "1.0.0" } as const;
 
 /** 新しい順。クライアントが送ってきた版が分かればそれ、分からなければ先頭で答える（仕様の版交渉）。 */
 export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
 
-export const INSTRUCTIONS = [
+const INSTRUCTIONS = [
   "edane はマインドマップ / アウトラインのノートアプリ。ノートはノードの木（複数の木も可）。",
   "編集の前に read_note でアウトラインを読み、行末の {id=…} でノードを指定する。",
   "ノードの追加は Markdown（見出し・箇条書き・`- [ ]` タスク）で渡す。インデント 2 スペースで 1 段深くなる。",
 ].join("\n");
 
-export type JsonSchema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
+type JsonSchema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
 
 export type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -34,7 +34,7 @@ export interface McpTool<Ctx> {
 export class ToolInputError extends Error {}
 
 export const textResult = (text: string): ToolResult => ({ content: [{ type: "text", text }] });
-export const errorResult = (text: string): ToolResult => ({ content: [{ type: "text", text }], isError: true });
+const errorResult = (text: string): ToolResult => ({ content: [{ type: "text", text }], isError: true });
 
 type Id = string | number;
 type JsonRpcResponse =
@@ -43,9 +43,9 @@ type JsonRpcResponse =
 
 export const PARSE_ERROR = -32700;
 export const INVALID_REQUEST = -32600;
-export const METHOD_NOT_FOUND = -32601;
-export const INVALID_PARAMS = -32602;
-export const INTERNAL_ERROR = -32603;
+const METHOD_NOT_FOUND = -32601;
+const INVALID_PARAMS = -32602;
+const INTERNAL_ERROR = -32603;
 
 const fail = (id: Id | null, code: number, message: string): JsonRpcResponse => ({
   jsonrpc: "2.0",
