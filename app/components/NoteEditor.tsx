@@ -106,6 +106,10 @@ export default function NoteEditor(props: Props) {
   };
   return (
     <>
+      {engine.syncError && <div role="alert" className="px-4 py-2 text-sm bg-amber-50 text-amber-950">
+        {engine.syncError}
+        {engine.syncRecovery && <details><summary>適用できなかった編集（復元用）</summary><textarea readOnly aria-label="未適用の編集" value={engine.syncRecovery} className="w-full h-24" /></details>}
+      </div>}
       {layout === "outline" ? <OutlineEditor {...viewProps} /> : <MindmapEditorView {...viewProps} />}
       {show && <SlideShow doc={engine.model} startNodeId={show.from} onExit={endPresentation} />}
     </>

@@ -27,6 +27,7 @@ export const notes = sqliteTable("notes", {
   userId: text("user_id").references(() => users.id),
   title: text("title").notNull().default("Untitled"),
   content: text("content").notNull().default(""),
+  version: integer("version").notNull().default(0),
   isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
   /** Pinned notes sort to the top of the list. */
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),

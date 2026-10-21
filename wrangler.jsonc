@@ -14,6 +14,8 @@
       "database_id": "aeb23f2c-ead6-4495-854b-dfec9fef53ae"
     }
   ],
+  "durable_objects": { "bindings": [{ "name": "NOTE_ROOMS", "class_name": "NoteRoom" }] },
+  "migrations": [{ "tag": "note-sync-v1", "new_sqlite_classes": ["NoteRoom"] }],
   "ai": { "binding": "AI", "remote": true },
   "r2_buckets": [
     {
