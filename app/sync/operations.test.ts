@@ -3,7 +3,7 @@ import { applyPatch, diffDocument, parseCommit } from "../application/syncOperat
 import type { MindMapDocument } from "../domain/model";
 import { editorReducer, type EditorState } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
-import { prepareActions } from "../components/webmcp";
+import { prepareActions } from "../application/agentActions";
 const base = (): MindMapDocument => ({ title: "Note", roots: [{ id: "r", text: "Root", children: [{ id: "a", text: "A", children: [] }, { id: "b", text: "B", children: [] }] }] });
 const edit = (fn: (d: MindMapDocument) => void) => { const d = base(); fn(d); return diffDocument(base(), d); };
 const state = (model = base()): EditorState => ({ document: { model, clipboard: null }, view: { activeNodeId: "r", editing: false, editingText: "Root", cursorPos: 0, selectionEnd: 0, lastChildByParent: {} } });
