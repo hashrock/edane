@@ -128,12 +128,15 @@ describe("POST /mcp transport", () => {
     expect(res.status).toBe(413);
   });
 
-  it("401s without a valid Bearer token, advertising Bearer", async () => {
+  it("401s without a valid Bearer token, pointing OAuth clients at the resource metadata", async () => {
     const { post } = setup();
     for (const token of [null, "wrong"]) {
       const res = await post({ jsonrpc: "2.0", id: 1, method: "ping" }, token);
       expect(res.status).toBe(401);
-      expect(res.headers.get("WWW-Authenticate")).toMatch(/^Bearer/);
+      const challenge = res.headers.get("WWW-Authenticate")!;
+      expect(challenge).toMatch(/^Bearer /);
+      expect(challenge).toMatch(/resource_metadata="https?:\/\/[^"]+\/\.well-known\/oauth-protected-resource\/mcp"/);
+      expect(challenge.includes('error="invalid_token"')).toBe(token !== null);
     }
   });
 

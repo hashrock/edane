@@ -61,7 +61,11 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   // mcp = the remote MCP server (POST /mcp, Bearer API token). Server
   // infrastructure: tools built on the pure layers (noteEdits / persistence)
   // plus the note repositories in utils. Independent of auth, like stats.
-  mcp: ["domain", "lib", "application", "db", "utils"],
+  mcp: ["domain", "lib", "application", "db", "utils", "oauth"],
+  // oauth = the OAuth 2.1 authorization server for /mcp (discovery metadata,
+  // client registration, consent, token endpoint). Server infrastructure on
+  // db/utils; mcp reads its pure protocol module for the 401 challenge.
+  oauth: ["db", "utils"],
   // sync = the per-note coordinator (NoteRoom, a Durable Object). Server
   // infrastructure on the pure layers plus utils (crypto); reached only via
   // the NOTE_ROOMS binding from server.ts / mcp, never by import.

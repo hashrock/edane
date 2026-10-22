@@ -32,6 +32,13 @@ interface ApiToken {
   createdAt: string;
 }
 
+/** GET /api/oauth/grants の1行（OAuth で接続中のアプリ）。 */
+interface OAuthGrant {
+  id: string;
+  clientName: string;
+  createdAt: string;
+}
+
 /** GET /api/publications の1行（Web公開中のノード）。 */
 interface Publication {
   id: string;
@@ -70,6 +77,8 @@ export default function Settings({ user }: { user: User }) {
   const [mcpClient, setMcpClient] = useState<McpClientId>("claude-code");
   const [copiedMcpSnippet, setCopiedMcpSnippet] = useState(false);
 
+  const [grants, setGrants] = useState<OAuthGrant[]>([]);
+
   const [publications, setPublications] = useState<Publication[]>([]);
   const [copiedPubUrl, setCopiedPubUrl] = useState<string | null>(null);
 
@@ -91,6 +100,11 @@ export default function Settings({ user }: { user: User }) {
     if (res.ok) setTokens((await res.json()) as ApiToken[]);
   }, []);
 
+  const loadGrants = useCallback(async () => {
+    const res = await fetch("/api/oauth/grants", { credentials: "include" });
+    if (res.ok) setGrants((await res.json()) as OAuthGrant[]);
+  }, []);
+
   const loadPublications = useCallback(async () => {
     const res = await fetch("/api/publications", { credentials: "include" });
     if (!res.ok) return;
@@ -99,10 +113,13 @@ export default function Settings({ user }: { user: User }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([loadImages(), loadTokens(), loadPublications()]).finally(() =>
-      setLoading(false)
-    );
-  }, [loadImages, loadTokens, loadPublications]);
+    Promise.all([
+      loadImages(),
+      loadTokens(),
+      loadGrants(),
+      loadPublications(),
+    ]).finally(() => setLoading(false));
+  }, [loadImages, loadTokens, loadGrants, loadPublications]);
 
   const handleUpload = async (file: File | undefined) => {
     if (!file) return;
@@ -159,6 +176,14 @@ export default function Settings({ user }: { user: User }) {
       credentials: "include",
     });
     await loadTokens();
+  };
+
+  const disconnectGrant = async (id: string) => {
+    await fetch(`/api/oauth/grants/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    await loadGrants();
   };
 
   const revokePublication = async (id: string) => {
@@ -391,7 +416,7 @@ export default function Settings({ user }: { user: User }) {
           </p>
         </section>
 
-        <section>
+        <section className="mb-8">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase text-slate-400">
               {t("apiTokensHeading")}
@@ -491,6 +516,42 @@ export default function Settings({ user }: { user: User }) {
               </ul>
             )}
           </div>
+        </section>
+
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            {t("connectedAppsHeading")}
+          </h2>
+          <div className="rounded-xl border border-slate-200 bg-white">
+            {grants.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-400">
+                {t("noConnectedApps")}
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {grants.map((g) => (
+                  <li
+                    key={g.id}
+                    className="flex items-center justify-between px-4 py-3 text-sm"
+                  >
+                    <div>
+                      <div className="font-medium">{g.clientName}</div>
+                      <div className="text-xs text-slate-400">{g.createdAt}</div>
+                    </div>
+                    <button
+                      onClick={() => disconnectGrant(g.id)}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      {t("disconnect")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            {t("connectedAppsHint", { url: `${window.location.origin}/mcp` })}
+          </p>
         </section>
       </main>
     </div>

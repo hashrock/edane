@@ -323,6 +323,21 @@ export const MESSAGES_JA = {
     "リモートMCP: {url} に Authorization: Bearer <トークン> で接続すると、AIエージェントからノートを読み書きできます。クライアント別の設定例:",
   mcpConfigFile: "{file} に追記:",
   deleteAction: "削除",
+  connectedAppsHeading: "接続中のアプリ（OAuth）",
+  connectedAppsHint:
+    "ChatGPT や Claude（claude.ai / Claude Desktop）のコネクタには {url} を登録するだけで、ログインと許可の画面から接続できます。",
+  noConnectedApps: "接続中のアプリはありません",
+  disconnect: "接続解除",
+
+  // --- OAuth 同意画面 ---
+  oauthConsentTitle: "アプリの接続",
+  oauthConsentHeading: "{client} が edane への接続を求めています",
+  oauthConsentBody:
+    "許可すると、このアプリは {email} のすべてのノートを読み書きできるようになります。接続は設定画面の「接続中のアプリ」からいつでも解除できます。",
+  oauthConsentRedirect: "許可後の戻り先: {redirect}",
+  oauthConsentWarning: "自分で始めた接続でなければ拒否してください。",
+  oauthApprove: "許可する",
+  oauthDeny: "拒否",
 
   // --- ノート一覧 ---
   trash: "ゴミ箱",
@@ -692,6 +707,21 @@ export const MESSAGES_EN = {
     "Remote MCP: connect to {url} with Authorization: Bearer <token> to let an AI agent read and edit your notes. Setup per client:",
   mcpConfigFile: "Add to {file}:",
   deleteAction: "Delete",
+  connectedAppsHeading: "Connected apps (OAuth)",
+  connectedAppsHint:
+    "For ChatGPT or Claude (claude.ai / Claude Desktop) connectors, just add {url}; they connect through the sign-in and consent screen.",
+  noConnectedApps: "No connected apps",
+  disconnect: "Disconnect",
+
+  // --- OAuth consent page ---
+  oauthConsentTitle: "Connect an app",
+  oauthConsentHeading: "{client} wants to connect to edane",
+  oauthConsentBody:
+    "If you allow it, this app can read and edit all notes of {email}. You can disconnect it at any time under \"Connected apps\" in Settings.",
+  oauthConsentRedirect: "Returns to: {redirect}",
+  oauthConsentWarning: "Deny this unless you started the connection yourself.",
+  oauthApprove: "Allow",
+  oauthDeny: "Deny",
 
   // --- Notes index ---
   trash: "Trash",

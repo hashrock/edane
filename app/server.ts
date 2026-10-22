@@ -39,6 +39,7 @@ import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from ".
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
+import { oauthServerRoutes, oauthSessionRoutes, takeOAuthReturn } from "./oauth";
 import { noteRoom } from "./utils/noteRoom";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
@@ -55,6 +56,9 @@ app.route("/api/stats", statsRoutes());
 // Also before the session middleware: a session cookie must never authorize
 // it, or any site could post a form that edits the signed-in user's notes.
 app.route("/mcp", mcpRoutes());
+// OAuth for /mcp (ChatGPT / claude.ai connectors): discovery metadata, client
+// registration and the token endpoint. Cookie-free like /mcp, so also here.
+app.route("/", oauthServerRoutes());
 
 // --- Session middleware ---
 // Who is signed in is decided by the AuthProvider selected from env (auth/):
@@ -65,6 +69,9 @@ app.use("*", authMiddleware(selectAuth));
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
+
+// --- OAuth consent page + connected apps (need the signed-in user) ---
+app.route("/", oauthSessionRoutes());
 
 // --- Auth (full-page redirects, not Inertia) ---
 app.get(
@@ -104,7 +111,8 @@ app.get(
       avatarUrl: googleUser.picture || "",
     });
 
-    return c.redirect("/notes");
+    // Sent here from the OAuth consent page while signed out: go back to it.
+    return c.redirect(takeOAuthReturn(c) ?? "/notes");
   }
 );
 

@@ -1,7 +1,9 @@
 /**
  * リモート MCP サーバー（`POST /mcp`、Streamable HTTP の stateless 版）。仕様は docs/mcp.md。
  *
- * 認証は `Authorization: Bearer <API トークン>`（設定画面で発行するもの）だけ。
+ * 認証は `Authorization: Bearer <トークン>` だけ。トークンは設定画面で発行する API トークンか、
+ * OAuth（app/oauth/、ChatGPT や claude.ai のコネクタ用）で発行したアクセストークン。
+ * トークンが無い・無効なときの 401 は resource_metadata を示し、OAuth クライアントに認可サーバーを見つけさせる。
  * セッション Cookie は読まないので、server.ts は認証ミドルウェアより前に mount する
  * （Cookie で通ると、別サイトからのフォーム送信でノートを書き換えられてしまう）。
  * Bearer はブラウザが勝手に付けないので、CORS はどのオリジンにも開けてよい。
@@ -11,6 +13,8 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../global.d";
 import { getUserIdByToken } from "../utils/apiToken";
+import { getUserIdByOAuthAccessToken } from "../utils/oauthToken";
+import { ACCESS_TOKEN_PREFIX, mcpChallenge } from "../oauth/protocol";
 import { handleMessage, PARSE_ERROR, INVALID_REQUEST } from "./protocol";
 import { NOTE_TOOLS, type ToolContext } from "./tools";
 import { d1NoteStore, type NoteStore } from "./noteStore";
@@ -21,8 +25,15 @@ export interface McpDeps {
   store(env: Env["Bindings"]): NoteStore;
 }
 
+/** 接頭辞で API トークンか OAuth のアクセストークンかを分け、どちらも 1 回の検索で済ませる。 */
+async function resolveBearer(c: Context<Env>): Promise<string | null> {
+  const token = c.req.header("Authorization")?.match(/^Bearer (.+)$/)?.[1];
+  if (token?.startsWith(ACCESS_TOKEN_PREFIX)) return getUserIdByOAuthAccessToken(c, token);
+  return getUserIdByToken(c);
+}
+
 const defaultDeps: McpDeps = {
-  resolveUserId: getUserIdByToken,
+  resolveUserId: resolveBearer,
   store: d1NoteStore,
 };
 
@@ -54,7 +65,8 @@ export function mcpRoutes(deps: McpDeps = defaultDeps) {
       c.header("Cache-Control", "no-store");
       const userId = await deps.resolveUserId(c);
       if (!userId) {
-        c.header("WWW-Authenticate", 'Bearer realm="edane"');
+        const origin = new URL(c.req.url).origin;
+        c.header("WWW-Authenticate", mcpChallenge(origin, !!c.req.header("Authorization")));
         return c.json({ error: "Unauthorized" }, 401);
       }
 

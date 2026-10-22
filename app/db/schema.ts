@@ -97,3 +97,60 @@ export const sites = sqliteTable("sites", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+// OAuth 2.1 for the remote MCP endpoint (docs/adr/0005-mcp-oauth.md). Rows are
+// created by dynamic client registration (open — anyone may register, a client
+// only gets access once a signed-in user approves it on the consent page).
+export const oauthClients = sqliteTable("oauth_clients", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** JSON array of the registered redirect URIs. */
+  redirectUris: text("redirect_uris").notNull(),
+  /** SHA-256 of the client secret; null = public client (PKCE only). */
+  secretHash: text("secret_hash"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/** Authorization codes: single use (deleted on exchange), short-lived. */
+export const oauthCodes = sqliteTable("oauth_codes", {
+  codeHash: text("code_hash").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => oauthClients.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  redirectUri: text("redirect_uri").notNull(),
+  /** PKCE S256 challenge. */
+  codeChallenge: text("code_challenge").notNull(),
+  scope: text("scope").notNull(),
+  /** Epoch ms. */
+  expiresAt: integer("expires_at").notNull(),
+});
+
+/**
+ * One approved client's access to one user's notes. Holds the current
+ * access/refresh token pair (hashes); a refresh rotates both in place, and
+ * deleting the row (Settings → connected apps) revokes the client.
+ */
+export const oauthGrants = sqliteTable("oauth_grants", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => oauthClients.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  scope: text("scope").notNull(),
+  accessTokenHash: text("access_token_hash").notNull().unique(),
+  /** Epoch ms. */
+  accessExpiresAt: integer("access_expires_at").notNull(),
+  refreshTokenHash: text("refresh_token_hash").notNull().unique(),
+  /** Epoch ms. */
+  refreshExpiresAt: integer("refresh_expires_at").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
