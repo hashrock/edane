@@ -320,7 +320,8 @@ export const MESSAGES_JA = {
   tokenIssued: "トークンを発行しました（この画面でしか確認できません）",
   noTokens: "トークンはありません",
   mcpTokenHint:
-    "リモートMCP: {url} に Authorization: Bearer <トークン> で接続すると、AIエージェントからノートを読み書きできます。Claude Code なら:",
+    "リモートMCP: {url} に Authorization: Bearer <トークン> で接続すると、AIエージェントからノートを読み書きできます。クライアント別の設定例:",
+  mcpConfigFile: "{file} に追記:",
   deleteAction: "削除",
 
   // --- ノート一覧 ---
@@ -688,7 +689,8 @@ export const MESSAGES_EN = {
   tokenIssued: "Token created (it is only shown on this screen)",
   noTokens: "No tokens",
   mcpTokenHint:
-    "Remote MCP: connect to {url} with Authorization: Bearer <token> to let an AI agent read and edit your notes. With Claude Code:",
+    "Remote MCP: connect to {url} with Authorization: Bearer <token> to let an AI agent read and edit your notes. Setup per client:",
+  mcpConfigFile: "Add to {file}:",
   deleteAction: "Delete",
 
   // --- Notes index ---
