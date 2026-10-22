@@ -18,6 +18,8 @@ export const CODE_TTL_MS = 10 * 60 * 1000;
 export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 /** リフレッシュトークンの寿命。使うたびに入れ替わるので、使っている限り切れない。 */
 export const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+/** 誰にも許可されなかったクライアントを残す期間。登録から同意までには十分で、放置された登録は溜めない。 */
+export const UNAUTHORIZED_CLIENT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const REFRESH_TOKEN_PREFIX = "edane_ort_";
 export const CODE_PREFIX = "edane_oac_";

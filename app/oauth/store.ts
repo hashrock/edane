@@ -4,7 +4,7 @@
  * （生の値はこのモジュールに来ない）。
  */
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, lte } from "drizzle-orm";
 import type { Env } from "../global.d";
 import { oauthClients, oauthCodes, oauthGrants } from "../db/schema";
 
@@ -46,32 +46,57 @@ export interface GrantSummary {
   createdAt: string;
 }
 
+/** 登録のついでに消す行の境目（epoch ms）。いつより前を消すかはルートが決める。 */
+export interface PurgeCutoffs {
+  /** これ以前に切れた認可コードと、リフレッシュトークンが切れた付与を消す。 */
+  now: number;
+  /** これより前に登録され、誰にも許可されていないクライアントを消す。 */
+  unauthorizedClientsBefore: number;
+}
+
 export interface OAuthStore {
-  createClient(client: OAuthClient): Promise<void>;
+  /**
+   * クライアントを登録し（`created_at` = `cutoffs.now`）、同じ batch でもう使えない行を消す:
+   * 期限切れの認可コード、リフレッシュトークンが切れた付与、許可されないまま古くなったクライアント。
+   * 登録は誰でもできるので、行が増えるここで片付ければ溜まらない。
+   */
+  createClient(client: OAuthClient, cutoffs: PurgeCutoffs): Promise<void>;
   findClient(id: string): Promise<OAuthClient | null>;
   saveCode(code: OAuthCode): Promise<void>;
   /** コードを消して返す（1 回だけ使える）。同時に 2 回交換されても片方にしか返らない。 */
   takeCode(codeHash: string): Promise<OAuthCode | null>;
-  createGrant(grant: OAuthGrant): Promise<void>;
+  /** 付与を作り、クライアントを「許可されたことがある」にする（登録時の片付けで消えなくなる）。 */
+  createGrant(grant: OAuthGrant, now: number): Promise<void>;
   /**
    * リフレッシュトークン（`clientId` のもの、`now` で未失効）を持つ付与のトークンを入れ替える。
    * 古いリフレッシュトークンは同時に無効になる。該当なしなら null。
    */
   rotateGrant(refreshTokenHash: string, clientId: string, next: TokenPair, now: number): Promise<{ scope: string } | null>;
-  listGrants(userId: string): Promise<GrantSummary[]>;
+  /** リフレッシュトークンが切れていない付与だけ（切れたものは再認可しないと使えない）。 */
+  listGrants(userId: string, now: number): Promise<GrantSummary[]>;
   deleteGrant(userId: string, id: string): Promise<boolean>;
 }
 
 export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
   const db = drizzle(env.DB);
   return {
-    async createClient(client) {
-      await db.insert(oauthClients).values({
-        id: client.id,
-        name: client.name,
-        redirectUris: JSON.stringify(client.redirectUris),
-        secretHash: client.secretHash,
-      });
+    async createClient(client, { now, unauthorizedClientsBefore }) {
+      await db.batch([
+        db.delete(oauthCodes).where(lte(oauthCodes.expiresAt, now)),
+        db.delete(oauthGrants).where(lte(oauthGrants.refreshExpiresAt, now)),
+        db
+          .delete(oauthClients)
+          .where(
+            and(isNull(oauthClients.authorizedAt), lt(oauthClients.createdAt, new Date(unauthorizedClientsBefore).toISOString()))
+          ),
+        db.insert(oauthClients).values({
+          id: client.id,
+          name: client.name,
+          redirectUris: JSON.stringify(client.redirectUris),
+          secretHash: client.secretHash,
+          createdAt: new Date(now).toISOString(),
+        }),
+      ]);
     },
     async findClient(id) {
       const row = await db.select().from(oauthClients).where(eq(oauthClients.id, id)).get();
@@ -85,8 +110,14 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
       const rows = await db.delete(oauthCodes).where(eq(oauthCodes.codeHash, codeHash)).returning();
       return rows[0] ?? null;
     },
-    async createGrant(grant) {
-      await db.insert(oauthGrants).values(grant);
+    async createGrant(grant, now) {
+      await db.batch([
+        db.insert(oauthGrants).values(grant),
+        db
+          .update(oauthClients)
+          .set({ authorizedAt: now })
+          .where(and(eq(oauthClients.id, grant.clientId), isNull(oauthClients.authorizedAt))),
+      ]);
     },
     async rotateGrant(refreshTokenHash, clientId, next, now) {
       const rows = await db
@@ -102,12 +133,12 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
         .returning({ scope: oauthGrants.scope });
       return rows[0] ?? null;
     },
-    async listGrants(userId) {
+    async listGrants(userId, now) {
       return db
         .select({ id: oauthGrants.id, clientName: oauthClients.name, createdAt: oauthGrants.createdAt })
         .from(oauthGrants)
         .innerJoin(oauthClients, eq(oauthGrants.clientId, oauthClients.id))
-        .where(eq(oauthGrants.userId, userId))
+        .where(and(eq(oauthGrants.userId, userId), gt(oauthGrants.refreshExpiresAt, now)))
         .orderBy(desc(oauthGrants.createdAt));
     },
     async deleteGrant(userId, id) {

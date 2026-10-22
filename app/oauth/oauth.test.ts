@@ -11,6 +11,7 @@ import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
 import { oauthServerRoutes, oauthSessionRoutes } from "./index";
 import type { OAuthClient, OAuthCode, OAuthGrant, OAuthStore } from "./store";
+import { REFRESH_TOKEN_TTL_MS } from "./protocol";
 import { hashToken } from "../utils/tokenHash";
 
 const ORIGIN = "http://edane.test";
@@ -20,12 +21,15 @@ const CHALLENGE = createHash("sha256").update(VERIFIER).digest("base64url");
 const ALICE: SessionUser = { id: "alice", email: "alice@example.com", name: "Alice", avatarUrl: "" };
 
 function memoryStore() {
-  const clients = new Map<string, OAuthClient>();
+  const clients = new Map<string, OAuthClient & { createdAt: number; authorizedAt: number | null }>();
   const codes = new Map<string, OAuthCode>();
   const grants = new Map<string, OAuthGrant & { createdAt: string }>();
   const store: OAuthStore = {
-    async createClient(c) {
-      clients.set(c.id, c);
+    async createClient(c, { now, unauthorizedClientsBefore }) {
+      for (const [k, code] of codes) if (code.expiresAt <= now) codes.delete(k);
+      for (const [k, g] of grants) if (g.refreshExpiresAt <= now) grants.delete(k);
+      for (const [k, cl] of clients) if (cl.authorizedAt === null && cl.createdAt < unauthorizedClientsBefore) clients.delete(k);
+      clients.set(c.id, { ...c, createdAt: now, authorizedAt: null });
     },
     async findClient(id) {
       return clients.get(id) ?? null;
@@ -38,8 +42,9 @@ function memoryStore() {
       codes.delete(h);
       return c;
     },
-    async createGrant(g) {
+    async createGrant(g, now) {
       grants.set(g.id, { ...g, createdAt: "t0" });
+      clients.get(g.clientId)!.authorizedAt ??= now;
     },
     async rotateGrant(refreshHash, clientId, next, now) {
       for (const g of grants.values()) {
@@ -50,9 +55,9 @@ function memoryStore() {
       }
       return null;
     },
-    async listGrants(userId) {
+    async listGrants(userId, now) {
       return [...grants.values()]
-        .filter((g) => g.userId === userId)
+        .filter((g) => g.userId === userId && g.refreshExpiresAt > now)
         .map((g) => ({ id: g.id, clientName: clients.get(g.clientId)!.name, createdAt: g.createdAt }));
     },
     async deleteGrant(userId, id) {
@@ -68,7 +73,8 @@ function memoryStore() {
 function setup(user: SessionUser | null = ALICE) {
   const mem = memoryStore();
   let now = 1_000_000;
-  const deps = { store: () => mem.store, now: () => now };
+  let registrationAllowed = true;
+  const deps = { store: () => mem.store, now: () => now, allowRegistration: async () => registrationAllowed };
   const app = new Hono<Env>()
     .route("/", oauthServerRoutes(deps))
     .use("*", async (c, next) => {
@@ -78,7 +84,14 @@ function setup(user: SessionUser | null = ALICE) {
     .use(inertia())
     .route("/", oauthSessionRoutes(deps));
   const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${path}`, init);
-  return { ...mem, req, advance: (ms: number) => (now += ms) };
+  return {
+    ...mem,
+    req,
+    advance: (ms: number) => (now += ms),
+    limitRegistration: () => {
+      registrationAllowed = false;
+    },
+  };
 }
 
 const form = (fields: Record<string, string>) => ({
@@ -293,5 +306,39 @@ describe("connected apps", () => {
 
     expect((await t.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE" })).status).toBe(200);
     expect(t.grants.size).toBe(0);
+  });
+});
+
+describe("housekeeping", () => {
+  it("rate-limits dynamic client registration", async () => {
+    const t = setup();
+    t.limitRegistration();
+    const res = await t.req("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [REDIRECT] }),
+    });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    expect(t.clients.size).toBe(0);
+  });
+
+  it("purges expired codes and grants and never-authorized clients, keeping authorized ones", async () => {
+    const t = setup();
+    const authorized = await register(t);
+    const abandoned = await register(t);
+    await exchange(t, { grant_type: "authorization_code", code: await approve(t, authorized.client_id), client_id: authorized.client_id, code_verifier: VERIFIER });
+    await approve(t, authorized.client_id); // never exchanged
+
+    t.advance(REFRESH_TOKEN_TTL_MS);
+    // The grant is past its refresh token: hidden at once, deleted by the next registration.
+    expect(await (await t.req("/api/oauth/grants")).json()).toEqual([]);
+    await register(t);
+
+    expect(t.codes.size).toBe(0);
+    expect(t.grants.size).toBe(0);
+    expect(t.clients.has(abandoned.client_id)).toBe(false);
+    // Reconnecting with the same client still works after its grant is gone.
+    expect(t.clients.has(authorized.client_id)).toBe(true);
   });
 });

@@ -24,6 +24,7 @@ import {
   CODE_TTL_MS,
   REFRESH_TOKEN_PREFIX,
   REFRESH_TOKEN_TTL_MS,
+  UNAUTHORIZED_CLIENT_TTL_MS,
   authorizationServerMetadata,
   authorizeResponseUrl,
   parseBasicCredentials,
@@ -38,14 +39,23 @@ import {
 export interface OAuthDeps {
   store(env: Env["Bindings"]): OAuthStore;
   now(): number;
+  /** 動的クライアント登録を受けてよいか（IP ごとのレート制限）。false = 429。 */
+  allowRegistration(c: Context<Env>): Promise<boolean>;
 }
 
-const defaultDeps: OAuthDeps = { store: d1OAuthStore, now: () => Date.now() };
+const defaultDeps: OAuthDeps = {
+  store: d1OAuthStore,
+  now: () => Date.now(),
+  async allowRegistration(c) {
+    const key = c.req.header("CF-Connecting-IP") ?? "unknown";
+    return (await c.env.OAUTH_REGISTER_LIMITER.limit({ key })).success;
+  },
+};
 
 const originOf = (c: Context) => new URL(c.req.url).origin;
 
 /** RFC 6749 §5.2 のエラー応答。 */
-function oauthError(c: Context, status: 400 | 401, error: string, error_description: string) {
+function oauthError(c: Context, status: 400 | 401 | 429, error: string, error_description: string) {
   c.header("Cache-Control", "no-store");
   if (status === 401) c.header("WWW-Authenticate", 'Basic realm="edane"');
   return c.json({ error, error_description }, status);
@@ -125,24 +135,27 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
     "/oauth/register",
     bodyLimit({ maxSize: 16 * 1024, onError: (c) => oauthError(c, 400, "invalid_client_metadata", "Too large") }),
     async (c) => {
+      if (!(await deps.allowRegistration(c))) {
+        c.header("Retry-After", "60");
+        return oauthError(c, 429, "too_many_requests", "Too many registrations; retry later");
+      }
+      const now = deps.now();
       const body = await c.req.json().catch(() => null);
       const parsed = parseRegistration(body);
       if (!parsed.ok) return c.json(parsed.error, 400);
       const { name, redirectUris, authMethod } = parsed.value;
       const id = crypto.randomUUID();
       const secret = authMethod === "none" ? null : randomToken(CLIENT_SECRET_PREFIX);
-      await deps.store(c.env).createClient({
-        id,
-        name,
-        redirectUris,
-        secretHash: secret ? await hashToken(secret) : null,
-      });
+      await deps.store(c.env).createClient(
+        { id, name, redirectUris, secretHash: secret ? await hashToken(secret) : null },
+        { now, unauthorizedClientsBefore: now - UNAUTHORIZED_CLIENT_TTL_MS }
+      );
       c.header("Cache-Control", "no-store");
       return c.json(
         {
           client_id: id,
           ...(secret ? { client_secret: secret, client_secret_expires_at: 0 } : {}),
-          client_id_issued_at: Math.floor(deps.now() / 1000),
+          client_id_issued_at: Math.floor(now / 1000),
           client_name: name,
           redirect_uris: redirectUris,
           grant_types: ["authorization_code", "refresh_token"],
@@ -171,7 +184,7 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
         if (!exchange.ok) return oauthError(c, 400, exchange.error.error, exchange.error.error_description);
         const { code } = exchange;
         const tokens = await issueTokens(now);
-        await store.createGrant({ id: crypto.randomUUID(), clientId: client.id, userId: code.userId, scope: code.scope, ...tokens.pair });
+        await store.createGrant({ id: crypto.randomUUID(), clientId: client.id, userId: code.userId, scope: code.scope, ...tokens.pair }, now);
         return tokenResponse(c, tokens, code.scope);
       }
 
@@ -294,7 +307,7 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
   r.get("/api/oauth/grants", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
-    return c.json(await deps.store(c.env).listGrants(user.id));
+    return c.json(await deps.store(c.env).listGrants(user.id, deps.now()));
   });
   r.delete("/api/oauth/grants/:id", async (c) => {
     const user = c.get("user");

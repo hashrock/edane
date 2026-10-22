@@ -148,7 +148,7 @@ edane 自身が OAuth 2.1 の認可サーバーになる（MCP の認可仕様�
 |---|---|
 | `GET /.well-known/oauth-protected-resource/mcp`（とルート） | 保護リソースのメタデータ（RFC 9728）。`/mcp` の 401 の `WWW-Authenticate` の `resource_metadata` がここを指す |
 | `GET /.well-known/oauth-authorization-server` | 認可サーバーのメタデータ（RFC 8414） |
-| `POST /oauth/register` | 動的クライアント登録（RFC 7591）。既定は公開クライアント、`client_secret_post` / `client_secret_basic` を求められればシークレットも発行 |
+| `POST /oauth/register` | 動的クライアント登録（RFC 7591）。既定は公開クライアント、`client_secret_post` / `client_secret_basic` を求められればシークレットも発行。IP ごとに 1 分 10 件まで（超えると 429）。誰にも許可されなかったクライアントは 1 日で消える |
 | `GET /oauth/authorize` | 同意画面。未ログインなら Google ログインを挟んで戻ってくる。PKCE（S256）必須 |
 | `POST /oauth/token` | `authorization_code` と `refresh_token`。アクセストークン 1 時間、リフレッシュトークンは使うたびに入れ替わり 90 日 |
 
