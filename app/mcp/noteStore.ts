@@ -74,9 +74,26 @@ export function d1NoteStore(env: Env["Bindings"]): NoteStore {
       try {
         await noteRoom(env, note.id).commit({ noteId: note.id, userId }, { id: crypto.randomUUID(), patch });
       } catch (e) {
-        // 併合できない競合などは NoteRoom の文言のまま返す（競合なら読み直しを促す文言が付いている）。
-        throw new ToolInputError((e as Error).message);
+        const rejection = commitRejection(note.id, (e as Error).message);
+        if (rejection === null) throw e;
+        throw new ToolInputError(rejection);
       }
     },
   };
+}
+
+/**
+ * NoteRoom が commit を断った理由のうち、エージェントに返してよいもの（読み直せば
+ * 済む・入力を小さくすれば済む）を、エージェント向けの文言にする。それ以外（D1 の障害
+ * など）は null — 内部エラーのまま返し、中身を見せない。RPC 越しに例外の型は残らない
+ * ので文言で判別する（文言は app/sync/room.ts と application/syncOperations.ts のもの）。
+ */
+export function commitRejection(noteId: string, message: string): string | null {
+  if (message.startsWith("Concurrent change: ")) return message; // 読み直しの指示が付いている
+  if (message.startsWith("Note changed or was deleted")) {
+    return `Note ${noteId} changed or was deleted during the edit. Read the note again and retry.`;
+  }
+  if (message === "Note unavailable") return `Note not found: ${noteId}`;
+  if (message === "Commit exceeds 1 MB") return "The edit is too large (over 1 MB). Split it into smaller edits.";
+  return null;
 }
