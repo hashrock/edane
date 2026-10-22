@@ -4,6 +4,10 @@ import type { SessionUser } from "../user";
 import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
 import { siteEditPath } from "../application/siteTemplate";
+import {
+  mcpClientConfigs,
+  type McpClientId,
+} from "../application/mcpClientConfigs";
 import { copyText } from "../lib/clipboard";
 import { formatBytes } from "../lib/formatBytes";
 import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
@@ -63,6 +67,8 @@ export default function Settings({ user }: { user: User }) {
 
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [newToken, setNewToken] = useState<string | null>(null);
+  const [mcpClient, setMcpClient] = useState<McpClientId>("claude-code");
+  const [copiedMcpSnippet, setCopiedMcpSnippet] = useState(false);
 
   const [publications, setPublications] = useState<Publication[]>([]);
   const [copiedPubUrl, setCopiedPubUrl] = useState<string | null>(null);
@@ -408,9 +414,54 @@ export default function Settings({ user }: { user: User }) {
               <div className="mt-2 text-xs text-amber-800">
                 {t("mcpTokenHint", { url: `${window.location.origin}/mcp` })}
               </div>
-              <code className="mt-1 block break-all rounded bg-white px-2 py-1 text-xs">
-                {`claude mcp add --transport http edane ${window.location.origin}/mcp --header "Authorization: Bearer ${newToken}"`}
-              </code>
+              {(() => {
+                const configs = mcpClientConfigs(
+                  `${window.location.origin}/mcp`,
+                  newToken
+                );
+                const config =
+                  configs.find((c) => c.id === mcpClient) ?? configs[0];
+                return (
+                  <>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {configs.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => {
+                            setMcpClient(c.id);
+                            setCopiedMcpSnippet(false);
+                          }}
+                          className={`rounded border px-2 py-0.5 text-xs ${
+                            c.id === config.id
+                              ? "border-amber-500 bg-amber-100 font-medium text-amber-900"
+                              : "border-amber-200 bg-white text-amber-800 hover:bg-amber-100"
+                          }`}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    {config.file && (
+                      <div className="mt-2 text-xs text-amber-800">
+                        {t("mcpConfigFile", { file: config.file })}
+                      </div>
+                    )}
+                    <div className="relative mt-1">
+                      <pre className="overflow-x-auto whitespace-pre rounded bg-white px-2 py-1 pr-14 text-xs">
+                        {config.snippet}
+                      </pre>
+                      <button
+                        onClick={async () =>
+                          setCopiedMcpSnippet(await copyText(config.snippet))
+                        }
+                        className="absolute right-1 top-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                      >
+                        {copiedMcpSnippet ? t("copied") : t("copy")}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white">

@@ -5,14 +5,113 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 ## 接続
 
 1. 設定画面（`/settings`）の「APIトークン」で「新規作成」を押し、表示されたトークン（`edane_…`）を控える。トークンは発行時にしか表示されない。
-2. クライアントに URL とヘッダーを登録する:
+2. クライアントに URL とヘッダーを登録する。設定画面はトークン発行直後に、下のクライアントごとの設定例をトークン入りで表示する（`app/application/mcpClientConfigs.ts`）。
 
-   ```bash
-   claude mcp add --transport http edane https://edane.hashrock.info/mcp \
-     --header "Authorization: Bearer edane_xxxxxxxx"
-   ```
+   ヘッダーを付けられるクライアントなら、どれでも同じ URL とヘッダーで接続できる。以下の `edane_xxxxxxxx` は発行したトークンに置き換える。
 
-   ヘッダーを付けられるクライアントなら、どれでも同じ設定で接続できる。
+### Claude Code
+
+```bash
+claude mcp add --transport http edane https://edane.hashrock.info/mcp \
+  --header "Authorization: Bearer edane_xxxxxxxx"
+```
+
+### Claude Desktop
+
+カスタムコネクタはヘッダーを付けられないので、[mcp-remote](https://www.npmjs.com/package/mcp-remote) で stdio に橋渡しする（Node.js が必要）。`claude_desktop_config.json`（設定 → 開発者 → 構成を編集）に追記する。ヘッダー値は空白を含むので env 経由で渡す。
+
+```json
+{
+  "mcpServers": {
+    "edane": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://edane.hashrock.info/mcp", "--header", "Authorization:${EDANE_AUTH}"],
+      "env": { "EDANE_AUTH": "Bearer edane_xxxxxxxx" }
+    }
+  }
+}
+```
+
+### Cursor
+
+`~/.cursor/mcp.json`（プロジェクト単位なら `.cursor/mcp.json`）:
+
+```json
+{
+  "mcpServers": {
+    "edane": {
+      "url": "https://edane.hashrock.info/mcp",
+      "headers": { "Authorization": "Bearer edane_xxxxxxxx" }
+    }
+  }
+}
+```
+
+### VS Code（GitHub Copilot のエージェントモード）
+
+`.vscode/mcp.json`（ユーザー設定なら「MCP: Open User Configuration」）。キーが `servers` で `type` が必要な点が他と違う:
+
+```json
+{
+  "servers": {
+    "edane": {
+      "type": "http",
+      "url": "https://edane.hashrock.info/mcp",
+      "headers": { "Authorization": "Bearer edane_xxxxxxxx" }
+    }
+  }
+}
+```
+
+### Windsurf
+
+`~/.codeium/windsurf/mcp_config.json`。URL のキーは `serverUrl`:
+
+```json
+{
+  "mcpServers": {
+    "edane": {
+      "serverUrl": "https://edane.hashrock.info/mcp",
+      "headers": { "Authorization": "Bearer edane_xxxxxxxx" }
+    }
+  }
+}
+```
+
+### Codex CLI
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.edane]
+url = "https://edane.hashrock.info/mcp"
+http_headers = { Authorization = "Bearer edane_xxxxxxxx" }
+```
+
+トークンを設定ファイルに書きたくなければ、`http_headers` の代わりに `bearer_token_env_var = "EDANE_TOKEN"` として環境変数 `EDANE_TOKEN` にトークンを入れる。
+
+### Gemini CLI
+
+`~/.gemini/settings.json`。Streamable HTTP の URL のキーは `httpUrl`（`url` は SSE 用）:
+
+```json
+{
+  "mcpServers": {
+    "edane": {
+      "httpUrl": "https://edane.hashrock.info/mcp",
+      "headers": { "Authorization": "Bearer edane_xxxxxxxx" }
+    }
+  }
+}
+```
+
+### MCP Inspector（動作確認）
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+Transport Type を「Streamable HTTP」、URL を `https://edane.hashrock.info/mcp` にし、Authentication の Header Name に `Authorization`、Bearer Token にトークンを入れて Connect する。
 
 トークンを失効させるには設定画面で削除する。トークンを持っている人はそのユーザーの全ノートを読み書きできる。
 
