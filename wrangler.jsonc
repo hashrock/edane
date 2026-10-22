@@ -17,6 +17,10 @@
   "durable_objects": { "bindings": [{ "name": "NOTE_ROOMS", "class_name": "NoteRoom" }] },
   "migrations": [{ "tag": "note-sync-v1", "new_sqlite_classes": ["NoteRoom"] }],
   "ai": { "binding": "AI", "remote": true },
+  // POST /oauth/register (open dynamic client registration): per IP, 10 per minute.
+  "ratelimits": [
+    { "name": "OAUTH_REGISTER_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
+  ],
   "r2_buckets": [
     {
       "binding": "IMAGES",

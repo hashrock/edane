@@ -111,6 +111,11 @@ export const oauthClients = sqliteTable("oauth_clients", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+  /**
+   * Epoch ms of the first approved grant. Null = never authorized: such a
+   * client is purged after a day (registration is open), an authorized one is kept.
+   */
+  authorizedAt: integer("authorized_at"),
 });
 
 /** Authorization codes: single use (deleted on exchange), short-lived. */
