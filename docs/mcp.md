@@ -56,3 +56,10 @@ pnpm dev
 curl -s localhost:5173/mcp -H "Authorization: Bearer edane_xxx" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_notes","arguments":{}}}'
 ```
+
+Claude Code から MCP で編集し、開いているエディタへの反映（リロードなし）と、エディタで入力中の同時編集の併合までを実通信で確かめるスクリプト。トークンは dev の認証バイパスで自動発行し、MCP の設定は一時ファイルを `--mcp-config` で渡すだけなので Claude Code の設定には書かない。
+
+```bash
+pnpm dev --port 5199 --strictPort &
+node scripts/mcp-live-e2e.mjs   # 接続先は EDANE_BASE_URL で変えられる。PATH 上に claude が必要
+```
