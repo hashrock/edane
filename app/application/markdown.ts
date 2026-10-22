@@ -191,16 +191,20 @@ function nodeToMarkdownText(node: MindMapModel): string {
  * The given node is the top-level item; children nest two spaces deeper per
  * level. Text nodes honour their `bold` flag; image/link nodes become their
  * Markdown image/link syntax, and a task node keeps its checkbox as a GFM
- * `- [ ]` / `- [x]` marker.
+ * `- [ ]` / `- [x]` marker. `annotate` appends to each node's line (the MCP
+ * outline puts the node id there).
  */
-export function modelToMarkdown(node: MindMapModel): string {
+export function modelToMarkdown(
+  node: MindMapModel,
+  annotate: (n: MindMapModel) => string = () => ""
+): string {
   const lines: string[] = [];
   const walk = (n: MindMapModel, depth: number) => {
     // Task state rides on the list marker (GFM), so a task node round-trips
     // through markdownToModel as a task rather than as literal text.
     const box =
       n.checked === undefined ? "" : n.checked ? "[x] " : "[ ] ";
-    lines.push(`${"  ".repeat(depth)}- ${box}${nodeToMarkdownText(n)}`);
+    lines.push(`${"  ".repeat(depth)}- ${box}${nodeToMarkdownText(n)}${annotate(n)}`);
     for (const child of n.children) walk(child, depth + 1);
   };
   walk(node, 0);

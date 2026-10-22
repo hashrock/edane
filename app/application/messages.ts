@@ -315,10 +315,12 @@ export const MESSAGES_JA = {
   revoke: "解除",
   publicationsFootnote:
     "公開URLは枝（ノードとその子孫）の最新内容を JSON / Markdown で配信します。解除するとURLは無効になり、再公開すると新しいURLが発行されます。",
-  apiTokensHeading: "APIトークン（デスクトップアプリ用）",
+  apiTokensHeading: "APIトークン（デスクトップアプリ・MCP用）",
   createNew: "新規作成",
   tokenIssued: "トークンを発行しました（この画面でしか確認できません）",
   noTokens: "トークンはありません",
+  mcpTokenHint:
+    "リモートMCP: {url} に Authorization: Bearer <トークン> で接続すると、AIエージェントからノートを読み書きできます。Claude Code なら:",
   deleteAction: "削除",
 
   // --- ノート一覧 ---
@@ -681,10 +683,12 @@ export const MESSAGES_EN = {
   revoke: "Revoke",
   publicationsFootnote:
     "Public URLs serve the branch's (node and its descendants) latest content as JSON / Markdown. Revoking invalidates the URL; publishing again issues a new one.",
-  apiTokensHeading: "API tokens (for the desktop app)",
+  apiTokensHeading: "API tokens (for the desktop app and MCP)",
   createNew: "Create new",
   tokenIssued: "Token created (it is only shown on this screen)",
   noTokens: "No tokens",
+  mcpTokenHint:
+    "Remote MCP: connect to {url} with Authorization: Bearer <token> to let an AI agent read and edit your notes. With Claude Code:",
   deleteAction: "Delete",
 
   // --- Notes index ---

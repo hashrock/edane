@@ -514,6 +514,21 @@ describe("insertNodes", () => {
     expect(next.view.activeNodeId).toBe("n2");
   });
 
+  it("with into, appends as the target's last children and expands it", () => {
+    const model = sampleModel();
+    const nodes: MindMapModel[] = [{ id: "n1", text: "X", children: [] }];
+    const next = editorReducer(stateAt(model, "a1"), {
+      type: "insertNodes",
+      targetId: "a1",
+      nodes,
+      into: true,
+    });
+    const a1 = findNode(next.document.model, "a1")!;
+    expect(a1.children.map((c) => c.id)).toEqual(["n1"]);
+    expect(a1.collapsed).toBe(false);
+    expect(findNode(next.document.model, "a")!.children.map((c) => c.id)).toEqual(["a1"]);
+  });
+
   it("inserts under a tree root as its children — never as new trees", () => {
     const model = sampleModel();
     const nodes: MindMapModel[] = [{ id: "n1", text: "X", children: [] }];
