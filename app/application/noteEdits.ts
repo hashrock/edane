@@ -15,7 +15,7 @@
  * later edit can name the node it targets.
  */
 import type { IdSource, MindMapDocument, MindMapModel } from "../domain/model";
-import { ensureRoot, findNode, firstRootId, generateId } from "../domain/model";
+import { findNode, firstRootId, generateId } from "../domain/model";
 import { assertNever } from "../lib/assertNever";
 import { editorReducer, freshEditorState, type EditorAction } from "./editorReducer";
 import { markdownToModel, modelToMarkdown } from "./markdown";
@@ -37,7 +37,7 @@ export function documentFromMarkdown(
 ): MindMapDocument {
   const nodes = nodesFromMarkdown(md, nextId);
   const roots = nodes.length === 1 ? nodes : [{ id: nextId(), text: title, children: nodes }];
-  return ensureRoot({ title, roots }, nextId);
+  return { title, roots };
 }
 
 /**

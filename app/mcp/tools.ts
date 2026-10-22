@@ -2,7 +2,7 @@
  * edane の MCP ツール。ノートの読み書きは application/noteEdits.ts（reducer 経由の純粋な
  * 変換）に任せ、ここは「引数を検証 → ノートを読む → 変換 → 保存 → 結果を文章で返す」だけ。
  */
-import { CONTENT_FORMAT_VERSION, parseContent, serializeDocument } from "../application/persistence";
+import { CONTENT_FORMAT_VERSION } from "../application/persistence";
 import { absoluteUrl } from "../lib/url";
 import {
   applyNoteEdit,
@@ -50,9 +50,9 @@ async function loadNote(ctx: ToolContext, args: Args): Promise<StoredNote> {
 /** 読んで、編集を当てて、保存して、編集後のアウトラインを返す。 */
 async function editNote(ctx: ToolContext, args: Args, edit: NoteEdit): Promise<ToolResult> {
   const note = await loadNote(ctx, args);
-  const result = applyNoteEdit(parseContent(note.content, note.title), edit);
+  const result = applyNoteEdit(note.doc, edit);
   if (!result.ok) throw new ToolInputError(result.error);
-  await ctx.store.saveContent(ctx.userId, note, serializeDocument(result.document));
+  await ctx.store.save(ctx.userId, note, result.document);
   const created = result.nodeIds ? `Added node ids: ${result.nodeIds.join(", ")}\n\n` : "";
   return textResult(`${created}${documentToOutline(result.document)}`);
 }
@@ -94,7 +94,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       const format = optionalString(args, "format") ?? "outline";
       if (format !== "outline" && format !== "json") throw new ToolInputError("format must be outline or json");
       const note = await loadNote(ctx, args);
-      const doc = parseContent(note.content, note.title);
+      const { doc } = note;
       if (format === "json") {
         return textResult(JSON.stringify({ title: doc.title, version: CONTENT_FORMAT_VERSION, roots: doc.roots }, null, 2));
       }
@@ -114,7 +114,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
       const doc = documentFromMarkdown(title, optionalString(args, "markdown") ?? "");
-      const { id } = await ctx.store.create(ctx.userId, { title, content: serializeDocument(doc) });
+      const { id } = await ctx.store.create(ctx.userId, doc);
       return textResult(`Created note ${id}\nurl: ${noteUrl(ctx, id)}\n\n${documentToOutline(doc)}`);
     },
   },
@@ -126,8 +126,8 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     annotations: { idempotentHint: true },
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
-      const noteId = requiredString(args, "noteId");
-      if (!(await ctx.store.rename(ctx.userId, noteId, title))) throw new ToolInputError(`Note not found: ${noteId}`);
+      const note = await loadNote(ctx, args);
+      await ctx.store.save(ctx.userId, note, { ...note.doc, title });
       return textResult(`Renamed to "${title}"`);
     },
   },

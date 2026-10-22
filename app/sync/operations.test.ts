@@ -15,6 +15,12 @@ describe("shared note operation semantics", () => {
     expect(result.roots[0].children.map(n => n.text)).toEqual(["Alice", "Bob"]);
     expect(result.roots[0].children[0].bold).toBe(true);
   });
+  it("patches are plain data that survive structured clone, even for a __proto__ id", () => {
+    const patch = edit(d => { d.roots[0].children.push({ id: "__proto__", text: "P", children: [] }); });
+    const cloned = structuredClone(patch);
+    expect(Object.keys(cloned.nodes)).toContain("__proto__");
+    expect(applyPatch(base(), parseCommit({ id: "c1", patch: cloned }).patch).roots[0].children.map(n => n.id)).toEqual(["a", "b", "__proto__"]);
+  });
   it("rejects same-field conflicts atomically", () => {
     const a = edit(d => { d.roots[0].text = "Alice"; });
     const b = edit(d => { d.title = "Bad partial update"; d.roots[0].text = "Bob"; });

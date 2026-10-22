@@ -39,6 +39,7 @@ import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from ".
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
+import { noteRoom } from "./utils/noteRoom";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
 
@@ -112,8 +113,6 @@ app.get("/auth/logout", async (c) => {
 });
 
 // All editor writes go through the note coordinator, including legacy PUT.
-const noteRoom = (c: { env: Env["Bindings"] }, id: string) =>
-  c.env.NOTE_ROOMS.get(c.env.NOTE_ROOMS.idFromName(id));
 app.get("/api/notes/:id/sync", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -125,9 +124,9 @@ app.get("/api/notes/:id/sync", async (c) => {
     if (c.req.header("Origin") !== new URL(c.req.url).origin) return c.text("Invalid origin", 403);
     const headers = new Headers(c.req.raw.headers);
     headers.set("X-Note-Identity", JSON.stringify(identity));
-    return noteRoom(c, id).fetch(new Request(c.req.url, { headers }));
+    return noteRoom(c.env, id).fetch(new Request(c.req.url, { headers }));
   }
-  return c.json(await noteRoom(c, id).snapshot(identity));
+  return c.json(await noteRoom(c.env, id).snapshot(identity));
 });
 app.put("/api/notes/:id", async (c) => {
   const user = c.get("user");
@@ -139,7 +138,7 @@ app.put("/api/notes/:id", async (c) => {
   if (!Number.isSafeInteger(body.version)) return c.json({ error: "version required; GET /api/notes/:id/sync first" }, 428);
   if ((body.title !== undefined && typeof body.title !== "string") || (body.content !== undefined && typeof body.content !== "string") || (body.isPublic !== undefined && typeof body.isPublic !== "boolean")) return c.json({ error: "Invalid note" }, 400);
   try {
-    return c.json(await noteRoom(c, id).replace({ noteId: id, userId: user.id }, body));
+    return c.json(await noteRoom(c.env, id).replace({ noteId: id, userId: user.id }, body));
   } catch (error) {
     return c.json({ error: (error as Error).message }, 409);
   }
@@ -726,7 +725,7 @@ const routes = app
         .update(notes)
         .set({ deletedAt: new Date().toISOString() })
         .where(eq(notes.id, note.id));
-      await noteRoom(c, note.id).invalidate();
+      await noteRoom(c.env, note.id).invalidate();
     }
     return c.redirect("/notes", 303);
   })
@@ -757,7 +756,7 @@ const routes = app
         .delete(nodePublications)
         .where(eq(nodePublications.noteId, note.id));
       await db.delete(notes).where(eq(notes.id, note.id));
-      await noteRoom(c, note.id).invalidate();
+      await noteRoom(c.env, note.id).invalidate();
     }
     return c.redirect("/trash", 303);
   })

@@ -6,7 +6,6 @@
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "../global.d";
-import { serializeDocument, parseContent } from "../application/persistence";
 import { mcpRoutes } from "./index";
 import type { NoteStore, StoredNote } from "./noteStore";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol";
@@ -21,26 +20,20 @@ function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: 
     async list(userId) {
       return [...notes.values()]
         .filter((n) => n.userId === userId)
-        .map(({ id, title, isPublic, updatedAt }) => ({ id, title, isPublic, pinned: false, updatedAt }));
+        .map(({ id, doc, updatedAt }) => ({ id, title: doc.title, isPublic: false, pinned: false, updatedAt }));
     },
     async load(userId, noteId) {
       const n = notes.get(noteId);
       return n && n.userId === userId ? n : null;
     },
-    async create(userId, { title, content }) {
+    async create(userId, doc) {
       const id = `note${seq++}`;
-      notes.set(id, { id, userId, title, content, isPublic: false, updatedAt: "t0" });
+      notes.set(id, { id, userId, doc, updatedAt: "t0" });
       return { id };
     },
-    async saveContent(userId, note, content) {
+    async save(userId, note, after) {
       const n = notes.get(note.id);
-      if (n && n.userId === userId) notes.set(note.id, { ...n, content, updatedAt: "t1" });
-    },
-    async rename(userId, noteId, title) {
-      const n = notes.get(noteId);
-      if (!n || n.userId !== userId) return false;
-      notes.set(noteId, { ...n, title, updatedAt: "t1" });
-      return true;
+      if (n && n.userId === userId) notes.set(note.id, { ...n, doc: after, updatedAt: "t1" });
     },
   };
 }
@@ -50,15 +43,18 @@ function setup() {
   store.notes.set("n1", {
     id: "n1",
     userId: "alice",
-    title: "Groceries",
-    isPublic: false,
     updatedAt: "t0",
-    content: serializeDocument({
+    doc: {
       title: "Groceries",
       roots: [{ id: "r", text: "Groceries", children: [{ id: "milk", text: "milk", children: [], checked: false }] }],
-    }),
+    },
   });
-  store.notes.set("n2", { id: "n2", userId: "bob", title: "Bob's", isPublic: false, updatedAt: "t0", content: "" });
+  store.notes.set("n2", {
+    id: "n2",
+    userId: "bob",
+    updatedAt: "t0",
+    doc: { title: "Bob's", roots: [{ id: "b", text: "", children: [] }] },
+  });
   const app = new Hono<Env>().route(
     "/mcp",
     mcpRoutes({
@@ -83,10 +79,7 @@ function setup() {
     const json = (await res.json()) as { result: { content: { text: string }[]; isError?: boolean } };
     return { text: json.result.content[0].text, isError: json.result.isError === true };
   };
-  const docOf = (noteId: string) => {
-    const n = store.notes.get(noteId)!;
-    return parseContent(n.content, n.title);
-  };
+  const docOf = (noteId: string) => store.notes.get(noteId)!.doc;
   return { app, store, post, call, docOf };
 }
 
@@ -174,7 +167,7 @@ describe("note tools", () => {
     const { call, docOf, store } = setup();
     const created = await call("create_note", { title: "Trip", markdown: "- pack\n- book hotel" });
     const id = /Created note (\S+)/.exec(created.text)![1];
-    expect(store.notes.get(id)!.title).toBe("Trip");
+    expect(store.notes.get(id)!.doc.title).toBe("Trip");
     const root = docOf(id).roots[0];
     expect(root.text).toBe("Trip");
     expect(root.children.map((c) => c.text)).toEqual(["pack", "book hotel"]);
@@ -191,19 +184,19 @@ describe("note tools", () => {
     expect(docOf(id).roots[0].children.map((c) => c.text)).toEqual(["pack"]);
 
     await call("rename_note", { noteId: id, title: "Trip 2" });
-    expect(store.notes.get(id)!.title).toBe("Trip 2");
+    expect(store.notes.get(id)!.doc.title).toBe("Trip 2");
   });
 
   it("returns misuse as isError results without saving", async () => {
     const { call, store } = setup();
-    const before = store.notes.get("n1")!.content;
+    const before = store.notes.get("n1")!.doc;
     expect(await call("update_node", { noteId: "n1", nodeId: "milk" })).toMatchObject({ isError: true });
     expect(await call("update_node", { noteId: "n1", nodeId: "milk", checked: "yes" })).toMatchObject({ isError: true });
     expect(await call("delete_node", { noteId: "n1", nodeId: "ghost" })).toMatchObject({ isError: true });
     expect(await call("add_nodes", { noteId: "n1", markdown: "   " })).toMatchObject({ isError: true });
     expect(await call("read_note", {})).toMatchObject({ isError: true });
     expect(await call("rename_note", { noteId: "n2", title: "mine" })).toMatchObject({ isError: true });
-    expect(store.notes.get("n2")!.title).toBe("Bob's");
-    expect(store.notes.get("n1")!.content).toBe(before);
+    expect(store.notes.get("n2")!.doc.title).toBe("Bob's");
+    expect(store.notes.get("n1")!.doc).toBe(before);
   });
 });

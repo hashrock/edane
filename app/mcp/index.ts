@@ -22,7 +22,7 @@ export interface McpDeps {
 
 const defaultDeps: McpDeps = {
   resolveUserId: getUserIdByToken,
-  store: (env) => d1NoteStore(env),
+  store: d1NoteStore,
 };
 
 /** 1 リクエストに詰められる JSON-RPC メッセージの上限（旧版のバッチ用）。 */
