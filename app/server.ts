@@ -48,8 +48,12 @@ import { aiSuggestAllowed } from "./utils/aiQuota";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
+import { securityHeaders } from "./utils/securityHeaders";
 
 const app = new Hono<Env>();
+
+// Baseline headers (CSP frame-ancestors / script-src, nosniff) on every response.
+app.use("*", securityHeaders);
 
 // --- Signup stats for the repos.hashrock.info admin (Bearer STATS_TOKEN) ---
 // Mounted before the session middleware on purpose: it must not depend on
