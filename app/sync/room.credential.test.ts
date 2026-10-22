@@ -21,7 +21,7 @@ describe("NoteRoom credential check", () => {
     env = { DB: sqliteD1(), ENCRYPTION_KEY: KEY } as Env["Bindings"];
     const db = drizzle(env.DB);
     await insertUser(db, alice);
-    await insertNote(db, { id: "n1", userId: "alice", title: "T", plainContent: "a", isPublic: false, now: "2026-01-01" }, KEY);
+    await insertNote(db, { id: "n1", userId: "alice", title: "T", plainContent: "a", isPublic: false, now: "2026-01-01" }, { current: KEY });
     await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('s1', 'alice', 'x', ?)")
       .bind(Date.now() + 60_000)
       .run();

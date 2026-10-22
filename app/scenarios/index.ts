@@ -12,6 +12,7 @@
  * ログイン中ユーザーのデータとして作る（response.ts の `resolveScenarioAccess`）。
  * Cookie やミドルウェアをここで直接触ることはない。
  */
+import { noteKeys } from "../utils/crypto";
 import { Hono } from "hono";
 import { html } from "hono/html";
 import { drizzle } from "drizzle-orm/d1";
@@ -104,7 +105,7 @@ ${status}
           await auth.signIn(c, actor.user);
         }
         const plan = access.scenario.build({ tag, nextId: generateId });
-        await applyScenarioPlan(db, plan, actor.user.id, c.env.ENCRYPTION_KEY);
+        await applyScenarioPlan(db, plan, actor.user.id, noteKeys(c.env));
         if (!json) return c.redirect(plan.redirect, 303);
         const origin = new URL(c.req.url).origin;
         return c.json(describePlan(access.scenario, plan, tag, actor, origin));

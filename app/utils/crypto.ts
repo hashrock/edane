@@ -12,58 +12,49 @@
  */
 
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import { hashToken } from "./tokenHash";
 
 const ALGO = "AES-GCM";
 const IV_LENGTH = 12; // 96-bit IV for AES-GCM
 
-async function deriveKey(secret: string): Promise<CryptoKey> {
-  const raw = new TextEncoder().encode(secret);
-  const hash = await crypto.subtle.digest("SHA-256", raw);
-  return crypto.subtle.importKey("raw", hash, { name: ALGO }, false, [
-    "encrypt",
-    "decrypt",
-  ]);
-}
-
-export async function encrypt(
-  plaintext: string,
-  secret: string
-): Promise<string> {
-  const key = await deriveKey(secret);
+/** AES-GCM with a fresh random IV; stored as base64(iv + ciphertext + tag). Shared by v1 and v2. */
+async function seal(key: CryptoKey, plaintext: string, additionalData?: Uint8Array): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const encoded = new TextEncoder().encode(plaintext);
-
   const ciphertext = await crypto.subtle.encrypt(
-    { name: ALGO, iv },
+    { name: ALGO, iv, ...(additionalData ? { additionalData } : {}) },
     key,
-    encoded
+    new TextEncoder().encode(plaintext)
   );
-
-  // Concatenate iv + ciphertext into a single buffer
   const combined = new Uint8Array(iv.length + ciphertext.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(ciphertext), iv.length);
-
   return bytesToBase64(combined);
 }
 
-export async function decrypt(
-  encoded: string,
-  secret: string
-): Promise<string> {
-  const key = await deriveKey(secret);
-  const combined = base64ToBytes(encoded);
-
-  const iv = combined.slice(0, IV_LENGTH);
-  const ciphertext = combined.slice(IV_LENGTH);
-
+/** Inverse of {@link seal}; throws if the key or the additional data don't match. */
+async function open(key: CryptoKey, sealed: string, additionalData?: Uint8Array): Promise<string> {
+  const combined = base64ToBytes(sealed);
   const plaintext = await crypto.subtle.decrypt(
-    { name: ALGO, iv },
+    { name: ALGO, iv: combined.slice(0, IV_LENGTH), ...(additionalData ? { additionalData } : {}) },
     key,
-    ciphertext
+    combined.slice(IV_LENGTH)
   );
-
   return new TextDecoder().decode(plaintext);
+}
+
+/** v1 key: SHA-256 of the secret (legacy; kept for reading). */
+async function deriveKey(secret: string): Promise<CryptoKey> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", hash, { name: ALGO }, false, ["encrypt", "decrypt"]);
+}
+
+/** v1 format. Only tests and legacy reads use it; storage writes v2 (encodeNoteContentForStorage). */
+export async function encrypt(plaintext: string, secret: string): Promise<string> {
+  return seal(await deriveKey(secret), plaintext);
+}
+
+export async function decrypt(encoded: string, secret: string): Promise<string> {
+  return open(await deriveKey(secret), encoded);
 }
 
 const GCM_TAG_LENGTH = 16;
@@ -106,65 +97,57 @@ export function noteStorageMode(isPublic: boolean): NoteStorageMode {
 
 /**
  * The secrets note content is encrypted with: `current` for writing, and
- * `previous` (optional) still accepted for reading while a rotation is under
- * way. A plain string means just a current key.
+ * `previous` (optional) still accepted for reading while a rotation is under way.
  */
-export type NoteKeys = string | { current: string; previous?: string };
+export type NoteKeys = { current: string; previous?: string };
 
 /** The note keys from the Worker's env (ENCRYPTION_KEY, ENCRYPTION_KEY_PREVIOUS). */
 export function noteKeys(env: { ENCRYPTION_KEY: string; ENCRYPTION_KEY_PREVIOUS?: string }): NoteKeys {
   return { current: env.ENCRYPTION_KEY, previous: env.ENCRYPTION_KEY_PREVIOUS || undefined };
 }
 
-const keyList = (keys: NoteKeys) =>
-  typeof keys === "string" ? [keys] : [keys.current, ...(keys.previous ? [keys.previous] : [])];
+const keyList = (keys: NoteKeys) => [keys.current, ...(keys.previous ? [keys.previous] : [])];
 
 const V2 = "v2:";
 const encoder = new TextEncoder();
 
-/** A short public name for a secret (not the key): which secret a v2 ciphertext needs. */
-async function keyIdOf(secret: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(`edane key id\0${secret}`)));
-  return Array.from(digest.slice(0, 4), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function deriveKeyV2(secret: string): Promise<CryptoKey> {
-  const material = await crypto.subtle.importKey("raw", encoder.encode(secret), "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: encoder.encode("edane note content v2") },
-    material,
-    { name: ALGO, length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
+/**
+ * A secret's v2 key and its public id (which secret a ciphertext needs). Both
+ * depend only on the secret, so each is derived once per isolate: every commit
+ * decrypts and encrypts.
+ */
+const v2Keys = new Map<string, Promise<{ keyId: string; key: CryptoKey }>>();
+function v2Key(secret: string): Promise<{ keyId: string; key: CryptoKey }> {
+  let entry = v2Keys.get(secret);
+  if (!entry) {
+    entry = (async () => {
+      const material = await crypto.subtle.importKey("raw", encoder.encode(secret), "HKDF", false, ["deriveKey"]);
+      const key = await crypto.subtle.deriveKey(
+        { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: encoder.encode("edane note content v2") },
+        material,
+        { name: ALGO, length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+      return { keyId: (await hashToken(`edane key id\0${secret}`)).slice(0, 8), key };
+    })();
+    v2Keys.set(secret, entry);
+  }
+  return entry;
 }
 
 const aadFor = (noteId: string) => encoder.encode(`edane note\0${noteId}`);
 
 async function encryptV2(plaintext: string, secret: string, noteId: string): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: ALGO, iv, additionalData: aadFor(noteId) },
-    await deriveKeyV2(secret),
-    encoder.encode(plaintext)
-  );
-  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
-  combined.set(iv, 0);
-  combined.set(new Uint8Array(ciphertext), iv.length);
-  return `${V2}${await keyIdOf(secret)}:${bytesToBase64(combined)}`;
+  const { keyId, key } = await v2Key(secret);
+  return `${V2}${keyId}:${await seal(key, plaintext, aadFor(noteId))}`;
 }
 
 async function decryptV2(stored: string, keys: NoteKeys, noteId: string): Promise<string> {
   const [keyId, body] = stored.slice(V2.length).split(":");
   for (const secret of keyList(keys)) {
-    if ((await keyIdOf(secret)) !== keyId) continue;
-    const combined = base64ToBytes(body);
-    const plaintext = await crypto.subtle.decrypt(
-      { name: ALGO, iv: combined.slice(0, IV_LENGTH), additionalData: aadFor(noteId) },
-      await deriveKeyV2(secret),
-      combined.slice(IV_LENGTH)
-    );
-    return new TextDecoder().decode(plaintext);
+    const k = await v2Key(secret);
+    if (k.keyId === keyId) return open(k.key, body, aadFor(noteId));
   }
   throw new Error("No key for this ciphertext");
 }
@@ -214,5 +197,5 @@ export async function encodeNoteContentForStorage(
   keys: NoteKeys,
   noteId: string
 ): Promise<string> {
-  return mode === "plain" ? content : await encryptV2(content, keyList(keys)[0], noteId);
+  return mode === "plain" ? content : await encryptV2(content, keys.current, noteId);
 }
