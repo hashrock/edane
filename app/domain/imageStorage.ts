@@ -10,23 +10,14 @@ export const IMAGE_STORAGE_LIMIT_BYTES = 10 * 1024 * 1024; // 10MB
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /**
- * Sum of stored image sizes ("used" bytes for the quota). Pulled out as the
- * single place that computes it so the two server.ts call sites (listing
- * usage, checking a new upload) can't drift into different definitions of
- * "used".
+ * Sum of stored image sizes ("used" bytes for the quota), as the settings page
+ * shows it. The upload's own check is inside its INSERT
+ * (utils/imageRepository.ts) so it holds under parallel uploads.
  */
 export function totalImageBytes(sizes: number[]): number {
   return sizes.reduce((sum, size) => sum + size, 0);
 }
 
-/**
- * Whether adding `incomingSize` bytes to `used` would exceed
- * {@link IMAGE_STORAGE_LIMIT_BYTES}. Single source of truth for the quota
- * comparison, matching {@link totalImageBytes}.
- */
-export function exceedsImageQuota(used: number, incomingSize: number): boolean {
-  return used + incomingSize > IMAGE_STORAGE_LIMIT_BYTES;
-}
 
 /**
  * Image types an upload may be stored as. Raster only: an SVG (or HTML, or

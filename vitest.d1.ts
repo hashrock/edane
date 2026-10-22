@@ -6,11 +6,29 @@
  */
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
+import { NoteRoom } from "./app/sync/room";
 
 const MIGRATIONS = new URL("./migrations/", import.meta.url);
 
 const param = (v: unknown): SQLInputValue =>
   v === undefined ? null : typeof v === "boolean" ? (v ? 1 : 0) : (v as SQLInputValue);
+
+/** A NoteRoom on `env` with no open sockets (its storage is D1, so nothing else is needed). */
+export function testRoom(env: { DB: D1Database; ENCRYPTION_KEY: string }): NoteRoom {
+  return new NoteRoom({ getWebSockets: () => [] } as unknown as DurableObjectState, env as never);
+}
+
+/** {@link sqliteD1} with one user row already in it (most tables reference users). */
+export async function seededD1(
+  user = { id: "u", email: "u@example.com", name: "U", avatarUrl: "" }
+): Promise<D1Database> {
+  const db = sqliteD1();
+  await db
+    .prepare("INSERT INTO users (id, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(user.id, user.email, user.name, user.avatarUrl, new Date().toISOString())
+    .run();
+  return db;
+}
 
 export function sqliteD1(): D1Database {
   const db = new DatabaseSync(":memory:");
@@ -43,7 +61,10 @@ export function sqliteD1(): D1Database {
       return { results: [], success: true, meta: { changes: info.changes, last_row_id: info.lastInsertRowid } };
     }
     async raw() {
-      return this.rows().map((row) => Object.values(row));
+      // Arrays straight from SQLite: same-named columns would collapse in an object.
+      const stmt = db.prepare(this.query);
+      stmt.setReturnArrays(true);
+      return stmt.all(...this.params.map(param));
     }
     /** For batch: run and collect rows (RETURNING or not). */
     exec() {

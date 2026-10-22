@@ -24,29 +24,21 @@ export async function findApiToken(c: Context, token: string): Promise<{ id: str
   return row ?? null;
 }
 
-/** The id of the user an API token belongs to (one query). Null if invalid or expired. */
-export async function getUserIdByApiToken(c: Context, token: string): Promise<string | null> {
-  return (await findApiToken(c, token))?.userId ?? null;
-}
-
-/** The user a Bearer API token belongs to, and the token row it was. Null if invalid or expired. */
+/** The user a Bearer API token belongs to, and the token row it was. Null if invalid or expired. One query. */
 export async function getUserByToken(
   c: Context
 ): Promise<{ user: SessionUser; tokenId: string } | null> {
   const token = bearerToken(c);
-  const found = token ? await findApiToken(c, token) : null;
-  if (!found) return null;
-  const userId = found.userId;
-
-  const user = await drizzle(c.env.DB)
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
+  if (!token) return null;
+  const row = await drizzle(c.env.DB)
+    .select({ tokenId: apiTokens.id, id: users.id, email: users.email, name: users.name, avatarUrl: users.avatarUrl })
+    .from(apiTokens)
+    .innerJoin(users, eq(users.id, apiTokens.userId))
+    .where(and(eq(apiTokens.tokenHash, await hashToken(token)), gt(apiTokens.expiresAt, Date.now())))
     .get();
-  if (!user) return null;
-
+  if (!row) return null;
   return {
-    user: { id: user.id, email: user.email, name: user.name || "", avatarUrl: user.avatarUrl || "" },
-    tokenId: found.id,
+    user: { id: row.id, email: row.email, name: row.name || "", avatarUrl: row.avatarUrl || "" },
+    tokenId: row.tokenId,
   };
 }

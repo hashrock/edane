@@ -420,6 +420,7 @@ export default function OutlineEditor({
               const isActive = node.id === activeNodeId;
               const isEditingThis = isActive && editing;
               const type = node.type ?? "text";
+              const linkUrl = type === "link" ? safeExternalUrl(node.text) : null;
               const isCustom = isAuxInputSurface("outline", type);
               // Image/link nodes keep their preview while editing and expose the
               // URL in an inline box below (instead of raw-text editing).
@@ -617,9 +618,9 @@ export default function OutlineEditor({
                     </div>
 
                     {/* Open link */}
-                    {type === "link" && safeExternalUrl(node.text) && !isEditingThis && (
+                    {linkUrl && !isEditingThis && (
                       <a
-                        href={safeExternalUrl(node.text)!}
+                        href={linkUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}

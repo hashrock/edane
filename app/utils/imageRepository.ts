@@ -18,21 +18,10 @@ export async function insertImageWithinQuota(db: D1Database, image: NewImage, li
   const result = await db
     .prepare(
       `INSERT INTO images (id, user_id, r2_key, filename, content_type, size, created_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?
-       WHERE (SELECT COALESCE(SUM(size), 0) FROM images WHERE user_id = ?) + ? <= ?`
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+       WHERE (SELECT COALESCE(SUM(size), 0) FROM images WHERE user_id = ?2) + ?6 <= ?8`
     )
-    .bind(
-      image.id,
-      image.userId,
-      image.r2Key,
-      image.filename,
-      image.contentType,
-      image.size,
-      image.createdAt,
-      image.userId,
-      image.size,
-      limitBytes
-    )
+    .bind(image.id, image.userId, image.r2Key, image.filename, image.contentType, image.size, image.createdAt, limitBytes)
     .run();
   return result.meta.changes === 1;
 }

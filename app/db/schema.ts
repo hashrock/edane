@@ -53,9 +53,10 @@ export const notes = sqliteTable("notes", {
   /** Soft-delete timestamp (ISO). Non-null = in trash, hidden from the list. */
   deletedAt: text("deleted_at"),
   /**
-   * Bumped whenever the note stops being served publicly (made private, or
-   * trashed). A publication serves only while its own epoch matches, so making
-   * the note public again (or restoring it) doesn't silently revive old URLs.
+   * Advances whenever the note stops being served publicly (made private, or
+   * trashed), by the notes_public_epoch trigger (migration 0014), so every
+   * writer gets it. A publication serves only while its own epoch matches, so
+   * making the note public again (or restoring it) doesn't revive old URLs.
    */
   publicEpoch: integer("public_epoch").notNull().default(0),
   createdAt: text("created_at")

@@ -279,7 +279,3 @@ export async function validateCodeExchange<T extends { clientId: string; redirec
   return { ok: true, code };
 }
 
-/** 推測できない不透明なトークン（32 バイトの乱数）。DB にはハッシュだけを置く。 */
-export function randomToken(prefix: string): string {
-  return prefix + bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
-}

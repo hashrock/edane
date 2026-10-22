@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../global.d";
 import type { Credential } from "../user";
 import { parseContent, serializeDocument } from "../application/persistence";
+import { credentialLiveClause } from "../utils/credential";
 import { decodeStoredNoteContent, encodeNoteContentForStorage, noteKeys, noteStorageMode } from "../utils/crypto";
 import {
   applyPatch,
@@ -26,8 +27,7 @@ import { CLOSE_RATE_LIMITED, acceptsSocket, fullBucket, readableMessage, receipt
  * writes with no extra query.
  */
 type Identity = { noteId: string; userId: string; credential?: Credential };
-/** Credential tables by name: the only strings ever spliced into the SQL below. */
-const CREDENTIAL_TABLE = { sessions: "sessions", api_tokens: "api_tokens" } as const satisfies Record<Credential["table"], string>;
+
 type Row = { id: string; user_id: string; title: string; content: string; is_public: number; version: number; updated_at: string; deleted_at: string | null };
 type Loaded = { row: Row; snapshot: RoomSnapshot };
 
@@ -86,13 +86,10 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return result;
   }
   private async load(identity: Identity): Promise<RoomResult<Loaded>> {
-    const base = "SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL";
-    const cred = identity.credential;
-    const row = await (cred
-      ? this.env.DB.prepare(`${base} AND EXISTS (SELECT 1 FROM ${CREDENTIAL_TABLE[cred.table]} WHERE id = ? AND expires_at > ?)`)
-          .bind(identity.noteId, identity.userId, cred.id, Date.now())
-      : this.env.DB.prepare(base).bind(identity.noteId, identity.userId)
-    ).first<Row>();
+    const live = identity.credential ? credentialLiveClause(identity.credential, Date.now()) : { sql: "", bindings: [] };
+    const row = await this.env.DB.prepare(`SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL${live.sql}`)
+      .bind(identity.noteId, identity.userId, ...live.bindings)
+      .first<Row>();
     if (!row) return reject({ code: "not-found" });
     const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), noteKeys(this.env), row.id);
     if (content === null) return reject({ code: "decrypt-failed" });
@@ -179,9 +176,9 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     const result = await this.env.DB.batch([
       this.env.DB.prepare("INSERT INTO note_commits (note_id, operation_id, digest, version) SELECT id, ?, ?, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(commit.id, digest, version, row.id, row.version),
-      // Going private bumps public_epoch (application/nodePublication.ts: old URLs stay dead if it goes public again).
-      this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, public_epoch = public_epoch + (is_public = 1 AND ? = 0), is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
-        .bind(model.title, content, isPublic ? 1 : 0, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
+      // Going private advances public_epoch via the notes_public_epoch trigger (migration 0014).
+      this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
+        .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
       // Receipts only dedupe resends, which come within a few versions (limits.ts).
       ...(pruneBelow === null ? [] : [this.env.DB.prepare("DELETE FROM note_commits WHERE note_id = ? AND version <= ?").bind(row.id, pruneBelow)]),
     ]);

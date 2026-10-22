@@ -6,10 +6,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "../global.d";
-import { sqliteD1 } from "../../vitest.d1";
-import { insertUser } from "../utils/userRepository";
+import { seededD1, testRoom } from "../../vitest.d1";
 import { insertNote } from "../utils/noteRepository";
-import { NoteRoom } from "./room";
+import type { NoteRoom } from "./room";
 
 const KEY = "test-encryption-key";
 const alice = { id: "alice", email: "a@example.com", name: "A", avatarUrl: "" };
@@ -18,14 +17,13 @@ describe("NoteRoom credential check", () => {
   let env: Env["Bindings"];
   let room: NoteRoom;
   beforeEach(async () => {
-    env = { DB: sqliteD1(), ENCRYPTION_KEY: KEY } as Env["Bindings"];
+    env = { DB: await seededD1(alice), ENCRYPTION_KEY: KEY } as Env["Bindings"];
     const db = drizzle(env.DB);
-    await insertUser(db, alice);
     await insertNote(db, { id: "n1", userId: "alice", title: "T", plainContent: "a", isPublic: false, now: "2026-01-01" }, { current: KEY });
     await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('s1', 'alice', 'x', ?)")
       .bind(Date.now() + 60_000)
       .run();
-    room = new NoteRoom({ getWebSockets: () => [] } as unknown as DurableObjectState, env);
+    room = testRoom(env);
   });
   const identity = { noteId: "n1", userId: "alice", credential: { table: "sessions" as const, id: "s1" } };
 

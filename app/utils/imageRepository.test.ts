@@ -1,13 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { drizzle } from "drizzle-orm/d1";
-import { sqliteD1 } from "../../vitest.d1";
-import { insertUser } from "./userRepository";
+import { seededD1 } from "../../vitest.d1";
 import { insertImageWithinQuota } from "./imageRepository";
 
 describe("insertImageWithinQuota", () => {
   it("writes only while the user's total stays within the limit", async () => {
-    const db = sqliteD1();
-    await insertUser(drizzle(db), { id: "u", email: "u@example.com", name: "U", avatarUrl: "" });
+    const db = await seededD1();
     const image = (id: string, size: number) => ({
       id,
       userId: "u",

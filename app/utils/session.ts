@@ -4,10 +4,10 @@ import type { SessionUser } from "../user";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt, lte } from "drizzle-orm";
 import { sessions } from "../db/schema";
+import { randomToken } from "./tokenHash";
 import {
   base64ToBytes,
   bytesToBase64,
-  bytesToBase64Url,
   decodeBase64Utf8,
   encodeBase64Utf8,
 } from "./base64";
@@ -108,7 +108,7 @@ type SessionCookie = { sid: string; user: SessionUser };
 /** Start a server-side session (one row) and point the cookie at it. Expired rows are swept here. */
 export async function setSession(c: Context, user: SessionUser) {
   const now = Date.now();
-  const sid = randomSessionId();
+  const sid = randomToken();
   const db = drizzle(c.env.DB);
   await db.batch([
     db.delete(sessions).where(lte(sessions.expiresAt, now)),
@@ -137,6 +137,3 @@ export async function clearSession(c: Context) {
   deleteCookie(c, LEGACY_SESSION_COOKIE, { path: "/" });
 }
 
-function randomSessionId(): string {
-  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
-}

@@ -6,7 +6,7 @@ import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
@@ -43,7 +43,6 @@ import {
   IMAGE_STORAGE_LIMIT_BYTES,
   MAX_IMAGE_BYTES,
   totalImageBytes,
-  exceedsImageQuota,
   sniffImageType,
   imageResponseHeaders,
 } from "./domain/imageStorage";
@@ -293,32 +292,21 @@ app.post("/api/images", async (c) => {
     return c.json({ error: "Only PNG, JPEG, GIF, WebP and AVIF images are allowed" }, 400);
   }
 
-  const db = drizzle(c.env.DB);
-  const existing = await db
-    .select({ size: images.size })
-    .from(images)
-    .where(eq(images.userId, user.id));
-  const used = totalImageBytes(existing.map((r) => r.size));
-  if (exceedsImageQuota(used, file.size)) {
-    return c.json(
-      { error: "Storage limit exceeded", used, limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size },
-      413
-    );
-  }
-
+  // Reserve the quota first (the check is inside the INSERT, so it holds under
+  // parallel uploads), then store the bytes; a failed store gives the space back.
   const id = crypto.randomUUID();
   const r2Key = `${user.id}/${id}`;
-  await c.env.IMAGES.put(r2Key, bytes, {
-    httpMetadata: { contentType },
-  });
-
   const createdAt = new Date().toISOString();
   const filename = file.name.slice(0, 200);
-  // The check above answers early; this one, inside the INSERT, holds under parallel uploads.
   const row = { id, userId: user.id, r2Key, filename, contentType, size: file.size, createdAt };
   if (!(await insertImageWithinQuota(c.env.DB, row, IMAGE_STORAGE_LIMIT_BYTES))) {
-    await c.env.IMAGES.delete(r2Key);
     return c.json({ error: "Storage limit exceeded", limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size }, 413);
+  }
+  try {
+    await c.env.IMAGES.put(r2Key, bytes, { httpMetadata: { contentType } });
+  } catch (e) {
+    await drizzle(c.env.DB).delete(images).where(eq(images.id, id));
+    throw e;
   }
 
   return c.json(
@@ -765,7 +753,7 @@ const routes = app
     if (note) {
       await db
         .update(notes)
-        .set({ deletedAt: new Date().toISOString(), publicEpoch: sql`${notes.publicEpoch} + 1` })
+        .set({ deletedAt: new Date().toISOString() })
         .where(eq(notes.id, note.id));
       await noteRoom(c.env, note.id).invalidate();
     }

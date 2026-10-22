@@ -1,47 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DatabaseSync } from "node:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/d1";
 import { countUsers, insertUser } from "./userRepository";
-
-const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
-
-/**
- * 本物の SQLite（node:sqlite）に実際のマイグレーションを当て、drizzle-orm/d1 が
- * 使う分だけの D1Database（prepare → bind → raw / all / run）をかぶせる。
- * count(*) FILTER や julianday の解釈を SQLite 自身に確かめさせるため。
- */
-function sqliteD1(): D1Database {
-  const sqlite = new DatabaseSync(":memory:");
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
-    sqlite.exec(readFileSync(join(MIGRATIONS, file), "utf-8"));
-  }
-  const prepare = (query: string) => {
-    let params: unknown[] = [];
-    const stmt = {
-      bind(...values: unknown[]) {
-        params = values;
-        return stmt;
-      },
-      async raw() {
-        const s = sqlite.prepare(query);
-        s.setReturnArrays(true);
-        return s.all(...(params as never[]));
-      },
-      async all() {
-        return { results: sqlite.prepare(query).all(...(params as never[])) };
-      },
-      async run() {
-        sqlite.prepare(query).run(...(params as never[]));
-        return { success: true, results: [] };
-      },
-    };
-    return stmt;
-  };
-  return { prepare } as unknown as D1Database;
-}
+// 本物の SQLite に実際のマイグレーションを当て、count(*) FILTER や julianday の解釈を SQLite 自身に確かめさせる。
+import { sqliteD1 } from "../../vitest.d1";
 
 const NOW = new Date("2026-09-18T12:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;

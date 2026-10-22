@@ -23,8 +23,9 @@
   - `browser` / `browser-user`（`Authorization` 付きは断る）
   - `self`（セッションより前に mount し、自分で認証する `/mcp`・OAuth・stats）
 - **API トークンのスコープ**: API トークンはノート（`notes` スコープ、ADR 0005）の API にだけ届く。トークン管理・OAuth の同意・画像・公開・サイトはブラウザのセッション限定。
-- **CSRF**: `Authorization` の無い unsafe メソッドは、自オリジン（`Origin` か `Sec-Fetch-Site: same-origin`）からだけ受け付ける。SameSite=Lax はサイト単位なので、`*.hashrock.info` の兄弟からの送信を止められないため。
-- **本文サイズ**: 既定 1 MiB。ルートごとに上書きできる。
+- **CSRF**: `Authorization` の無い unsafe メソッドと WebSocket の upgrade は、自オリジン（`Origin` か `Sec-Fetch-Site: same-origin`）からだけ受け付ける。SameSite=Lax はサイト単位なので、`*.hashrock.info` の兄弟からの送信を止められないため。
+- **本文サイズとレート制限**: 本文は既定 1 MiB。どちらもルートごとに表で決める（`maxBody`・`rateLimit`）。
+- **2 段のミドルウェア**: 方針の照合・CSRF・本文・レート制限は最初に（`/mcp` や OAuth より前）、未ログインの拒否はセッションの後（`requireRouteUser`）。ハンドラーは `signedInUser` でユーザーを受け取る。
 - **エラー**: `app.onError` は固定の文言だけを返し、詳細はログに出す。
 - **共通ヘッダー**: 全レスポンスに CSP（`frame-ancestors 'self'`、`script-src 'self' https://repos.hashrock.info`）と `nosniff` を付ける（`app/utils/securityHeaders.ts`）。
   - 自前の CSP を持つルート（公開サイト・画像・同意画面）はそれを保つ。
@@ -38,7 +39,7 @@
   - 毎リクエスト、主キーで D1 を 1 回読む。
 - **API トークン**: `expires_at`（作成から 1 年。既存のものは移行時から 1 年）。
 - **WebSocket**: 接続時の認証情報（`sessions` / `api_tokens` の行 id）を attachment に持つ。
-  - NoteRoom は commit ごとの SELECT に `EXISTS (... WHERE id = ? AND expires_at > ?)` を足す。追加のクエリは無い。
+  - NoteRoom は commit ごとの SELECT に（`utils/credential.ts` の条件で） `EXISTS (... WHERE id = ? AND expires_at > ?)` を足す。追加のクエリは無い。
   - 行が消えるか期限が切れると、その socket は 4404 で閉じる。クライアントは再接続をやめる。
   - 受信（他の commit の配信）は次に書くまで続く。
 - **OAuth**: 入れ替え前のリフレッシュトークンのハッシュを `previous_refresh_hash` に残す。それがもう一度使われたら漏れたとみなし、grant ごと消す（OAuth 2.1 §4.3.1）。

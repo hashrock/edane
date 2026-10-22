@@ -24,14 +24,13 @@ export const SITE_ENTRY_FILE = "index.jsx";
  * スキーマが空なら実データから推定したもので整形するので、`items` は常に使える。
  */
 export function siteDataModule(root: SiteNode, schema: SiteSchema): string {
-  // `</script>` を含む文字列でも安全なように（lib/escapeHtml.ts）。
-  const json = jsonForScript;
+  // `</script>` を含む文字列でも安全なように jsonForScript（lib/escapeHtml.ts）で埋め込む。
   const { items } = shapeRecords(root, schema);
   return (
-    `export const data = ${json(root)};\n` +
-    `export const title = ${json(root.text)};\n` +
-    `export const items = ${json(items)};\n` +
-    `export const schema = ${json(schema)};\n`
+    `export const data = ${jsonForScript(root)};\n` +
+    `export const title = ${jsonForScript(root.text)};\n` +
+    `export const items = ${jsonForScript(items)};\n` +
+    `export const schema = ${jsonForScript(schema)};\n`
   );
 }
 

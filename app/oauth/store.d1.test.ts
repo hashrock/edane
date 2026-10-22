@@ -1,9 +1,7 @@
 /** d1OAuthStore's SQL against the migrated schema: refresh rotation and reuse revocation. */
 import { describe, it, expect } from "vitest";
-import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "../global.d";
-import { sqliteD1 } from "../../vitest.d1";
-import { insertUser } from "../utils/userRepository";
+import { seededD1 } from "../../vitest.d1";
 import { d1OAuthStore } from "./store";
 
 const pair = (n: number) => ({
@@ -15,8 +13,7 @@ const pair = (n: number) => ({
 
 describe("d1OAuthStore refresh rotation", () => {
   it("rotates once, then treats the replaced refresh token as leaked and revokes the grant", async () => {
-    const env = { DB: sqliteD1() } as Env["Bindings"];
-    await insertUser(drizzle(env.DB), { id: "u", email: "u@example.com", name: "U", avatarUrl: "" });
+    const env = { DB: await seededD1() } as Env["Bindings"];
     const store = d1OAuthStore(env);
     await store.createClient({ id: "c", name: "C", redirectUris: ["https://c.example/cb"], secretHash: null }, { now: 0, unauthorizedClientsBefore: 0 });
     await store.createGrant({ id: "g", clientId: "c", userId: "u", scope: "notes", ...pair(1) }, 0);

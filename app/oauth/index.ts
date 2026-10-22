@@ -15,7 +15,7 @@ import { bodyLimit } from "hono/body-limit";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../global.d";
 import { signedInUser } from "../auth/routePolicy";
-import { hashToken } from "../utils/tokenHash";
+import { hashToken, randomToken } from "../utils/tokenHash";
 import { ACCESS_TOKEN_PREFIX } from "../utils/oauthToken";
 import { d1OAuthStore, type OAuthClient, type OAuthStore, type TokenPair } from "./store";
 import {
@@ -31,7 +31,6 @@ import {
   parseBasicCredentials,
   parseRegistration,
   protectedResourceMetadata,
-  randomToken,
   validateAuthorizeRequest,
   validateCodeExchange,
   type AuthorizeRequest,
