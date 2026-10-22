@@ -41,6 +41,7 @@ import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
 import { oauthServerRoutes, oauthSessionRoutes, takeOAuthReturn } from "./oauth";
 import { noteRoom } from "./utils/noteRoom";
+import { aiSuggestAllowed } from "./utils/aiQuota";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
@@ -592,6 +593,7 @@ app.put("/api/sites/:pubId", async (c) => {
 app.post("/api/sites/:pubId/suggest", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
+  if (!(await aiSuggestAllowed(c.env, user.id))) return c.json({ error: "Too many AI requests; wait a minute" }, 429);
   const [owned, body] = await Promise.all([
     loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, c.env.ENCRYPTION_KEY),
     c.req.json().catch(() => null),
