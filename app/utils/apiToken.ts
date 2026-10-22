@@ -5,12 +5,21 @@ import { eq } from "drizzle-orm";
 import type { SessionUser } from "../user";
 import { hashToken } from "./tokenHash";
 
+/** The token in an `Authorization: Bearer <token>` header, or undefined. */
+export function bearerToken(c: Context): string | undefined {
+  const authHeader = c.req.header("Authorization");
+  return authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+}
+
 /** The id of the user a Bearer token belongs to (one query). Null if invalid. */
 export async function getUserIdByToken(c: Context): Promise<string | null> {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = bearerToken(c);
+  return token ? getUserIdByApiToken(c, token) : null;
+}
 
-  const hash = await hashToken(authHeader.slice(7));
+/** The id of the user an API token belongs to (one query). Null if invalid. */
+export async function getUserIdByApiToken(c: Context, token: string): Promise<string | null> {
+  const hash = await hashToken(token);
   const row = await drizzle(c.env.DB)
     .select({ userId: apiTokens.userId })
     .from(apiTokens)

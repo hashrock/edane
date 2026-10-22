@@ -36,7 +36,7 @@ pnpm dev    # Vite + Cloudflare Worker が http://localhost:5173 で起動
 
 ### リモート MCP（`POST /mcp`）
 
-AI エージェントから API トークン（設定画面で発行）を Bearer にしてノートを読み書きできる MCP サーバー。詳細は [docs/mcp.md](docs/mcp.md)。
+AI エージェントからノートを読み書きできる MCP サーバー。API トークン（設定画面で発行）を Bearer にするか、OAuth（ChatGPT や claude.ai のコネクタは URL を登録するだけ）で接続する。詳細は [docs/mcp.md](docs/mcp.md)。
 
 ### サインアップ数（`GET /api/stats`）
 

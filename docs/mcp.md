@@ -1,8 +1,13 @@
 # リモート MCP サーバー（`POST /mcp`）
 
-AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）から edane のノートを読み書きするための [Model Context Protocol](https://modelcontextprotocol.io) サーバー。Worker の `/mcp` で Streamable HTTP（stateless）として動く。
+AI エージェント（Claude Code、Claude Desktop、ChatGPT、MCP Inspector など）から edane のノートを読み書きするための [Model Context Protocol](https://modelcontextprotocol.io) サーバー。Worker の `/mcp` で Streamable HTTP（stateless）として動く。
 
 ## 接続
+
+接続の方法は 2 通りある。
+
+- **OAuth（URL だけ）**: ChatGPT や claude.ai のコネクタのように、URL を登録すると edane のログインと許可の画面が開くクライアント。トークンの発行は要らない。下の「OAuth で接続する」。
+- **API トークン（ヘッダー）**: `Authorization` ヘッダーを設定できるクライアント（Claude Code、Cursor など）。以下の手順。
 
 1. 設定画面（`/settings`）の「APIトークン」で「新規作成」を押し、表示されたトークン（`edane_…`）を控える。トークンは発行時にしか表示されない。
 2. クライアントに URL とヘッダーを登録する。設定画面はトークン発行直後に、下のクライアントごとの設定例をトークン入りで表示する（`app/application/mcpClientConfigs.ts`）。
@@ -18,7 +23,7 @@ claude mcp add --transport http edane https://edane.hashrock.info/mcp \
 
 ### Claude Desktop
 
-カスタムコネクタはヘッダーを付けられないので、[mcp-remote](https://www.npmjs.com/package/mcp-remote) で stdio に橋渡しする（Node.js が必要）。`claude_desktop_config.json`（設定 → 開発者 → 構成を編集）に追記する。ヘッダー値は空白を含むので env 経由で渡す。
+カスタムコネクタ（URL だけ）で OAuth 接続するのが簡単（下の「OAuth で接続する」）。API トークンを使うなら、カスタムコネクタはヘッダーを付けられないので、[mcp-remote](https://www.npmjs.com/package/mcp-remote) で stdio に橋渡しする（Node.js が必要）。`claude_desktop_config.json`（設定 → 開発者 → 構成を編集）に追記する。ヘッダー値は空白を含むので env 経由で渡す。
 
 ```json
 {
@@ -115,6 +120,40 @@ Transport Type を「Streamable HTTP」、URL を `https://edane.hashrock.info/m
 
 トークンを失効させるには設定画面で削除する。トークンを持っている人はそのユーザーの全ノートを読み書きできる。
 
+## OAuth で接続する
+
+URL `https://edane.hashrock.info/mcp` をクライアントに登録すると、クライアントが edane のログイン画面（Google）と許可の画面をブラウザで開く。「許可する」を押すと接続が終わる。トークンを手で扱う必要はない。
+
+### ChatGPT（Web / Desktop）
+
+1. 設定 → アプリとコネクタ → 詳細設定で「開発者モード」を有効にする（プランやワークスペースの設定によっては管理者の許可が要る）。
+2. 「作成」（コネクタの追加）で、名前に `edane`、MCP サーバーの URL に `https://edane.hashrock.info/mcp`、認証に「OAuth」を選ぶ。
+3. 開いた edane の画面でログインし、「許可する」を押す。
+
+Desktop アプリも同じアカウントのコネクタを使う。メニューの名前は ChatGPT 側の更新で変わることがある。
+
+### Claude（claude.ai / Claude Desktop）
+
+設定 → コネクタ → 「カスタムコネクタを追加」で、URL に `https://edane.hashrock.info/mcp` を入れて追加し、「連携」から edane の画面で許可する。
+
+### 接続の解除
+
+設定画面の「接続中のアプリ（OAuth）」に、許可したクライアントが並ぶ。「接続解除」でそのクライアントのトークンはすぐ無効になる（もう一度使うには許可し直す）。
+
+### 仕組み
+
+edane 自身が OAuth 2.1 の認可サーバーになる（MCP の認可仕様に沿う）。方針は [ADR 0005](adr/0005-mcp-oauth.md)。
+
+| エンドポイント | 内容 |
+|---|---|
+| `GET /.well-known/oauth-protected-resource/mcp`（とルート） | 保護リソースのメタデータ（RFC 9728）。`/mcp` の 401 の `WWW-Authenticate` の `resource_metadata` がここを指す |
+| `GET /.well-known/oauth-authorization-server` | 認可サーバーのメタデータ（RFC 8414） |
+| `POST /oauth/register` | 動的クライアント登録（RFC 7591）。既定は公開クライアント、`client_secret_post` / `client_secret_basic` を求められればシークレットも発行 |
+| `GET /oauth/authorize` | 同意画面。未ログインなら Google ログインを挟んで戻ってくる。PKCE（S256）必須 |
+| `POST /oauth/token` | `authorization_code` と `refresh_token`。アクセストークン 1 時間、リフレッシュトークンは使うたびに入れ替わり 90 日 |
+
+スコープは `notes`（ノートの読み書き）だけ。アクセストークンは API トークンと同じく、そのユーザーの全ノートを読み書きできる。
+
 ## ツール
 
 | ツール | 内容 |
@@ -141,15 +180,11 @@ Transport Type を「Streamable HTTP」、URL を `https://edane.hashrock.info/m
 
 ### HTTP の振る舞い
 
-- 認証は `Authorization: Bearer <API トークン>` だけ。セッション Cookie では通らない（別サイトからのフォーム送信でノートを書き換えられないように）。そのため認証ミドルウェアより前に mount している。トークンが無い・一致しない場合は 401 + `WWW-Authenticate: Bearer`。
+- 認証は `Authorization: Bearer <API トークン または OAuth のアクセストークン>` だけ。セッション Cookie では通らない（別サイトからのフォーム送信でノートを書き換えられないように）。そのため認証ミドルウェアより前に mount している。トークンが無い・一致しない場合は 401 + `WWW-Authenticate: Bearer realm="edane", resource_metadata="…/.well-known/oauth-protected-resource/mcp"`（トークンを送って断られたときは `error="invalid_token"` も付く。OAuth クライアントはこれを見てリフレッシュか認可をやり直す）。アクセストークンは接頭辞 `edane_oat_` で見分け、どちらの種類も 1 回の検索で済ませる。
 - 要求本文は 1 MiB まで（超えたら読まずに 413）。ツールの引数は宣言したもの以外を受け付けず、文字列には上限がある（タイトル 200 / ノード本文 100,000 / Markdown 500,000 / id 200 文字、コードポイントで数える）。上限は `app/application/agentInput.ts`、宣言（`additionalProperties: false` と `maxLength`）は `tools.ts` の inputSchema で、`protocol.ts` がツールを呼ぶ前に同じ宣言で検査する。
 - 要求には 200 で `application/json` を返す。通知だけなら 202（本文なし）。旧版のバッチ（配列）は最大 20 件まで。
 - サーバーから能動的に送るものもセッションも無いので、`GET`（SSE）と `DELETE` は 405。
 - Bearer はブラウザが勝手に付けないので、CORS は全オリジンに開けている（ブラウザ版の MCP Inspector から使える）。
-
-### 制限
-
-- OAuth には対応していないので、ヘッダーを設定できないクライアント（claude.ai のカスタムコネクタなど）からは接続できない。
 
 ## ローカルで試す
 
