@@ -34,7 +34,8 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 
 - `app/mcp/protocol.ts` — JSON-RPC（`initialize` / `ping` / `tools/list` / `tools/call`）。HTTP と DB に依存しない。
 - `app/mcp/tools.ts` — ツール定義。引数の検証 → 読み込み → 変換 → 保存だけを行う。
-- `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通し、読んだ時点からの差分（`diffDocument`）だけを commit する。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。併合できない競合（同じ属性を同時に書いた・削除済みのノードを編集した）はツールの `isError` として返るので、読み直してやり直す。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。
+- `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通し、読んだ時点からの差分（`diffDocument`）だけを commit する。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。併合できない競合（同じ属性を同時に書いた・削除済みのノードを編集した）はツールの `isError` として返るので、読み直してやり直す。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。所有者とゴミ箱の確認も `NoteRoom` が内容と同じ 1 行の SELECT で行い（`updatedAt` もその行のもの）、MCP 側で事前に読み直さない。
+- `NoteRoom` の想定内の拒否（ノートなし・復号失敗・競合・大きすぎる など）は例外ではなく `RoomResult` の `{ ok: false, code }` で返る（`app/application/syncOperations.ts` の `RoomRejection`。DO の RPC 越しには例外の型が残らないため）。呼び出し側（WebSocket・旧 PUT・MCP）がそれぞれの相手向けの文言にする。それ以外の例外（D1 の障害など）はエージェントには `Internal error` だけを返し、詳細はサーバーのログにだけ残す。
 - `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
 
 ### HTTP の振る舞い

@@ -146,6 +146,8 @@ export async function handleMessage<Ctx>(
         return ok(await tool.call(args, ctx));
       } catch (e) {
         if (e instanceof ToolInputError) return ok(errorResult(e.message));
+        // エージェントには中身を見せず、サーバー側にだけ残す（引数はノートの本文を含みうるので出さない）。
+        console.error("mcp tool failed", { tool: tool.name, error: e instanceof Error ? (e.stack ?? e.message) : String(e) });
         return fail(id, INTERNAL_ERROR, "Internal error");
       }
     }

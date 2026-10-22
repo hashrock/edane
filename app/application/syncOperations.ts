@@ -12,6 +12,34 @@ export interface Patch {
 export interface Snapshot { model: MindMapDocument; version: number; isPublic: boolean }
 export interface Commit { id: string; patch: Patch; publicity?: Change<boolean> }
 export class Conflict extends Error {}
+/** parseCommit's refusal. `tooLarge` separates "send less" from "send something well-formed". */
+export class InvalidCommit extends Error {
+  constructor(message: string, readonly tooLarge = false) { super(message); }
+}
+
+/** A snapshot as NoteRoom reads it: `updatedAt` comes from the same row as the content and version. */
+export interface RoomSnapshot extends Snapshot { updatedAt: string }
+/** A persisted commit: the resulting snapshot plus the receipt for the operation id. */
+export interface CommitReceipt extends RoomSnapshot { ack: string; committedVersion: number }
+/**
+ * Why NoteRoom refused a request — the expected outcomes. They're returned, not thrown,
+ * because exception types don't survive Durable Object RPC; each caller (WebSocket,
+ * legacy PUT, remote MCP) words them for its own audience. Anything else (D1 failing,
+ * a bug) is thrown and stays an internal error.
+ */
+export type RoomRejection =
+  /** Missing, someone else's, or in the trash — deliberately indistinguishable. */
+  | { code: "not-found" }
+  | { code: "decrypt-failed" }
+  /** The note changed in a way this commit can't merge with. Read the latest and retry. */
+  | { code: "conflict"; detail: string }
+  /** The legacy full-document PUT named a version that isn't the current one. */
+  | { code: "version-conflict" }
+  | { code: "invalid-commit"; detail: string }
+  | { code: "too-large" }
+  /** The operation id already has a receipt for a different commit. */
+  | { code: "operation-reused" };
+export type RoomResult<T> = { ok: true; value: T } | ({ ok: false } & RoomRejection);
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => [key, canonical(v)]));
@@ -114,28 +142,28 @@ export function applyPatch(doc: MindMapDocument, patch: Patch): MindMapDocument 
 /** Strict wire boundary: validate sizes, shapes and known field types before apply. */
 export function parseCommit(value: unknown): Commit {
   const raw = JSON.stringify(value);
-  if (!raw || raw.length > 1_000_000) throw new Error("Commit exceeds 1 MB");
+  if (!raw || raw.length > 1_000_000) throw new InvalidCommit("Commit exceeds 1 MB", true);
   const v = value as Commit;
-  if (!v || typeof v.id !== "string" || !/^[\w-]{1,100}$/.test(v.id) || !v.patch || typeof v.patch.nodes !== "object" || !v.patch.nodes || Array.isArray(v.patch.nodes)) throw new Error("Invalid commit");
+  if (!v || typeof v.id !== "string" || !/^[\w-]{1,100}$/.test(v.id) || !v.patch || typeof v.patch.nodes !== "object" || !v.patch.nodes || Array.isArray(v.patch.nodes)) throw new InvalidCommit("Invalid commit");
   const strings = (x: unknown): x is string[] => Array.isArray(x) && x.every(id => typeof id === "string" && id.length > 0 && id.length <= 200) && new Set(x).size === x.length;
   const change = (x: unknown, test: (v: unknown) => boolean) => !!x && typeof x === "object" && test((x as Change<unknown>).before) && test((x as Change<unknown>).after);
-  if (v.patch.title && !change(v.patch.title, x => typeof x === "string")) throw new Error("Invalid title");
-  if (v.publicity && !change(v.publicity, x => typeof x === "boolean")) throw new Error("Invalid publicity");
-  if (v.patch.roots && !change(v.patch.roots, strings)) throw new Error("Invalid roots");
+  if (v.patch.title && !change(v.patch.title, x => typeof x === "string")) throw new InvalidCommit("Invalid title");
+  if (v.publicity && !change(v.publicity, x => typeof x === "boolean")) throw new InvalidCommit("Invalid publicity");
+  if (v.patch.roots && !change(v.patch.roots, strings)) throw new InvalidCommit("Invalid roots");
   for (const [id, c] of Object.entries(v.patch.nodes)) {
-    if (!id || id.length > 200 || !c || typeof c !== "object") throw new Error("Invalid node change");
+    if (!id || id.length > 200 || !c || typeof c !== "object") throw new InvalidCommit("Invalid node change");
     for (const n of [c.before, c.after]) {
       if (n === null) continue;
-      if (!n || !strings(n.children) || !n.fields || typeof n.fields !== "object") throw new Error("Invalid node");
+      if (!n || !strings(n.children) || !n.fields || typeof n.fields !== "object") throw new InvalidCommit("Invalid node");
       const normalized = normalizeDocument({ roots: [{ ...n.fields, id, children: [] }] }, "");
       const fields = normalized?.roots[0];
-      if (!fields) throw new Error("Invalid fields");
+      if (!fields) throw new InvalidCommit("Invalid fields");
       const allowed = new Set(["text", "collapsed", "type", "fontSize", "bold", "linkTitle", "favicon", "checked", "schema", "position"]);
       for (const [key, val] of Object.entries(n.fields)) {
-        if (!allowed.has(key)) throw new Error(`Unknown field: ${key}`);
+        if (!allowed.has(key)) throw new InvalidCommit(`Unknown field: ${key}`);
         // false booleans and empty schema are valid reducer output.
         if ((key === "collapsed" || key === "bold") && val === false || key === "schema" && val === "") continue;
-        if (!same(val, (fields as unknown as Record<string, unknown>)[key])) throw new Error(`Invalid field: ${key}`);
+        if (!same(val, (fields as unknown as Record<string, unknown>)[key])) throw new InvalidCommit(`Invalid field: ${key}`);
       }
     }
   }

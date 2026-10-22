@@ -3,7 +3,7 @@
  * 通知は 202、ツールの誤用は isError の結果。ノートはメモリ上の NoteStore に置く
  * （D1 も暗号化も通らない — そこは noteStore.ts と crypto のテストの担当）。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "../global.d";
 import { mcpRoutes, MAX_BODY_BYTES } from "./index";
@@ -249,6 +249,29 @@ describe("note tools", () => {
     const title = AGENT_INPUT_LIMITS.title;
     expect(await call("rename_note", { noteId: "n1", title: "😀".repeat(title) })).toMatchObject({ isError: false });
     expect(await call("rename_note", { noteId: "n1", title: "😀".repeat(title + 1) })).toMatchObject({ isError: true });
+  });
+
+  it("keeps an internal failure internal: JSON-RPC error to the agent, details only in the server log", async () => {
+    const { store, post } = setup();
+    store.save = async () => {
+      throw new Error("D1_ERROR: disk I/O error at /secret/path");
+    };
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await post({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "update_node", arguments: { noteId: "n1", nodeId: "milk", text: "oat" } },
+      });
+      const body = await res.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code: -32603, message: "Internal error" } });
+      expect(body).not.toContain("secret");
+      expect(log).toHaveBeenCalledWith("mcp tool failed", expect.objectContaining({ tool: "update_node" }));
+      expect(JSON.stringify(log.mock.calls)).not.toContain("oat"); // arguments may hold note text
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("returns misuse as isError results without saving", async () => {

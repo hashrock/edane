@@ -95,6 +95,30 @@ try {
     check("the note is unchanged and the server still answers", read.includes("- 子 {id="), read.split("\n")[2]);
   }
 
+  // 0b) NoteRoom が読み取りの正本: read_note の updatedAt は同期 API の snapshot と同じ行のもの。
+  //     編集で version と updatedAt が進み、ゴミ箱に入れたノートは見つからない扱いになる。
+  {
+    const { noteId, text } = await createNote("正本テスト", "- 根\n  - 子");
+    const syncSnapshot = async () => {
+      const res = await fetch(`${base}/api/notes/${noteId}/sync`);
+      return res.ok ? res.json() : { status: res.status };
+    };
+    const updatedAtOf = (outline) => outline.match(/updatedAt: ([^,]+),/)[1];
+    const before = await syncSnapshot();
+    check("read_note reports the snapshot's updatedAt", updatedAtOf(await mcp("read_note", { noteId })) === before.updatedAt, before.updatedAt);
+    await mcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "子（更新）" });
+    const after = await syncSnapshot();
+    check(
+      "an edit advances version and updatedAt together",
+      after.version === before.version + 1 && after.updatedAt > before.updatedAt && updatedAtOf(await mcp("read_note", { noteId })) === after.updatedAt,
+      `v${before.version}→v${after.version}`
+    );
+    await fetch(`${base}/notes/${noteId}/trash`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
+    const trashed = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "x" });
+    check("a trashed note is not found by MCP", trashed.result?.content[0].text === `Note not found: ${noteId}`, trashed.result?.content[0].text);
+    check("a trashed note is 404 on the sync API", (await syncSnapshot()).status === 404);
+  }
+
   // 1) Claude Code → MCP → 開いているエディタ（リロードしない）
   {
     const { noteId } = await createNote("MCP同期テスト", "- 買い物\n  - 牛乳");
