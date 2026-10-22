@@ -6,6 +6,7 @@ import {
   useEffect,
   useLayoutEffect,
 } from "react";
+import { safeExternalUrl } from "../lib/url";
 import { Link, router } from "@inertiajs/react";
 import { findNode } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
@@ -616,9 +617,9 @@ export default function OutlineEditor({
                     </div>
 
                     {/* Open link */}
-                    {type === "link" && node.text && !isEditingThis && (
+                    {type === "link" && safeExternalUrl(node.text) && !isEditingThis && (
                       <a
-                        href={node.text}
+                        href={safeExternalUrl(node.text)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { safeExternalUrl } from "../lib/url";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { buildSlides, slideIndexOf, type Slide } from "../application/slides";
 import { nodeDisplayText, supportsCheckbox } from "../application/nodeUtils";
@@ -172,7 +173,7 @@ function NodeContent({ node }: { node: MindMapModel }) {
         </span>
       )}
       {type === "link" ? (
-        <a href={node.text} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">
+        <a href={safeExternalUrl(node.text) ?? undefined} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">
           {node.favicon && <img src={node.favicon} alt="" className="mr-[0.5cqw] inline h-[1em] w-[1em] align-[-0.1em]" />}
           {text}
         </a>

@@ -11,7 +11,7 @@
  */
 import { shapeRecords, type SiteSchema } from "./siteSchema";
 import type { SiteNode } from "./siteNode";
-import { escapeHtml } from "../lib/escapeHtml";
+import { escapeHtml, jsonForScript } from "../lib/escapeHtml";
 import { absoluteUrl } from "../lib/url";
 
 /** テンプレートが `import { data } from './data.js'` で読む仮想ファイル。 */
@@ -24,8 +24,8 @@ export const SITE_ENTRY_FILE = "index.jsx";
  * スキーマが空なら実データから推定したもので整形するので、`items` は常に使える。
  */
 export function siteDataModule(root: SiteNode, schema: SiteSchema): string {
-  // `</script>` を含む文字列でも安全なように、JSON 内の `<` をエスケープする。
-  const json = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
+  // `</script>` を含む文字列でも安全なように（lib/escapeHtml.ts）。
+  const json = jsonForScript;
   const { items } = shapeRecords(root, schema);
   return (
     `export const data = ${json(root)};\n` +

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { escapeHtml } from "./escapeHtml";
+import { escapeHtml, jsonForScript } from "./escapeHtml";
 import { unescapeHtml } from "./escapeHtml.testHelpers";
 
 describe("escapeHtml", () => {
@@ -27,5 +27,21 @@ describe("escapeHtml", () => {
         expect(escaped).not.toMatch(/[<>"]/);
       })
     );
+  });
+});
+
+describe("jsonForScript", () => {
+  it("round-trips through JSON.parse and never contains `<`", () => {
+    fc.assert(
+      fc.property(fc.jsonValue(), (v) => {
+        const out = jsonForScript(v);
+        expect(out).not.toContain("<");
+        expect(JSON.parse(out)).toEqual(JSON.parse(JSON.stringify(v)));
+      })
+    );
+  });
+  it("neutralizes script-ending and comment-opening sequences", () => {
+    const out = jsonForScript({ t: "</script><!--<script>\u2028" });
+    expect(out).not.toMatch(/<\/script|<!--|\u2028/);
   });
 });

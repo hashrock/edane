@@ -12,3 +12,20 @@
 export function absoluteUrl(origin: string, path: string): string {
   return `${origin.replace(/\/+$/, "")}${path}`;
 }
+
+/**
+ * A user-supplied URL (a link node's text, a favicon from a fetched page) that
+ * is safe to navigate to or load: http(s) only, parsed and re-serialized.
+ * `javascript:`, `data:` and anything unparseable give null, so a link from a
+ * shared or public note can't run script. Every place that opens or renders
+ * such a URL goes through here (app/externalLinks.test.ts keeps it that way).
+ */
+export function safeExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
