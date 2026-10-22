@@ -32,6 +32,10 @@ describe("isAllowedRedirectUri", () => {
     "data:text/html,hi",
     "https://ok.example/cb#frag",
     "not a url",
+    "intent://scan/#Intent;scheme=zxing;end",
+    "ms-settings:privacy",
+    "myapp://cb",
+    "blob:https://ok.example/1",
   ])("rejects %s", (uri) => expect(isAllowedRedirectUri(uri)).toBe(false));
 });
 

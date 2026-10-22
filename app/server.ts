@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { AGENT_INPUT_LIMITS, codePointLength } from "./application/agentInput";
+import { API_TOKEN_TTL_MS } from "./utils/apiToken";
 import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
@@ -136,8 +137,9 @@ app.get("/api/notes/:id/sync", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   const id = c.req.param("id");
-  // NoteRoom checks owner and trash itself (404 for both, as for a missing note).
-  const identity = { noteId: id, userId: user.id };
+  // NoteRoom checks owner and trash itself (404 for both, as for a missing note),
+  // and, for a socket, that the credential it was opened with is still live.
+  const identity = { noteId: id, userId: user.id, credential: c.get("credential") ?? undefined };
   if (c.req.header("Upgrade")?.toLowerCase() === "websocket") {
     if (c.req.header("Origin") !== new URL(c.req.url).origin) return c.text("Invalid origin", 403);
     const headers = new Headers(c.req.raw.headers);
@@ -199,6 +201,7 @@ app.post("/api/tokens", async (c) => {
     name: body.name || "default",
     tokenHash: hash,
     createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + API_TOKEN_TTL_MS,
   });
 
   // Return the raw token only once — it cannot be retrieved later
@@ -215,6 +218,7 @@ app.get("/api/tokens", async (c) => {
       id: apiTokens.id,
       name: apiTokens.name,
       createdAt: apiTokens.createdAt,
+      expiresAt: apiTokens.expiresAt,
     })
     .from(apiTokens)
     .where(eq(apiTokens.userId, user.id));

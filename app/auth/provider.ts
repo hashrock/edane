@@ -36,6 +36,7 @@ export function authMiddleware(select: (env: Env["Bindings"]) => AuthProvider): 
   return async (c, next) => {
     const auth = select(c.env);
     c.set("auth", auth);
+    c.set("credential", null);
     c.set("user", await auth.resolve(c));
     await next();
   };

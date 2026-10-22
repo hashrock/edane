@@ -191,8 +191,12 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
       if (form.grant_type === "refresh_token") {
         if (!form.refresh_token) return oauthError(c, 400, "invalid_request", "refresh_token is required");
         const tokens = await issueTokens(now);
-        const rotated = await store.rotateGrant(await hashToken(form.refresh_token), client.id, tokens.pair, now);
-        if (!rotated) return oauthError(c, 400, "invalid_grant", "Invalid or expired refresh token");
+        const refreshHash = await hashToken(form.refresh_token);
+        const rotated = await store.rotateGrant(refreshHash, client.id, tokens.pair, now);
+        if (!rotated) {
+          await store.revokeOnRefreshReuse(refreshHash, client.id);
+          return oauthError(c, 400, "invalid_grant", "Invalid or expired refresh token");
+        }
         return tokenResponse(c, tokens, rotated.scope);
       }
 

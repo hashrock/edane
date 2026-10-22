@@ -118,7 +118,7 @@ npx @modelcontextprotocol/inspector
 
 Transport Type を「Streamable HTTP」、URL を `https://edane.hashrock.info/mcp` にし、Authentication の Header Name に `Authorization`、Bearer Token にトークンを入れて Connect する。
 
-トークンを失効させるには設定画面で削除する。トークンを持っている人はそのユーザーの全ノートを読み書きできる。
+API トークンは作成から 1 年で切れ、ノートの API（`/mcp`・同期・ノートの作成と更新）にだけ使える（画像・公開・トークン管理などはブラウザのセッション限定。ADR 0006）。トークンを失効させるには設定画面で削除する。トークンを持っている人はそのユーザーの全ノートを読み書きできる。
 
 ## OAuth で接続する
 

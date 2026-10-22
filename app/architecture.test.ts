@@ -31,6 +31,9 @@ const APP_ROOT = dirname(fileURLToPath(import.meta.url));
 //   transitively import a UI framework through a re-export and the
 //   UI-framework-specifier check below would never see it.
 const ROOT_SHARED_FILES = new Set(["user.ts", "global.d.ts"]);
+// Test helpers at the repo root (outside app/), for *.test.ts files only:
+// vitest.d1.ts is an in-memory D1 so tests run the real SQL of any layer.
+const TEST_SUPPORT_FILES = new Set(["vitest.d1.ts"]);
 
 // Layer -> buckets it may import from (besides itself). Buckets not listed
 // here (server.ts, root-view.tsx, client.tsx, user.ts, global.d.ts — the
@@ -162,7 +165,9 @@ describe("dependency direction", () => {
         if (!target) continue;
         const toBucket = bucketOf(target);
         const isSharedRoot = toBucket === "root" && ROOT_SHARED_FILES.has(basename(target));
-        if (toBucket === fromBucket || isSharedRoot || rule.includes(toBucket)) continue;
+        const isTestSupport =
+          /\.test\.tsx?$/.test(file) && !target.startsWith(APP_ROOT) && TEST_SUPPORT_FILES.has(basename(target));
+        if (toBucket === fromBucket || isSharedRoot || isTestSupport || rule.includes(toBucket)) continue;
         violations.push(
           `${relative(APP_ROOT, file)} (${fromBucket}) imports ${relative(APP_ROOT, target)} (${toBucket}); ` +
             `${fromBucket} may only import [${rule.join(", ") || "nothing"}]`

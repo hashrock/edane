@@ -30,6 +30,8 @@ interface ApiToken {
   id: string;
   name: string;
   createdAt: string;
+  /** Epoch ms. */
+  expiresAt: number;
 }
 
 /** GET /api/oauth/grants の1行（OAuth で接続中のアプリ）。 */
@@ -503,7 +505,9 @@ export default function Settings({ user }: { user: User }) {
                   >
                     <div>
                       <div className="font-medium">{tok.name}</div>
-                      <div className="text-xs text-slate-400">{tok.createdAt}</div>
+                      <div className="text-xs text-slate-400">
+                        {tok.createdAt} · {t("tokenExpires", { date: new Date(tok.expiresAt).toLocaleDateString() })}
+                      </div>
                     </div>
                     <button
                       onClick={() => deleteToken(tok.id)}

@@ -20,6 +20,25 @@ export const apiTokens = sqliteTable("api_tokens", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+  /** Epoch ms; the token stops working after this (API_TOKEN_TTL_MS from creation). */
+  expiresAt: integer("expires_at").notNull(),
+});
+
+/**
+ * Browser sign-ins. The session cookie only names a row here, so signing out
+ * (or the row expiring) ends the session server-side, and open WebSockets
+ * opened with it stop being able to write (NoteRoom checks the row per commit).
+ */
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  /** Epoch ms. */
+  expiresAt: integer("expires_at").notNull(),
 });
 
 export const notes = sqliteTable("notes", {
@@ -153,6 +172,8 @@ export const oauthGrants = sqliteTable("oauth_grants", {
   /** Epoch ms. */
   accessExpiresAt: integer("access_expires_at").notNull(),
   refreshTokenHash: text("refresh_token_hash").notNull().unique(),
+  /** The refresh token this pair replaced. Presenting it again means it leaked: the grant is revoked. */
+  previousRefreshHash: text("previous_refresh_hash"),
   /** Epoch ms. */
   refreshExpiresAt: integer("refresh_expires_at").notNull(),
   createdAt: text("created_at")

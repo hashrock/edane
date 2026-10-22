@@ -1,10 +1,11 @@
-import type { SessionUser } from "./user";
+import type { Credential, SessionUser } from "./user";
 import type { AuthProvider } from "./auth/provider";
 
 declare module "hono" {
   interface ContextVariableMap {
     user: SessionUser | null;
     auth: AuthProvider;
+    credential: Credential | null;
   }
 }
 
@@ -32,5 +33,7 @@ export type Env = {
     user: SessionUser | null;
     /** このリクエストの認証プロバイダ（auth/index.ts の selectAuth が env から選ぶ）。 */
     auth: AuthProvider;
+    /** 認証に使った行（セッションか API トークン）。dev のバイパスでは null。 */
+    credential: Credential | null;
   };
 };

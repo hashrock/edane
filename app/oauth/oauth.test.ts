@@ -23,7 +23,7 @@ const ALICE: SessionUser = { id: "alice", email: "alice@example.com", name: "Ali
 function memoryStore() {
   const clients = new Map<string, OAuthClient & { createdAt: number; authorizedAt: number | null }>();
   const codes = new Map<string, OAuthCode>();
-  const grants = new Map<string, OAuthGrant & { createdAt: string }>();
+  const grants = new Map<string, OAuthGrant & { createdAt: string; previousRefreshHash?: string }>();
   const store: OAuthStore = {
     async createClient(c, { now, unauthorizedClientsBefore }) {
       for (const [k, code] of codes) if (code.expiresAt <= now) codes.delete(k);
@@ -49,11 +49,17 @@ function memoryStore() {
     async rotateGrant(refreshHash, clientId, next, now) {
       for (const g of grants.values()) {
         if (g.refreshTokenHash === refreshHash && g.clientId === clientId && g.refreshExpiresAt > now) {
-          Object.assign(g, next);
+          Object.assign(g, next, { previousRefreshHash: refreshHash });
           return { scope: g.scope };
         }
       }
       return null;
+    },
+    async revokeOnRefreshReuse(refreshHash, clientId) {
+      for (const [k, g] of grants) {
+        if (g.previousRefreshHash === refreshHash && g.clientId === clientId) return grants.delete(k);
+      }
+      return false;
     },
     async listGrants(userId, now) {
       return [...grants.values()]
@@ -194,6 +200,10 @@ describe("authorization code flow", () => {
     expect(grant.accessTokenHash).toBe(await hashToken(next.access_token));
     const replay = await exchange(t, { grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id });
     expect(replay.status).toBe(400);
+    // Replaying a rotated refresh token means it leaked: the whole grant goes, the current pair too.
+    expect(t.grants.size).toBe(0);
+    const afterReuse = await exchange(t, { grant_type: "refresh_token", refresh_token: next.refresh_token, client_id });
+    expect(afterReuse.status).toBe(400);
   });
 
   it("rejects a wrong PKCE verifier, an expired code and another client's code", async () => {

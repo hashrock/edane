@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../global.d";
+import type { Credential } from "../user";
 import { parseContent, serializeDocument } from "../application/persistence";
 import { decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "../utils/crypto";
 import {
@@ -19,7 +20,14 @@ import { applyNoteEditRequest, requestedNodeIds, type NoteEditRequest } from "..
 import { generateId, type IdSource } from "../domain/model";
 import { CLOSE_RATE_LIMITED, acceptsSocket, fullBucket, readableMessage, receiptPruneBelow, takeToken, type Bucket } from "./limits";
 
-type Identity = { noteId: string; userId: string };
+/**
+ * Who is asking. `credential` (a socket's, from when it connected) is re-checked
+ * on every load, so signing out or deleting the token stops an open socket's
+ * writes with no extra query.
+ */
+type Identity = { noteId: string; userId: string; credential?: Credential };
+/** Credential tables by name: the only strings ever spliced into the SQL below. */
+const CREDENTIAL_TABLE = { sessions: "sessions", api_tokens: "api_tokens" } as const satisfies Record<Credential["table"], string>;
 type Row = { id: string; user_id: string; title: string; content: string; is_public: number; version: number; updated_at: string; deleted_at: string | null };
 type Loaded = { row: Row; snapshot: RoomSnapshot };
 
@@ -35,6 +43,9 @@ const idsFor = (operationId: string | undefined): IdSource => {
   let n = 0;
   return () => `op-${operationId}-${++n}`;
 };
+
+/** Close code for a socket whose note (or sign-in) is gone; the client stops reconnecting. */
+const CLOSE_UNAVAILABLE = 4404;
 
 const reject = (rejection: RoomRejection): { ok: false } & RoomRejection => ({ ok: false, ...rejection });
 
@@ -75,8 +86,13 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return result;
   }
   private async load(identity: Identity): Promise<RoomResult<Loaded>> {
-    const row = await this.env.DB.prepare("SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-      .bind(identity.noteId, identity.userId).first<Row>();
+    const base = "SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL";
+    const cred = identity.credential;
+    const row = await (cred
+      ? this.env.DB.prepare(`${base} AND EXISTS (SELECT 1 FROM ${CREDENTIAL_TABLE[cred.table]} WHERE id = ? AND expires_at > ?)`)
+          .bind(identity.noteId, identity.userId, cred.id, Date.now())
+      : this.env.DB.prepare(base).bind(identity.noteId, identity.userId)
+    ).first<Row>();
     if (!row) return reject({ code: "not-found" });
     const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), this.env.ENCRYPTION_KEY);
     if (content === null) return reject({ code: "decrypt-failed" });
@@ -220,6 +236,8 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       const input = JSON.parse(raw);
       id = typeof input.id === "string" ? input.id : undefined;
       const result = await this.commit(ws.deserializeAttachment() as Identity, input);
+      // Note trashed or gone, or the socket's sign-in revoked: same as invalidate().
+      if (!result.ok && result.code === "not-found") return ws.close(CLOSE_UNAVAILABLE, "Note unavailable; reconnect");
       // Also send duplicate receipts, which intentionally don't broadcast.
       ws.send(JSON.stringify(result.ok ? { type: "state", ...result.value } : { type: "error", id, message: rejectionMessage(result) }));
     } catch (error) {
@@ -230,7 +248,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     }
   }
   async invalidate() {
-    for (const ws of this.ctx.getWebSockets()) ws.close(4404, "Note unavailable; reconnect");
+    for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_UNAVAILABLE, "Note unavailable; reconnect");
   }
   private broadcast(message: unknown) {
     const raw = JSON.stringify(message);
