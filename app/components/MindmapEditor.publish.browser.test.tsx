@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render } from "vitest-browser-react";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import type { MindMapModel } from "../domain/model";
+import { stubSyncSocket } from "./fakeSyncSocket";
 
 const MODEL: MindMapModel = {
   id: "root",
@@ -61,6 +62,16 @@ const menuItem = (label: string) =>
 const PUB_ID = "pub-123";
 const realFetch = globalThis.fetch;
 let requests: { url: string; method: string; body?: unknown }[] = [];
+let restoreSocket: (() => void) | null = null;
+
+/** noteId 付きのエディタは同期の初回 state を待つので、同期サーバーを立てる。 */
+function stubSync(isPublic: boolean) {
+  restoreSocket = stubSyncSocket({
+    content: JSON.stringify({ version: 2, roots: MODEL.children }),
+    title: "Root",
+    isPublic,
+  });
+}
 
 beforeEach(() => {
   requests = [];
@@ -105,10 +116,13 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  restoreSocket?.();
+  restoreSocket = null;
 });
 
 describe("node web publication (browser e2e)", () => {
   it("context menu → dialog issues a publication and shows both URLs; revoke DELETEs", async () => {
+    stubSync(true);
     render(
       <MindmapEditor
         noteId="note-1"
@@ -152,6 +166,7 @@ describe("node web publication (browser e2e)", () => {
   });
 
   it("private note: shows the reason instead of issuing a URL (no POST)", async () => {
+    stubSync(false);
     render(
       <MindmapEditor
         noteId="note-1"
