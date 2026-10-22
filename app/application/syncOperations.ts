@@ -30,14 +30,15 @@ function flatten(doc: MindMapDocument) {
 }
 export function diffDocument(before: MindMapDocument, after: MindMapDocument): Patch {
   const a = flatten(before), b = flatten(after);
-  const patch: Patch = { nodes: Object.create(null) };
+  // Object.fromEntries, not assignment: an id like "__proto__" stays an own key,
+  // and the result is a plain object that RPC structured clone accepts.
+  const changes = [...new Set([...a.keys(), ...b.keys()])]
+    .map(id => [id, { before: a.get(id) ?? null, after: b.get(id) ?? null }] as const)
+    .filter(([, change]) => !same(change.before, change.after));
+  const patch: Patch = { nodes: Object.fromEntries(changes) };
   if (before.title !== after.title) patch.title = { before: before.title, after: after.title };
   const roots = { before: before.roots.map(n => n.id), after: after.roots.map(n => n.id) };
   if (!same(roots.before, roots.after)) patch.roots = roots;
-  for (const id of new Set([...a.keys(), ...b.keys()])) {
-    const change = { before: a.get(id) ?? null, after: b.get(id) ?? null };
-    if (!same(change.before, change.after)) patch.nodes[id] = change;
-  }
   return patch;
 }
 export const hasChanges = (p: Patch) => !!(p.title || p.roots || Object.keys(p.nodes).length);

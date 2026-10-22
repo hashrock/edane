@@ -5,28 +5,31 @@ import { eq } from "drizzle-orm";
 import type { SessionUser } from "../user";
 import { hashToken } from "./tokenHash";
 
+/** The id of the user a Bearer token belongs to (one query). Null if invalid. */
+export async function getUserIdByToken(c: Context): Promise<string | null> {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) return null;
+
+  const hash = await hashToken(authHeader.slice(7));
+  const row = await drizzle(c.env.DB)
+    .select({ userId: apiTokens.userId })
+    .from(apiTokens)
+    .where(eq(apiTokens.tokenHash, hash))
+    .get();
+  return row?.userId ?? null;
+}
+
 /** Look up a user by Bearer token. Returns null if invalid. */
 export async function getUserByToken(
   c: Context
 ): Promise<SessionUser | null> {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
+  const userId = await getUserIdByToken(c);
+  if (!userId) return null;
 
-  const token = authHeader.slice(7);
-  const hash = await hashToken(token);
-
-  const db = drizzle(c.env.DB);
-  const row = await db
-    .select()
-    .from(apiTokens)
-    .where(eq(apiTokens.tokenHash, hash))
-    .get();
-  if (!row) return null;
-
-  const user = await db
+  const user = await drizzle(c.env.DB)
     .select()
     .from(users)
-    .where(eq(users.id, row.userId))
+    .where(eq(users.id, userId))
     .get();
   if (!user) return null;
 

@@ -6,6 +6,7 @@
  * too, so no caller can store a private note in the clear by mistake.
  */
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { notes, nodePublications, sites } from "../db/schema";
 import { encodeNoteContentForStorage, noteStorageMode } from "./crypto";
 
@@ -39,6 +40,21 @@ export async function insertNote(db: DrizzleD1Database, note: NewNote, encryptio
     createdAt: note.now,
     updatedAt: note.now,
   });
+}
+
+/** The user's notes outside the trash: pinned first, then most recently updated. */
+export async function listLiveNotes(db: DrizzleD1Database, userId: string) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      isPublic: notes.isPublic,
+      pinned: notes.pinned,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(and(eq(notes.userId, userId), isNull(notes.deletedAt)))
+    .orderBy(desc(notes.pinned), desc(notes.updatedAt));
 }
 
 export interface NewPublication {

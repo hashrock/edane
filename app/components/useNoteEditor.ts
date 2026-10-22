@@ -17,6 +17,7 @@ import { editorReducer } from "../application/editorReducer";
 import { router } from "@inertiajs/react";
 import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
+  freshEditorState,
   type EditorState,
   type EditorAction,
   type UndoType,
@@ -171,18 +172,7 @@ export function useNoteEditor({
   // active (the root is the title, not a node).
   const [state, setStateRaw] = useState<EditorState>(() => {
     const model = parseContent(initialContent, initialTitle);
-    const firstId = firstRootId(model);
-    return {
-      document: { model, clipboard: null },
-      view: {
-        activeNodeId: firstId,
-        editing: false,
-        editingText: findNode(model, firstId)?.text ?? "",
-        cursorPos: 0,
-        selectionEnd: 0,
-        lastChildByParent: {},
-      },
-    };
+    return freshEditorState(model, firstRootId(model));
   });
   const stateRef = useRef(state);
   stateRef.current = state;
