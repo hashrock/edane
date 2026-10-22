@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { allIds, expectUniqueIds, modelArb, pick, sequentialIds } from "../domain/model.arb";
-import { applyNoteEdit, documentToOutline, type NoteEdit } from "./noteEdits";
+import { applyNoteEdit, applyNoteEditRequest, documentToOutline, requestedNodeIds, type NoteEdit, type NoteEditRequest } from "./noteEdits";
 
 function nestedPositions(doc: MindMapDocument): number {
   const walk = (n: MindMapModel): number => n.children.reduce((s, c) => s + (c.position ? 1 : 0) + walk(c), 0);
@@ -54,6 +54,36 @@ describe("applyNoteEdit", () => {
           expect(outline.split(`{id=${id}}`).length - 1).toBe(1);
         }
       })
+    );
+  });
+});
+
+describe("NoteEditRequest (what an operation id names)", () => {
+  const requestArb = fc
+    .tuple(modelArb, fc.nat(), fc.integer({ min: 0, max: 3 }), fc.array(fc.constantFrom("a", "b", "c"), { minLength: 1, maxLength: 4 }))
+    .map(([model, n, kind, words]): { model: MindMapDocument; request: NoteEditRequest } => {
+      const nodeId = pick(allIds(model), n);
+      const markdown = words.map((w) => `- ${w}\n  - ${w}${w}`).join("\n");
+      const requests: NoteEditRequest[] = [
+        { kind: "addNodes", markdown, parentId: nodeId },
+        { kind: "addNodes", markdown },
+        { kind: "updateNode", nodeId, text: words.join("") },
+        { kind: "rename", title: words.join(" ") },
+      ];
+      return { model, request: requests[kind] };
+    });
+
+  it("makes the same document and node ids from the same id source, and says which ids up front", () => {
+    fc.assert(
+      fc.property(requestArb, ({ model, request }) => {
+        const first = applyNoteEditRequest(model, request, sequentialIds("op-x-"));
+        const again = applyNoteEditRequest(model, request, sequentialIds("op-x-"));
+        expect(again).toEqual(first);
+        if (!first.ok) return;
+        expectUniqueIds(first.document);
+        expect(requestedNodeIds(request, sequentialIds("op-x-"))).toEqual(first.nodeIds);
+      }),
+      { numRuns: 200 }
     );
   });
 });

@@ -1,4 +1,4 @@
-import { applyPatch, diffDocument, hasChanges, type Commit, type Snapshot } from "../application/syncOperations";
+import { applyPatch, buildCommit, type Commit, type Snapshot } from "../application/syncOperations";
 import type { MindMapDocument } from "../domain/model";
 
 type Pending = { commit: Commit; resolve: () => void; reject: (e: Error) => void; done: Promise<void> };
@@ -86,12 +86,12 @@ export class NoteSyncClient {
     this.socket.send(JSON.stringify(this.pending[0].commit));
   }
   commit(before: MindMapDocument, after: MindMapDocument, publicity?: Commit["publicity"]): Promise<void> {
-    const patch = diffDocument(before, after);
-    if (!hasChanges(patch) && !publicity) return Promise.resolve();
+    const commit = buildCommit(crypto.randomUUID(), before, after, publicity);
+    if (!commit) return Promise.resolve();
     let resolve!: () => void, reject!: (e: Error) => void;
     const done = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
     done.catch(() => {});
-    this.pending.push({ commit: { id: crypto.randomUUID(), patch, ...(publicity && { publicity }) }, resolve, reject, done });
+    this.pending.push({ commit, resolve, reject, done });
     this.send();
     return done;
   }

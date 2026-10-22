@@ -3,17 +3,21 @@
  * 通知は 202、ツールの誤用は isError の結果。ノートはメモリ上の NoteStore に置く
  * （D1 も暗号化も通らない — そこは noteStore.ts と crypto のテストの担当）。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "../global.d";
-import { mcpRoutes } from "./index";
+import { mcpRoutes, MAX_BODY_BYTES } from "./index";
+import { AGENT_INPUT_LIMITS } from "../application/agentInput";
 import type { NoteStore, StoredNote } from "./noteStore";
-import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol";
+import { SUPPORTED_PROTOCOL_VERSIONS, ToolInputError } from "./protocol";
+import { applyNoteEditRequest } from "../application/noteEdits";
+import { sequentialIds } from "../domain/model.arb";
 
 const TOKEN = "edane_test";
 
 function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: string }> } {
   const notes = new Map<string, StoredNote & { userId: string }>();
+  const receipts = new Map<string, { request: string; nodeIds?: string[] }>();
   let seq = 0;
   return {
     notes,
@@ -31,9 +35,21 @@ function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: 
       notes.set(id, { id, userId, doc, updatedAt: "t0" });
       return { id };
     },
-    async save(userId, note, after) {
-      const n = notes.get(note.id);
-      if (n && n.userId === userId) notes.set(note.id, { ...n, doc: after, updatedAt: "t1" });
+    // Same rules as NoteRoom.applyEdit: the request applied to the note as it is now,
+    // and a repeated operation id answered from its receipt.
+    async edit(userId, noteId, request, operationId) {
+      const n = notes.get(noteId);
+      if (!n || n.userId !== userId) throw new ToolInputError(`Note not found: ${noteId}`);
+      const receipt = operationId && receipts.get(`${noteId}/${operationId}`);
+      if (receipt) {
+        if (receipt.request !== JSON.stringify(request)) throw new ToolInputError("operation reused");
+        return { doc: n.doc, nodeIds: receipt.nodeIds };
+      }
+      const result = applyNoteEditRequest(n.doc, request, sequentialIds(`${noteId}-${seq++}-`));
+      if (!result.ok) throw new ToolInputError(result.error);
+      if (operationId) receipts.set(`${noteId}/${operationId}`, { request: JSON.stringify(request), nodeIds: result.nodeIds });
+      notes.set(noteId, { ...n, doc: result.document, updatedAt: "t1" });
+      return { doc: result.document, nodeIds: result.nodeIds };
     },
   };
 }
@@ -83,7 +99,35 @@ function setup() {
   return { app, store, post, call, docOf };
 }
 
+/** A ping whose JSON is exactly `bytes` long (ASCII padding). */
+function pingOfSize(bytes: number): string {
+  const head = '{"jsonrpc":"2.0","id":1,"method":"ping","pad":"';
+  return head + "x".repeat(bytes - head.length - 2) + '"}';
+}
+
 describe("POST /mcp transport", () => {
+  it("413s a body over the limit, with or without Content-Length, and accepts one at the limit", async () => {
+    const { app, post } = setup();
+    expect((await post(pingOfSize(MAX_BODY_BYTES))).status).toBe(200);
+    expect((await post(pingOfSize(MAX_BODY_BYTES + 1))).status).toBe(413);
+
+    // No Content-Length: the limit is enforced while streaming.
+    const bytes = new TextEncoder().encode(pingOfSize(MAX_BODY_BYTES + 1));
+    const stream = new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += 64 * 1024) controller.enqueue(bytes.slice(i, i + 64 * 1024));
+        controller.close();
+      },
+    });
+    const res = await app.request("https://edane.test/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+    expect(res.status).toBe(413);
+  });
+
   it("401s without a valid Bearer token, advertising Bearer", async () => {
     const { post } = setup();
     for (const token of [null, "wrong"]) {
@@ -113,6 +157,19 @@ describe("POST /mcp transport", () => {
     const list = await post({ jsonrpc: "2.0", id: 3, method: "tools/list" });
     const tools = ((await list.json()) as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name);
     expect(tools).toEqual(["list_notes", "read_note", "create_note", "rename_note", "add_nodes", "update_node", "delete_node"]);
+  });
+
+  it("declares every tool's arguments strictly, with a length cap on every free-text string", async () => {
+    const { post } = setup();
+    const list = await post({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    type Schema = { additionalProperties?: boolean; properties: Record<string, { type: unknown; maxLength?: number; enum?: unknown }> };
+    const tools = ((await list.json()) as { result: { tools: { name: string; inputSchema: Schema }[] } }).result.tools;
+    for (const { name, inputSchema } of tools) {
+      expect(inputSchema.additionalProperties, name).toBe(false);
+      for (const [field, prop] of Object.entries(inputSchema.properties)) {
+        if (prop.type === "string" && !prop.enum) expect(prop.maxLength, `${name}.${field}`).toBeGreaterThan(0);
+      }
+    }
   });
 
   it("answers notifications with 202 and no body, and batches with the responses only", async () => {
@@ -185,6 +242,65 @@ describe("note tools", () => {
 
     await call("rename_note", { noteId: id, title: "Trip 2" });
     expect(store.notes.get(id)!.doc.title).toBe("Trip 2");
+  });
+
+  it("rejects unknown arguments and over-long strings before running the tool", async () => {
+    const { call, store } = setup();
+    const before = store.notes.get("n1")!.doc;
+    expect(await call("update_node", { noteId: "n1", nodeId: "milk", text: "oat", colour: "red" })).toMatchObject({
+      isError: true,
+      text: "Unknown argument: colour",
+    });
+    expect(await call("delete_node", { noteId: "n1", nodeId: "milk", ["__proto__"]: 1 })).toMatchObject({ isError: true });
+
+    const limit = AGENT_INPUT_LIMITS.text;
+    expect(await call("update_node", { noteId: "n1", nodeId: "milk", text: "a".repeat(limit + 1) })).toMatchObject({
+      isError: true,
+      text: `text is too long (max ${limit} characters)`,
+    });
+    expect(store.notes.get("n1")!.doc).toBe(before);
+
+    // Code points, as JSON Schema counts: a surrogate pair is one character.
+    const title = AGENT_INPUT_LIMITS.title;
+    expect(await call("rename_note", { noteId: "n1", title: "😀".repeat(title) })).toMatchObject({ isError: false });
+    expect(await call("rename_note", { noteId: "n1", title: "😀".repeat(title + 1) })).toMatchObject({ isError: true });
+  });
+
+  it("keeps an internal failure internal: JSON-RPC error to the agent, details only in the server log", async () => {
+    const { store, post } = setup();
+    store.edit = async () => {
+      throw new Error("D1_ERROR: disk I/O error at /secret/path");
+    };
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await post({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "update_node", arguments: { noteId: "n1", nodeId: "milk", text: "oat" } },
+      });
+      const body = await res.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code: -32603, message: "Internal error" } });
+      expect(body).not.toContain("secret");
+      expect(log).toHaveBeenCalledWith("mcp tool failed", expect.objectContaining({ tool: "update_node" }));
+      expect(JSON.stringify(log.mock.calls)).not.toContain("oat"); // arguments may hold note text
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("applies an edit sent again under the same operationId only once, with the same node ids", async () => {
+    const { call, docOf } = setup();
+    const args = { noteId: "n1", markdown: "- eggs", operationId: "op-1" };
+    const first = await call("add_nodes", args);
+    const again = await call("add_nodes", args);
+    expect(again.isError).toBe(false);
+    expect(/Added node ids: (\S+)/.exec(again.text)![1]).toBe(/Added node ids: (\S+)/.exec(first.text)![1]);
+    expect(docOf("n1").roots[0].children.map((c) => c.text)).toEqual(["milk", "eggs"]);
+
+    expect(await call("add_nodes", { ...args, markdown: "- ham" })).toMatchObject({ isError: true });
+    expect(await call("add_nodes", { ...args, operationId: "not ok!" })).toMatchObject({ isError: true });
+    expect(docOf("n1").roots[0].children.map((c) => c.text)).toEqual(["milk", "eggs"]);
   });
 
   it("returns misuse as isError results without saving", async () => {

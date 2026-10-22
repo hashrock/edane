@@ -35,13 +35,16 @@ const tokenRes = await fetch(`${base}/api/tokens`, {
 if (!tokenRes.ok) throw new Error(`token issue failed: ${tokenRes.status} (is the dev server running at ${base}?)`);
 const { token } = await tokenRes.json();
 
-async function mcp(name, args) {
-  const res = await fetch(`${base}/mcp`, {
+const postMcp = (body) =>
+  fetch(`${base}/mcp`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+    body: typeof body === "string" ? body : JSON.stringify(body),
   });
-  const { result, error } = await res.json();
+const callMcp = async (name, args) =>
+  (await postMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })).json();
+async function mcp(name, args) {
+  const { result, error } = await callMcp(name, args);
   if (error || result.isError) throw new Error(`${name}: ${error?.message ?? result.content[0].text}`);
   return result.content[0].text;
 }
@@ -78,6 +81,73 @@ const bodyHas = (texts, timeout = 10000) =>
 const outlineText = async () => (await page.innerText('[data-testid="outline-view"]')).replace(/\n+/g, " | ");
 
 try {
+  // 0) 入力の上限: 大きすぎる本文は読まずに 413、長すぎる・未知の引数はツールのエラー。
+  //    どれも後続の通常の呼び出しを妨げない。
+  {
+    const { noteId, text } = await createNote("上限テスト", "- 根\n  - 子");
+    const huge = await postMcp(`{"jsonrpc":"2.0","id":1,"method":"ping","pad":"${"x".repeat(2 * 1024 * 1024)}"}`);
+    check("an over-limit body is refused with 413", huge.status === 413, String(huge.status));
+    const long = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "x".repeat(100_001) });
+    check("an over-long field is a tool error", long.result?.isError === true, long.result?.content[0].text);
+    const unknown = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "y", colour: "red" });
+    check("an unknown argument is a tool error", unknown.result?.isError === true, unknown.result?.content[0].text);
+    const read = await mcp("read_note", { noteId });
+    check("the note is unchanged and the server still answers", read.includes("- 子 {id="), read.split("\n")[2]);
+  }
+
+  // 0b) NoteRoom が読み取りの正本: read_note の updatedAt は同期 API の snapshot と同じ行のもの。
+  //     編集で version と updatedAt が進み、ゴミ箱に入れたノートは見つからない扱いになる。
+  {
+    const { noteId, text } = await createNote("正本テスト", "- 根\n  - 子");
+    const syncSnapshot = async () => {
+      const res = await fetch(`${base}/api/notes/${noteId}/sync`);
+      return res.ok ? res.json() : { status: res.status };
+    };
+    const updatedAtOf = (outline) => outline.match(/updatedAt: ([^,]+),/)[1];
+    const before = await syncSnapshot();
+    check("read_note reports the snapshot's updatedAt", updatedAtOf(await mcp("read_note", { noteId })) === before.updatedAt, before.updatedAt);
+    await mcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "子（更新）" });
+    const after = await syncSnapshot();
+    check(
+      "an edit advances version and updatedAt together",
+      after.version === before.version + 1 && after.updatedAt > before.updatedAt && updatedAtOf(await mcp("read_note", { noteId })) === after.updatedAt,
+      `v${before.version}→v${after.version}`
+    );
+    await fetch(`${base}/notes/${noteId}/trash`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
+    const trashed = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "x" });
+    check("a trashed note is not found by MCP", trashed.result?.content[0].text === `Note not found: ${noteId}`, trashed.result?.content[0].text);
+    check("a trashed note is 404 on the sync API", (await syncSnapshot()).status === 404);
+  }
+
+  // 0c) applyEdit: 同じ operationId の再送は 1 回だけ当たり、同じ id を返す。別の編集に使い回すと
+  //     断られる。何も変えない編集・旧 PUT は version を進めない。
+  {
+    const { noteId, text } = await createNote("再送テスト", "- 根\n  - 子");
+    const version = async () => (await (await fetch(`${base}/api/notes/${noteId}/sync`)).json()).version;
+    const v0 = await version();
+    const args = { noteId, markdown: "- 追加", operationId: `live-${Date.now()}` };
+    const first = await mcp("add_nodes", args);
+    const again = await mcp("add_nodes", args);
+    const idsOf = (t) => t.match(/Added node ids: (\S+)/)[1];
+    const outline = await mcp("read_note", { noteId });
+    check(
+      "a retried add_nodes is applied once and answers with the same ids",
+      idsOf(first) === idsOf(again) && outline.split("- 追加 ").length === 2 && (await version()) === v0 + 1,
+      idsOf(again)
+    );
+    const reused = await callMcp("add_nodes", { ...args, markdown: "- 別" });
+    check("reusing an operationId for another edit is refused", /already used/.test(reused.result?.content[0].text), reused.result?.content[0].text);
+    await mcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "子" });
+    check("an edit that changes nothing doesn't advance the version", (await version()) === v0 + 1);
+    const snap = await (await fetch(`${base}/api/notes/${noteId}/sync`)).json();
+    const put = await fetch(`${base}/api/notes/${noteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ title: snap.model.title, version: snap.version }),
+    });
+    check("a legacy PUT that changes nothing doesn't advance the version", put.ok && (await version()) === snap.version, String(put.status));
+  }
+
   // 1) Claude Code → MCP → 開いているエディタ（リロードしない）
   {
     const { noteId } = await createNote("MCP同期テスト", "- 買い物\n  - 牛乳");
@@ -101,11 +171,19 @@ try {
     await page.getByText("アルファ", { exact: true }).click();
     await page.keyboard.press("End");
     await page.keyboard.type("を編集中");
-    await mcp("update_node", { noteId, nodeId: nodeId(text, "ベータ"), text: "ベータ（MCPで更新）" });
+    // Let the typing reach the server first, so the answer below can be checked for it.
+    for (let i = 0; i < 50; i++) {
+      const snap = await (await fetch(`${base}/api/notes/${noteId}/sync`)).json();
+      if (JSON.stringify(snap.model).includes("アルファを編集中")) break;
+      await page.waitForTimeout(100);
+    }
+    const answer = await mcp("update_node", { noteId, nodeId: nodeId(text, "ベータ"), text: "ベータ（MCPで更新）" });
     check("MCP edit appears while the browser is editing", await bodyHas(["ベータ（MCPで更新）"]));
     const focused = await page.evaluate(() => document.activeElement?.value ?? null);
     check("the in-progress text survives the remote edit", focused === "アルファを編集中", JSON.stringify(focused));
 
+    // The tool answers with the note as committed: the browser's typing so far is in it.
+    check("the edit tool answers with the merged note, browser edits included", answer.includes("アルファを編集中"), answer.split("\n")[2]);
     await page.keyboard.type("、続けて入力");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(1000);

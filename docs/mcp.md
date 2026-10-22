@@ -28,18 +28,22 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 | `update_node` | 本文（`text`）とチェックボックス（`checked`: true / false / null = 外す）を書き換える |
 | `delete_node` | サブツリーごと削除。最後の木の根を消すと空の根が 1 つ残る |
 
-編集ツールは編集後のアウトラインを返すので、続けて編集するときに読み直さなくてよい。
+編集ツールは確定した編集後のアウトライン（同時に併合された他のクライアントの編集も含む）を返すので、続けて編集するときに読み直さなくてよい。
+
+編集ツール（`rename_note` / `add_nodes` / `update_node` / `delete_node`）は任意の `operationId` を受け付ける。応答が届かずに同じ編集を送り直すとき、同じ値を渡せばノートには 1 回だけ当たり、最初と同じノード id が返る。同じ値を別の編集に使い回すと断られる。
 
 ## 実装
 
 - `app/mcp/protocol.ts` — JSON-RPC（`initialize` / `ping` / `tools/list` / `tools/call`）。HTTP と DB に依存しない。
 - `app/mcp/tools.ts` — ツール定義。引数の検証 → 読み込み → 変換 → 保存だけを行う。
-- `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通し、読んだ時点からの差分（`diffDocument`）だけを commit する。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。併合できない競合（同じ属性を同時に書いた・削除済みのノードを編集した）はツールの `isError` として返るので、読み直してやり直す。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。
+- `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通す。編集は依頼（`NoteEditRequest`、ノード id を振る前の形）ごと `NoteRoom.applyEdit` に渡し、`NoteRoom` がその時点のノートに 1 回の順番（`ordered()`）の中で読み込み → 編集 → commit → 配信まで行う。読んでから書くまでの間に他の commit は入らないので、ツールの応答は確定した状態そのもの。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。`operationId` があれば受領記録のダイジェストは依頼から取り、新しいノードの id もそこから決まる（`op-<operationId>-<n>`）。何も変えない編集は commit しない（version は進まない）。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。所有者とゴミ箱の確認も `NoteRoom` が内容と同じ 1 行の SELECT で行い（`updatedAt` もその行のもの）、MCP 側で事前に読み直さない。
+- `NoteRoom` の想定内の拒否（ノートなし・復号失敗・競合・大きすぎる など）は例外ではなく `RoomResult` の `{ ok: false, code }` で返る（`app/application/syncOperations.ts` の `RoomRejection`。DO の RPC 越しには例外の型が残らないため）。呼び出し側（WebSocket・旧 PUT・MCP）がそれぞれの相手向けの文言にする。それ以外の例外（D1 の障害など）はエージェントには `Internal error` だけを返し、詳細はサーバーのログにだけ残す。
 - `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
 
 ### HTTP の振る舞い
 
 - 認証は `Authorization: Bearer <API トークン>` だけ。セッション Cookie では通らない（別サイトからのフォーム送信でノートを書き換えられないように）。そのため認証ミドルウェアより前に mount している。トークンが無い・一致しない場合は 401 + `WWW-Authenticate: Bearer`。
+- 要求本文は 1 MiB まで（超えたら読まずに 413）。ツールの引数は宣言したもの以外を受け付けず、文字列には上限がある（タイトル 200 / ノード本文 100,000 / Markdown 500,000 / id 200 文字、コードポイントで数える）。上限は `app/application/agentInput.ts`、宣言（`additionalProperties: false` と `maxLength`）は `tools.ts` の inputSchema で、`protocol.ts` がツールを呼ぶ前に同じ宣言で検査する。
 - 要求には 200 で `application/json` を返す。通知だけなら 202（本文なし）。旧版のバッチ（配列）は最大 20 件まで。
 - サーバーから能動的に送るものもセッションも無いので、`GET`（SSE）と `DELETE` は 405。
 - Bearer はブラウザが勝手に付けないので、CORS は全オリジンに開けている（ブラウザ版の MCP Inspector から使える）。

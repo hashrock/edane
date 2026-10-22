@@ -1,33 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { applyPatch, diffDocument } from "../application/syncOperations";
+import { applyPatch, Conflict, diffDocument, type RoomRejection } from "../application/syncOperations";
 import type { MindMapDocument } from "../domain/model";
-import { commitRejection } from "./noteStore";
+import { rejectionForAgent } from "./noteStore";
 
-describe("commitRejection", () => {
-  it("passes a merge conflict through with its retry hint", () => {
-    const base: MindMapDocument = { title: "T", roots: [{ id: "r", text: "a", children: [] }] };
-    const mine = diffDocument(base, { ...base, roots: [{ id: "r", text: "b", children: [] }] });
-    const theirs = applyPatch(base, diffDocument(base, { ...base, roots: [{ id: "r", text: "c", children: [] }] }));
-    const message = (() => {
-      try {
-        applyPatch(theirs, mine);
-      } catch (e) {
-        return (e as Error).message;
-      }
-      throw new Error("expected a conflict");
-    })();
-    expect(commitRejection("n1", message)).toBe(message);
-    expect(message).toMatch(/retry/);
+/** The message applyPatch gives a real same-field conflict. */
+function conflictDetail(): string {
+  const base: MindMapDocument = { title: "T", roots: [{ id: "r", text: "a", children: [] }] };
+  const mine = diffDocument(base, { ...base, roots: [{ id: "r", text: "b", children: [] }] });
+  const theirs = applyPatch(base, diffDocument(base, { ...base, roots: [{ id: "r", text: "c", children: [] }] }));
+  try {
+    applyPatch(theirs, mine);
+  } catch (e) {
+    if (e instanceof Conflict) return e.message;
+  }
+  throw new Error("expected a conflict");
+}
+
+describe("rejectionForAgent", () => {
+  const detail = conflictDetail();
+  const cases: [RoomRejection, RegExp | string][] = [
+    [{ code: "conflict", detail }, detail],
+    [{ code: "not-found" }, "Note not found: n1"],
+    [{ code: "decrypt-failed" }, "Note could not be decrypted: n1"],
+    [{ code: "too-large" }, /too large.*Split/],
+    [{ code: "version-conflict" }, /Read the note again and retry/],
+    [{ code: "operation-reused" }, /already used for a different edit/],
+    [{ code: "invalid-edit", detail: "Node not found: x" }, "Node not found: x"],
+    [{ code: "invalid-commit", detail: "Invalid field: text" }, /could not be applied: Invalid field: text/],
+  ];
+  it.each(cases)("words %o for the agent", (rejection, expected) => {
+    const text = rejectionForAgent("n1", rejection);
+    if (typeof expected === "string") expect(text).toBe(expected);
+    else expect(text).toMatch(expected);
   });
 
-  it("rewords the room's expected rejections for an agent", () => {
-    expect(commitRejection("n1", "Note changed or was deleted; reconnect")).toMatch(/Read the note again and retry/);
-    expect(commitRejection("n1", "Note unavailable")).toBe("Note not found: n1");
-    expect(commitRejection("n1", "Commit exceeds 1 MB")).toMatch(/too large/);
-  });
-
-  it("keeps anything else an internal error", () => {
-    expect(commitRejection("n1", "D1_ERROR: database is locked")).toBeNull();
-    expect(commitRejection("n1", "Invalid field: text")).toBeNull();
+  it("tells the agent to re-read on a merge conflict", () => {
+    expect(rejectionForAgent("n1", { code: "conflict", detail })).toMatch(/retry/);
   });
 });

@@ -6,22 +6,23 @@
  * ゴミ箱のノートは一覧にも読み書きにも出さない（見つからない扱い）。
  *
  * 既存ノートの読み書きはエディタと同じノートごとの NoteRoom（app/sync/room.ts）を通す。
- * 読んだ時点からの差分だけを commit するので、開いているエディタの編集と併合され、
+ * 編集は依頼（NoteEditRequest）ごと NoteRoom.applyEdit に渡し、NoteRoom がその時点の
+ * ノートに 1 回の順番の中で当てて commit する。開いているエディタの編集と併合され、
  * version が進み、開いているエディタへも配信される。D1 を直接 UPDATE しないこと。
  */
 import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "../global.d";
 import type { MindMapDocument } from "../domain/model";
 import { serializeDocument } from "../application/persistence";
-import { diffDocument, hasChanges } from "../application/syncOperations";
+import type { RoomRejection } from "../application/syncOperations";
+import type { NoteEditRequest } from "../application/noteEdits";
 import { insertNote, listLiveNotes } from "../utils/noteRepository";
-import { loadOwnedNote } from "../utils/noteOwnership";
 import { noteRoom } from "../utils/noteRoom";
 import { ToolInputError } from "./protocol";
 
 export type NoteSummary = Awaited<ReturnType<typeof listLiveNotes>>[number];
 
-/** 復号済みのノート。`doc` は読んだ時点の文書で、保存はこれとの差分になる。 */
+/** 復号済みのノート。 */
 export interface StoredNote {
   id: string;
   updatedAt: string;
@@ -34,8 +35,16 @@ export interface NoteStore {
   /** 自分のノートで、ゴミ箱に無いものだけ。復号に失敗したら "decrypt-failed"。 */
   load(userId: string, noteId: string): Promise<StoredNote | null | "decrypt-failed">;
   create(userId: string, doc: MindMapDocument): Promise<{ id: string }>;
-  /** load したノートを `after` にする。読んだ後の他の編集とは差分の単位で併合される。 */
-  save(userId: string, note: StoredNote, after: MindMapDocument): Promise<void>;
+  /**
+   * ノートに編集を当てて、確定した文書（併合された他の編集も含む）を返す。`operationId` を
+   * 渡すと、同じ依頼の再送は 1 回だけ当たる。断られたら ToolInputError。
+   */
+  edit(
+    userId: string,
+    noteId: string,
+    request: NoteEditRequest,
+    operationId?: string
+  ): Promise<{ doc: MindMapDocument; nodeIds?: string[] }>;
 }
 
 export function d1NoteStore(env: Env["Bindings"]): NoteStore {
@@ -45,16 +54,13 @@ export function d1NoteStore(env: Env["Bindings"]): NoteStore {
     list: (userId) => listLiveNotes(db, userId),
 
     async load(userId, noteId) {
-      const note = await loadOwnedNote(db, noteId, userId);
-      if (!note || note.deletedAt !== null) return null;
-      try {
-        // 旧テキスト形式でも NoteRoom が振った安定 id の文書が返るので、そのまま差分を取れる。
-        const { model } = await noteRoom(env, noteId).snapshot({ noteId, userId });
-        return { id: note.id, updatedAt: note.updatedAt, doc: model };
-      } catch (e) {
-        if ((e as Error).message === "Decryption failed") return "decrypt-failed";
-        throw e;
-      }
+      // 所有者・ゴミ箱の確認は NoteRoom が同じ 1 行の SELECT で行う。updatedAt もその行のもの。
+      // 旧テキスト形式でも NoteRoom が振った安定 id の文書が返るので、そのまま差分を取れる。
+      const result = await noteRoom(env, noteId).snapshot({ noteId, userId });
+      if (result.ok) return { id: noteId, updatedAt: result.value.updatedAt, doc: result.value.model };
+      if (result.code === "not-found") return null;
+      if (result.code === "decrypt-failed") return "decrypt-failed";
+      throw new Error(`Unexpected snapshot rejection: ${result.code}`);
     },
 
     async create(userId, doc) {
@@ -68,32 +74,32 @@ export function d1NoteStore(env: Env["Bindings"]): NoteStore {
       return { id };
     },
 
-    async save(userId, note, after) {
-      const patch = diffDocument(note.doc, after);
-      if (!hasChanges(patch)) return;
-      try {
-        await noteRoom(env, note.id).commit({ noteId: note.id, userId }, { id: crypto.randomUUID(), patch });
-      } catch (e) {
-        const rejection = commitRejection(note.id, (e as Error).message);
-        if (rejection === null) throw e;
-        throw new ToolInputError(rejection);
-      }
+    async edit(userId, noteId, request, operationId) {
+      const result = await noteRoom(env, noteId).applyEdit({ noteId, userId }, { request, operationId });
+      if (!result.ok) throw new ToolInputError(rejectionForAgent(noteId, result));
+      return { doc: result.value.model, nodeIds: result.value.nodeIds };
     },
   };
 }
 
-/**
- * NoteRoom が commit を断った理由のうち、エージェントに返してよいもの（読み直せば
- * 済む・入力を小さくすれば済む）を、エージェント向けの文言にする。それ以外（D1 の障害
- * など）は null — 内部エラーのまま返し、中身を見せない。RPC 越しに例外の型は残らない
- * ので文言で判別する（文言は app/sync/room.ts と application/syncOperations.ts のもの）。
- */
-export function commitRejection(noteId: string, message: string): string | null {
-  if (message.startsWith("Concurrent change: ")) return message; // 読み直しの指示が付いている
-  if (message.startsWith("Note changed or was deleted")) {
-    return `Note ${noteId} changed or was deleted during the edit. Read the note again and retry.`;
+/** NoteRoom が断った理由を、エージェントが次に何をすればよいか分かる文言にする。 */
+export function rejectionForAgent(noteId: string, r: RoomRejection): string {
+  switch (r.code) {
+    case "conflict":
+      return r.detail; // 読み直してやり直す指示が付いている
+    case "not-found":
+      return `Note not found: ${noteId}`;
+    case "decrypt-failed":
+      return `Note could not be decrypted: ${noteId}`;
+    case "too-large":
+      return "The edit is too large (over 1 MB). Split it into smaller edits.";
+    case "version-conflict":
+      return `Note ${noteId} changed during the edit. Read the note again and retry.`;
+    case "operation-reused":
+      return "This operationId was already used for a different edit. Use a new operationId for a new edit.";
+    case "invalid-commit":
+      return `The edit could not be applied: ${r.detail}`;
+    case "invalid-edit":
+      return r.detail;
   }
-  if (message === "Note unavailable") return `Note not found: ${noteId}`;
-  if (message === "Commit exceeds 1 MB") return "The edit is too large (over 1 MB). Split it into smaller edits.";
-  return null;
 }

@@ -62,6 +62,10 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   // infrastructure: tools built on the pure layers (noteEdits / persistence)
   // plus the note repositories in utils. Independent of auth, like stats.
   mcp: ["domain", "lib", "application", "db", "utils"],
+  // sync = the per-note coordinator (NoteRoom, a Durable Object). Server
+  // infrastructure on the pure layers plus utils (crypto); reached only via
+  // the NOTE_ROOMS binding from server.ts / mcp, never by import.
+  sync: ["domain", "lib", "application", "db", "utils"],
 };
 
 const LAYER_DIRS = new Set(Object.keys(ALLOWED_IMPORTS));

@@ -12,7 +12,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { NoteSyncClient } from "./noteSyncClient";
-import { registerWebMcp, prepareActions } from "./webmcp";
+import { registerWebMcp } from "./webmcp";
+import { prepareActions } from "../application/agentActions";
 import { editorReducer } from "../application/editorReducer";
 import { router } from "@inertiajs/react";
 import { type MindMapDocument, findNode, firstRootId } from "../domain/model";

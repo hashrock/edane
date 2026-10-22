@@ -17,7 +17,42 @@ const INSTRUCTIONS = [
   "ノードの追加は Markdown（見出し・箇条書き・`- [ ]` タスク）で渡す。インデント 2 スペースで 1 段深くなる。",
 ].join("\n");
 
-type JsonSchema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
+import { tooLong, unknownField, type InputIssue } from "../application/agentInput";
+
+type PropertySchema = { type: string | string[]; description?: string; maxLength?: number; enum?: string[] };
+/**
+ * ツールの引数の宣言。tools/list でそのまま見せ、tools/call の前に同じ宣言で検査する
+ * （未知のフィールドと maxLength 超えは、ツールを呼ばずに isError）。型や必須の検査は
+ * ツール側。
+ */
+type JsonSchema = {
+  type: "object";
+  properties: Record<string, PropertySchema>;
+  required?: string[];
+  additionalProperties: false;
+};
+
+function argumentIssue(args: Record<string, unknown>, schema: JsonSchema): InputIssue | null {
+  const unknown = unknownField(args, Object.keys(schema.properties));
+  if (unknown) return unknown;
+  for (const [field, prop] of Object.entries(schema.properties)) {
+    const value = args[field];
+    if (prop.maxLength !== undefined && typeof value === "string") {
+      const issue = tooLong(field, value, prop.maxLength);
+      if (issue) return issue;
+    }
+  }
+  return null;
+}
+
+function describeIssue(issue: InputIssue): string {
+  switch (issue.code) {
+    case "unknown-field":
+      return `Unknown argument: ${issue.field}`;
+    case "too-long":
+      return `${issue.field} is too long (max ${issue.limit} characters)`;
+  }
+}
 
 export type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -105,10 +140,14 @@ export async function handleMessage<Ctx>(
       const tool = tools.find((t) => t.name === params.name);
       if (!tool) return fail(id, INVALID_PARAMS, `Unknown tool: ${String(params.name)}`);
       const args = isObject(params.arguments) ? params.arguments : {};
+      const issue = argumentIssue(args, tool.inputSchema);
+      if (issue) return ok(errorResult(describeIssue(issue)));
       try {
         return ok(await tool.call(args, ctx));
       } catch (e) {
         if (e instanceof ToolInputError) return ok(errorResult(e.message));
+        // エージェントには中身を見せず、サーバー側にだけ残す（引数はノートの本文を含みうるので出さない）。
+        console.error("mcp tool failed", { tool: tool.name, error: e instanceof Error ? (e.stack ?? e.message) : String(e) });
         return fail(id, INTERNAL_ERROR, "Internal error");
       }
     }
