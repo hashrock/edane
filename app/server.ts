@@ -6,7 +6,7 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
-import { authMiddleware, selectAuth } from "./auth";
+import { authMiddleware, browserSessionOnly, selectAuth } from "./auth";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
@@ -34,7 +34,7 @@ import {
   validateSuggestRequest,
   effectiveSchema,
 } from "./application/siteAi";
-import { extractLinkPreview } from "./utils/linkPreview";
+import { fetchLinkPreview } from "./utils/linkPreview";
 import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota, sniffImageType, imageResponseHeaders } from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
@@ -66,6 +66,10 @@ app.route("/", oauthServerRoutes());
 // impersonation) only when DEV_BYPASS_AUTH is set. Nothing here branches on
 // the request itself.
 app.use("*", authMiddleware(selectAuth));
+// Tokens and OAuth grants are managed from the web app only (see browserSessionOnly).
+for (const path of ["/api/tokens", "/api/tokens/*", "/api/oauth/grants", "/api/oauth/grants/*", "/oauth/authorize"]) {
+  app.use(path, browserSessionOnly);
+}
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
@@ -623,7 +627,8 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
 });
 
 // --- UI test scenarios: seed an isolated initial state and redirect to it ---
-// Public-safe (insert-only, current user's own data, no auth bypass); see
+// Public-safe (insert-only, current user's own data, no auth bypass, refused when
+// navigated to from another site); see
 // docs/ui-test-scenarios.md. Everything lives in app/scenarios/.
 app.route("/__scenarios", scenarioRoutes());
 
@@ -640,7 +645,14 @@ app.notFound((c) => {
 });
 
 // --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
+// Open to guests (the landing page editor uses it), so it is rate-limited per
+// IP and each fetch is bounded (utils/linkPreview.ts): not a free proxy.
 app.get("/api/link-preview", async (c) => {
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  if (!(await c.env.LINK_PREVIEW_LIMITER.limit({ key: ip })).success) {
+    c.header("Retry-After", "60");
+    return c.json({ error: "Too many requests" }, 429);
+  }
   const url = c.req.query("url");
   if (!url) return c.json({ error: "url is required" }, 400);
   let target: URL;
@@ -652,16 +664,8 @@ app.get("/api/link-preview", async (c) => {
   if (target.protocol !== "http:" && target.protocol !== "https:") {
     return c.json({ error: "unsupported protocol" }, 400);
   }
-  try {
-    const res = await fetch(target.toString(), {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; edane-bot/1.0)" },
-      redirect: "follow",
-    });
-    const html = await res.text();
-    return c.json(extractLinkPreview(html, target));
-  } catch (e) {
-    return c.json({ error: "fetch failed", detail: String(e) }, 502);
-  }
+  const preview = await fetchLinkPreview(target).catch(() => null);
+  return preview ? c.json(preview) : c.json({ error: "fetch failed" }, 502);
 });
 
 // --- Inertia pages ---

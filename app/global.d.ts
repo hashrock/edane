@@ -21,6 +21,8 @@ export type Env = {
     DEV_BYPASS_AUTH?: string;
     /** POST /oauth/register の IP ごとのレート制限（wrangler.jsonc の ratelimits）。 */
     OAUTH_REGISTER_LIMITER: RateLimit;
+    /** GET /api/link-preview の IP ごとのレート制限（wrangler.jsonc の ratelimits）。 */
+    LINK_PREVIEW_LIMITER: RateLimit;
     /** GET /api/stats の Bearer トークン（secret）。未設定なら endpoint は 404。 */
     STATS_TOKEN?: string;
   };

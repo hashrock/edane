@@ -206,6 +206,16 @@ describe("route decisions", () => {
     });
   });
 
+  it("resolveScenarioAccess (session auth): refuses a navigation from another site, allows direct and same-origin", () => {
+    const ctx = { authKind: "session" as const, tag: "t", nextId: sequentialIds(), user };
+    for (const fetchSite of ["cross-site", "same-site"]) {
+      expect(resolveScenarioAccess("typical", { ...ctx, fetchSite })).toEqual({ kind: "cross-site" });
+    }
+    for (const fetchSite of ["none", "same-origin", undefined]) {
+      expect(resolveScenarioAccess("typical", { ...ctx, fetchSite })).toMatchObject({ kind: "run" });
+    }
+  });
+
   it("resolveScenarioAccess (bypass auth): always runs as a fresh throwaway user, signed in or not", () => {
     const ctx = { authKind: "bypass" as const, tag: "ab12cd", nextId: sequentialIds() };
     for (const current of [user, null]) {

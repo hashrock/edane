@@ -68,7 +68,13 @@ ${status}
     const name = c.req.param("name");
     const auth = c.get("auth");
     const tag = shortTag();
-    const access = resolveScenarioAccess(name, { user: c.get("user"), authKind: auth.kind, tag, nextId: generateId });
+    const access = resolveScenarioAccess(name, {
+      user: c.get("user"),
+      authKind: auth.kind,
+      tag,
+      nextId: generateId,
+      fetchSite: c.req.header("Sec-Fetch-Site"),
+    });
     c.header("Cache-Control", "no-store");
 
     switch (access.kind) {
@@ -78,6 +84,13 @@ ${status}
           : c.html(
               html`<!doctype html><meta charset="utf-8"><p>Unknown scenario: <code>${name}</code>. <a href="${SCENARIOS_PATH}">一覧</a></p>`,
               404
+            );
+      case "cross-site":
+        return json
+          ? c.json({ error: "cross-site", scenariosUrl: SCENARIOS_PATH }, 403)
+          : c.html(
+              html`<!doctype html><meta charset="utf-8"><p>シナリオは他のサイトから開けません。<a href="${SCENARIOS_PATH}">一覧</a>から開いてください。</p>`,
+              403
             );
       case "login-required":
         return json
