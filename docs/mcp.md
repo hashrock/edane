@@ -40,6 +40,7 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 ### HTTP の振る舞い
 
 - 認証は `Authorization: Bearer <API トークン>` だけ。セッション Cookie では通らない（別サイトからのフォーム送信でノートを書き換えられないように）。そのため認証ミドルウェアより前に mount している。トークンが無い・一致しない場合は 401 + `WWW-Authenticate: Bearer`。
+- 要求本文は 1 MiB まで（超えたら読まずに 413）。ツールの引数は宣言したもの以外を受け付けず、文字列には上限がある（タイトル 200 / ノード本文 100,000 / Markdown 500,000 / id 200 文字、コードポイントで数える）。上限は `app/application/agentInput.ts`、宣言（`additionalProperties: false` と `maxLength`）は `tools.ts` の inputSchema で、`protocol.ts` がツールを呼ぶ前に同じ宣言で検査する。
 - 要求には 200 で `application/json` を返す。通知だけなら 202（本文なし）。旧版のバッチ（配列）は最大 20 件まで。
 - サーバーから能動的に送るものもセッションも無いので、`GET`（SSE）と `DELETE` は 405。
 - Bearer はブラウザが勝手に付けないので、CORS は全オリジンに開けている（ブラウザ版の MCP Inspector から使える）。

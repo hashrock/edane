@@ -8,6 +8,7 @@
  */
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../global.d";
 import { getUserIdByToken } from "../utils/apiToken";
 import { handleMessage, PARSE_ERROR, INVALID_REQUEST } from "./protocol";
@@ -27,6 +28,11 @@ const defaultDeps: McpDeps = {
 
 /** 1 リクエストに詰められる JSON-RPC メッセージの上限（旧版のバッチ用）。 */
 const MAX_BATCH = 20;
+/**
+ * 要求本文の上限（バイト）。Bearer 必須でも、誤動作したクライアントや漏れたトークンが
+ * Worker のメモリを食い潰さないように、読む前に切る。ツールごとの文字数の上限は tools.ts。
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
 
 export function mcpRoutes(deps: McpDeps = defaultDeps) {
   const r = new Hono<Env>();
@@ -41,37 +47,41 @@ export function mcpRoutes(deps: McpDeps = defaultDeps) {
     })
   );
 
-  r.post("/", async (c) => {
-    c.header("Cache-Control", "no-store");
-    const userId = await deps.resolveUserId(c);
-    if (!userId) {
-      c.header("WWW-Authenticate", 'Bearer realm="edane"');
-      return c.json({ error: "Unauthorized" }, 401);
-    }
+  r.post(
+    "/",
+    bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: "Payload Too Large" }, 413) }),
+    async (c) => {
+      c.header("Cache-Control", "no-store");
+      const userId = await deps.resolveUserId(c);
+      if (!userId) {
+        c.header("WWW-Authenticate", 'Bearer realm="edane"');
+        return c.json({ error: "Unauthorized" }, 401);
+      }
 
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ jsonrpc: "2.0", id: null, error: { code: PARSE_ERROR, message: "Parse error" } }, 400);
-    }
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        return c.json({ jsonrpc: "2.0", id: null, error: { code: PARSE_ERROR, message: "Parse error" } }, 400);
+      }
 
-    const ctx: ToolContext = { userId, store: deps.store(c.env), origin: new URL(c.req.url).origin };
+      const ctx: ToolContext = { userId, store: deps.store(c.env), origin: new URL(c.req.url).origin };
 
-    const batch = Array.isArray(body);
-    const messages = batch ? (body as unknown[]) : [body];
-    if (messages.length === 0 || messages.length > MAX_BATCH) {
-      return c.json({ jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: "Invalid Request" } }, 400);
+      const batch = Array.isArray(body);
+      const messages = batch ? (body as unknown[]) : [body];
+      if (messages.length === 0 || messages.length > MAX_BATCH) {
+        return c.json({ jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: "Invalid Request" } }, 400);
+      }
+      // In order: a later message in a batch may edit what an earlier one made.
+      const responses = [];
+      for (const m of messages) {
+        const res = await handleMessage(m, NOTE_TOOLS, ctx);
+        if (res) responses.push(res);
+      }
+      if (responses.length === 0) return c.body(null, 202);
+      return c.json(batch ? responses : responses[0]);
     }
-    // In order: a later message in a batch may edit what an earlier one made.
-    const responses = [];
-    for (const m of messages) {
-      const res = await handleMessage(m, NOTE_TOOLS, ctx);
-      if (res) responses.push(res);
-    }
-    if (responses.length === 0) return c.body(null, 202);
-    return c.json(batch ? responses : responses[0]);
-  });
+  );
 
   // サーバーから送るもの（SSE）もセッションも無い。
   const notAllowed = (c: Context<Env>) => {

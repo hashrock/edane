@@ -35,13 +35,16 @@ const tokenRes = await fetch(`${base}/api/tokens`, {
 if (!tokenRes.ok) throw new Error(`token issue failed: ${tokenRes.status} (is the dev server running at ${base}?)`);
 const { token } = await tokenRes.json();
 
-async function mcp(name, args) {
-  const res = await fetch(`${base}/mcp`, {
+const postMcp = (body) =>
+  fetch(`${base}/mcp`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+    body: typeof body === "string" ? body : JSON.stringify(body),
   });
-  const { result, error } = await res.json();
+const callMcp = async (name, args) =>
+  (await postMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })).json();
+async function mcp(name, args) {
+  const { result, error } = await callMcp(name, args);
   if (error || result.isError) throw new Error(`${name}: ${error?.message ?? result.content[0].text}`);
   return result.content[0].text;
 }
@@ -78,6 +81,20 @@ const bodyHas = (texts, timeout = 10000) =>
 const outlineText = async () => (await page.innerText('[data-testid="outline-view"]')).replace(/\n+/g, " | ");
 
 try {
+  // 0) 入力の上限: 大きすぎる本文は読まずに 413、長すぎる・未知の引数はツールのエラー。
+  //    どれも後続の通常の呼び出しを妨げない。
+  {
+    const { noteId, text } = await createNote("上限テスト", "- 根\n  - 子");
+    const huge = await postMcp(`{"jsonrpc":"2.0","id":1,"method":"ping","pad":"${"x".repeat(2 * 1024 * 1024)}"}`);
+    check("an over-limit body is refused with 413", huge.status === 413, String(huge.status));
+    const long = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "x".repeat(100_001) });
+    check("an over-long field is a tool error", long.result?.isError === true, long.result?.content[0].text);
+    const unknown = await callMcp("update_node", { noteId, nodeId: nodeId(text, "子"), text: "y", colour: "red" });
+    check("an unknown argument is a tool error", unknown.result?.isError === true, unknown.result?.content[0].text);
+    const read = await mcp("read_note", { noteId });
+    check("the note is unchanged and the server still answers", read.includes("- 子 {id="), read.split("\n")[2]);
+  }
+
   // 1) Claude Code → MCP → 開いているエディタ（リロードしない）
   {
     const { noteId } = await createNote("MCP同期テスト", "- 買い物\n  - 牛乳");

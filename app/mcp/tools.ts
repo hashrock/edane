@@ -4,6 +4,7 @@
  */
 import { CONTENT_FORMAT_VERSION } from "../application/persistence";
 import { absoluteUrl } from "../lib/url";
+import { AGENT_INPUT_LIMITS } from "../application/agentInput";
 import {
   applyNoteEdit,
   documentFromMarkdown,
@@ -57,10 +58,16 @@ async function editNote(ctx: ToolContext, args: Args, edit: NoteEdit): Promise<T
   return textResult(`${created}${documentToOutline(result.document)}`);
 }
 
-const NOTE_ID = { type: "string", description: "list_notes で得たノートの id" };
-const NODE_ID = { type: "string", description: "read_note のアウトラインで {id=…} に書かれたノードの id" };
+const NOTE_ID = { type: "string", maxLength: AGENT_INPUT_LIMITS.id, description: "list_notes で得たノートの id" };
+const NODE_ID = {
+  type: "string",
+  maxLength: AGENT_INPUT_LIMITS.id,
+  description: "read_note のアウトラインで {id=…} に書かれたノードの id",
+};
+const TITLE = { type: "string", maxLength: AGENT_INPUT_LIMITS.title };
 const MARKDOWN = {
   type: "string",
+  maxLength: AGENT_INPUT_LIMITS.markdown,
   description:
     "追加するノード。Markdown の見出し / 箇条書き（2 スペースで 1 段深く）/ `- [ ] タスク` / 段落。1 行 = 1 ノード、コードブロックは 1 ノード。",
 };
@@ -70,7 +77,13 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     name: "list_notes",
     title: "ノート一覧",
     description: "自分のノート（ゴミ箱を除く）を、ピン留め → 更新が新しい順に返す。query を渡すとタイトルの部分一致で絞り込む。",
-    inputSchema: { type: "object", properties: { query: { type: "string", description: "タイトルの検索語（大文字小文字を区別しない）" } } },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", maxLength: AGENT_INPUT_LIMITS.query, description: "タイトルの検索語（大文字小文字を区別しない）" },
+      },
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true },
     async call(args, ctx) {
       const query = optionalString(args, "query")?.trim().toLowerCase();
@@ -88,6 +101,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       type: "object",
       properties: { noteId: NOTE_ID, format: { type: "string", enum: ["outline", "json"] } },
       required: ["noteId"],
+      additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
     async call(args, ctx) {
@@ -108,8 +122,9 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       "新しい非公開ノートを作る。markdown の最上位が 1 項目ならそれが木の根、複数ならタイトルを根にしてその下に並べる。",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, markdown: MARKDOWN },
+      properties: { title: TITLE, markdown: MARKDOWN },
       required: ["title"],
+      additionalProperties: false,
     },
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
@@ -122,7 +137,12 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     name: "rename_note",
     title: "ノートの名前を変える",
     description: "ノートのタイトルを変える。",
-    inputSchema: { type: "object", properties: { noteId: NOTE_ID, title: { type: "string" } }, required: ["noteId", "title"] },
+    inputSchema: {
+      type: "object",
+      properties: { noteId: NOTE_ID, title: TITLE },
+      required: ["noteId", "title"],
+      additionalProperties: false,
+    },
     annotations: { idempotentHint: true },
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
@@ -140,6 +160,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       type: "object",
       properties: { noteId: NOTE_ID, markdown: MARKDOWN, parentId: NODE_ID, afterId: NODE_ID },
       required: ["noteId", "markdown"],
+      additionalProperties: false,
     },
     async call(args, ctx) {
       const nodes = nodesFromMarkdown(requiredString(args, "markdown"));
@@ -158,10 +179,11 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       properties: {
         noteId: NOTE_ID,
         nodeId: NODE_ID,
-        text: { type: "string" },
+        text: { type: "string", maxLength: AGENT_INPUT_LIMITS.text },
         checked: { type: ["boolean", "null"] },
       },
       required: ["noteId", "nodeId"],
+      additionalProperties: false,
     },
     annotations: { idempotentHint: true },
     async call(args, ctx) {
@@ -180,7 +202,12 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     name: "delete_node",
     title: "ノードを削除",
     description: "ノードをサブツリーごと削除する。最後の木の根を消すと空の根が 1 つ残る。",
-    inputSchema: { type: "object", properties: { noteId: NOTE_ID, nodeId: NODE_ID }, required: ["noteId", "nodeId"] },
+    inputSchema: {
+      type: "object",
+      properties: { noteId: NOTE_ID, nodeId: NODE_ID },
+      required: ["noteId", "nodeId"],
+      additionalProperties: false,
+    },
     annotations: { destructiveHint: true },
     async call(args, ctx) {
       const nodeId = requiredString(args, "nodeId");
