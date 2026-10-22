@@ -4,6 +4,7 @@ import type { MindMapDocument } from "../domain/model";
 import { editorReducer, type EditorState } from "../application/editorReducer";
 import { UndoManager } from "../application/undoManager";
 import { prepareActions } from "../application/agentActions";
+import { parseContent, serializeDocument } from "../application/persistence";
 const base = (): MindMapDocument => ({ title: "Note", roots: [{ id: "r", text: "Root", children: [{ id: "a", text: "A", children: [] }, { id: "b", text: "B", children: [] }] }] });
 const edit = (fn: (d: MindMapDocument) => void) => { const d = base(); fn(d); return diffDocument(base(), d); };
 const state = (model = base()): EditorState => ({ document: { model, clipboard: null }, view: { activeNodeId: "r", editing: false, editingText: "Root", cursorPos: 0, selectionEnd: 0, lastChildByParent: {} } });
@@ -20,6 +21,22 @@ describe("shared note operation semantics", () => {
     const cloned = structuredClone(patch);
     expect(Object.keys(cloned.nodes)).toContain("__proto__");
     expect(applyPatch(base(), parseCommit({ id: "c1", patch: cloned }).patch).roots[0].children.map(n => n.id)).toEqual(["a", "b", "__proto__"]);
+  });
+  it("a quick toggle sequence applies against the stored base, which drops collapsed: false and bold: false", () => {
+    // NoteRoom reloads every commit's base from storage (serialize → parse).
+    const reload = (d: MindMapDocument) => parseContent(serializeDocument(d), d.title);
+    const withChild = (): MindMapDocument => { const d = base(); d.roots[0].children[0].children.push({ id: "c", text: "C", children: [] }); return d; };
+    let local = state(withChild());
+    let server = reload(withChild());
+    for (const action of [
+      { type: "toggleCollapse", nodeId: "a" }, { type: "toggleCollapse", nodeId: "a" }, { type: "toggleCollapse", nodeId: "a" },
+      { type: "setNodeStyle", nodeId: "a", bold: true }, { type: "setNodeStyle", nodeId: "a", bold: false }, { type: "setNodeStyle", nodeId: "a", bold: true },
+    ] as const) {
+      const next = editorReducer(local, action);
+      server = reload(applyPatch(server, diffDocument(local.document.model, next.document.model)));
+      local = next;
+    }
+    expect(server.roots[0].children[0]).toMatchObject({ collapsed: true, bold: true });
   });
   it("rejects same-field conflicts atomically", () => {
     const a = edit(d => { d.roots[0].text = "Alice"; });
