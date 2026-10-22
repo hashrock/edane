@@ -57,39 +57,6 @@ export async function listLiveNotes(db: DrizzleD1Database, userId: string) {
     .orderBy(desc(notes.pinned), desc(notes.updatedAt));
 }
 
-export interface LiveNoteUpdate {
-  id: string;
-  userId: string;
-  title?: string;
-  /** Plaintext; encoded per `isPublic` (the note's current publicity). */
-  content?: { plain: string; isPublic: boolean };
-  now: string;
-}
-
-/**
- * Update a note the user owns and that is not in the trash, in one statement
- * (ownership and liveness are part of the WHERE). Returns whether it matched.
- */
-export async function updateLiveNote(
-  db: DrizzleD1Database,
-  update: LiveNoteUpdate,
-  encryptionKey: string
-): Promise<boolean> {
-  const content =
-    update.content &&
-    (await encodeNoteContentForStorage(update.content.plain, noteStorageMode(update.content.isPublic), encryptionKey));
-  const rows = await db
-    .update(notes)
-    .set({
-      ...(update.title !== undefined && { title: update.title }),
-      ...(content !== undefined && { content }),
-      updatedAt: update.now,
-    })
-    .where(and(eq(notes.id, update.id), eq(notes.userId, update.userId), isNull(notes.deletedAt)))
-    .returning({ id: notes.id });
-  return rows.length > 0;
-}
-
 export interface NewPublication {
   id: string;
   userId: string;

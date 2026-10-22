@@ -34,7 +34,7 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 
 - `app/mcp/protocol.ts` — JSON-RPC（`initialize` / `ping` / `tools/list` / `tools/call`）。HTTP と DB に依存しない。
 - `app/mcp/tools.ts` — ツール定義。引数の検証 → 読み込み → 変換 → 保存だけを行う。
-- `app/mcp/noteStore.ts` — D1 への読み書き。一覧と更新は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）/ `updateLiveNote`（所有者とゴミ箱外を WHERE に含めた 1 文の UPDATE）。公開 = 平文、非公開 = 暗号化の保存ポリシーは `crypto.ts`。
+- `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通し、読んだ時点からの差分（`diffDocument`）だけを commit する。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。併合できない競合（同じ属性を同時に書いた・削除済みのノードを編集した）はツールの `isError` として返るので、読み直してやり直す。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。
 - `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
 
 ### HTTP の振る舞い
@@ -46,7 +46,6 @@ AI エージェント（Claude Code、Claude Desktop、MCP Inspector など）�
 
 ### 制限
 
-- ブラウザのエディタでそのノートを開いたまま MCP で編集すると、エディタの次の自動保存で MCP の変更が上書きされる（エディタはノート全体を保存するため）。MCP で編集するノートはエディタで開かないか、編集後に再読み込みする。
 - OAuth には対応していないので、ヘッダーを設定できないクライアント（claude.ai のカスタムコネクタなど）からは接続できない。
 
 ## ローカルで試す

@@ -15,7 +15,7 @@ import { NoteSyncClient } from "./noteSyncClient";
 import { registerWebMcp, prepareActions } from "./webmcp";
 import { editorReducer } from "../application/editorReducer";
 import { router } from "@inertiajs/react";
-import { type MindMapDocument, firstRootId } from "../domain/model";
+import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
   freshEditorState,
   type EditorState,
