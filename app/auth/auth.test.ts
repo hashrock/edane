@@ -59,6 +59,8 @@ const noDb = bypassAuth({ devUser: async () => DEV_USER });
 describe("selectAuth", () => {
   it("picks the bypass only when DEV_BYPASS_AUTH is set", () => {
     expect(selectAuth({ DEV_BYPASS_AUTH: "true" }).kind).toBe("bypass");
+    expect(selectAuth({ DEV_BYPASS_AUTH: "1" }).kind).toBe("bypass");
+    for (const off of ["false", "0", "no", ""]) expect(selectAuth({ DEV_BYPASS_AUTH: off }).kind).toBe("session");
     expect(selectAuth({ DEV_BYPASS_AUTH: undefined }).kind).toBe("session");
     expect(selectAuth({}).kind).toBe("session");
   });
