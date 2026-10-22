@@ -80,6 +80,10 @@ export function markdownToModel(
   // Depth at which content directly under the current heading sits. Content
   // before any heading lives at the top level (depth 0).
   let contentDepth = 0;
+  // The last list item and the column its marker sits at: an unmarked line
+  // indented past that column continues the item's text (modelToMarkdown
+  // writes a multi-line text that way). Anything else ends the item.
+  let openItem: { node: MindMapModel; indent: number } | null = null;
 
   const push = (depth: number, text: string, checked?: boolean) => {
     const node: MindMapModel = { id: nextId(), text, children: [] };
@@ -89,6 +93,7 @@ export function markdownToModel(
     }
     stack[stack.length - 1].node.children.push(node);
     stack.push({ node, depth });
+    return node;
   };
 
   const lines = md.split("\n");
@@ -99,6 +104,7 @@ export function markdownToModel(
     // verbatim node so code keeps its own line breaks and markers.
     const fence = line.match(FENCE);
     if (fence) {
+      openItem = null;
       const marker = fence[1];
       const lang = line.trim().slice(marker.length).trim();
       const body: string[] = [];
@@ -116,6 +122,14 @@ export function markdownToModel(
     if (line.trim() === "") continue;
     if (HR.test(line)) continue;
 
+    const list = line.match(UNORDERED) || line.match(ORDERED);
+    const lineIndent = line.length - line.trimStart().length;
+    if (!list && openItem && lineIndent > openItem.indent && !HEADING.test(line)) {
+      openItem.node.text += `\n${stripInline(line.trim())}`;
+      continue;
+    }
+    openItem = null;
+
     const heading = line.match(HEADING);
     if (heading) {
       const level = heading[1].length; // 1..6
@@ -124,7 +138,6 @@ export function markdownToModel(
       continue;
     }
 
-    const list = line.match(UNORDERED) || line.match(ORDERED);
     if (list) {
       const indent = list[1].replace(/\t/g, "  ").length;
       const depth = contentDepth + Math.floor(indent / 2);
@@ -132,11 +145,8 @@ export function markdownToModel(
       // literal "[ ]" text — the round trip through modelToMarkdown below
       // writes the marker back.
       const task = list[2].match(TASK);
-      if (task) {
-        push(depth, stripInline(task[2]), task[1] !== " ");
-        continue;
-      }
-      push(depth, stripInline(list[2]));
+      const node = task ? push(depth, stripInline(task[2]), task[1] !== " ") : push(depth, stripInline(list[2]));
+      openItem = { node, indent };
       continue;
     }
 
@@ -204,7 +214,13 @@ export function modelToMarkdown(
     // through markdownToModel as a task rather than as literal text.
     const box =
       n.checked === undefined ? "" : n.checked ? "[x] " : "[ ] ";
-    lines.push(`${"  ".repeat(depth)}- ${box}${nodeToMarkdownText(n)}${annotate(n)}`);
+    // A multi-line text continues under the item, indented past the marker
+    // (as Markdown reads a list item's continuation lines), so it can't be
+    // mistaken for a node of its own. The annotation stays on the bullet line.
+    const indent = "  ".repeat(depth);
+    const [first, ...rest] = nodeToMarkdownText(n).split("\n");
+    lines.push(`${indent}- ${box}${first}${annotate(n)}`);
+    for (const line of rest) lines.push(`${indent}  ${line}`);
     for (const child of n.children) walk(child, depth + 1);
   };
   walk(node, 0);
