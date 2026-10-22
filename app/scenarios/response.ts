@@ -26,6 +26,11 @@ export type ScenarioAccess =
   | { kind: "unknown" }
   /** 認証は迂回しない：本番で未ログインなら通常のログイン導線へ（docs 参照）。 */
   | { kind: "login-required"; scenario: ScenarioDefinition }
+  /**
+   * 本番で、別サイト（同じ eTLD+1 の別サブドメインを含む）からの遷移。GET で書き込むので、
+   * 他サイトのリンクやリダイレクトでログイン中ユーザーのデータ（公開ノートを含む）を作らせない。
+   */
+  | { kind: "cross-site" }
   | { kind: "run"; scenario: ScenarioDefinition; actor: ScenarioActor };
 
 export interface AccessContext {
@@ -33,6 +38,8 @@ export interface AccessContext {
   authKind: AuthProvider["kind"];
   tag: string;
   nextId: IdSource;
+  /** `Sec-Fetch-Site`。URL を直接開いた（`none`）・一覧から辿った（`same-origin`）・ヘッダーなし（ブラウザ以外）だけ通す。 */
+  fetchSite?: string;
 }
 
 export function throwawayUser(name: string, tag: string, id: string): SessionUser {
@@ -45,6 +52,7 @@ export function resolveScenarioAccess(name: string, ctx: AccessContext): Scenari
   if (ctx.authKind === "bypass") {
     return { kind: "run", scenario, actor: { kind: "throwaway", user: throwawayUser(name, ctx.tag, ctx.nextId()) } };
   }
+  if (ctx.fetchSite === "cross-site" || ctx.fetchSite === "same-site") return { kind: "cross-site" };
   if (!ctx.user) return { kind: "login-required", scenario };
   return { kind: "run", scenario, actor: { kind: "current", user: ctx.user } };
 }

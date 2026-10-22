@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractLinkPreview } from "./linkPreview";
+import { extractLinkPreview, fetchLinkPreview, readTextPrefix, LINK_PREVIEW_MAX_BYTES } from "./linkPreview";
 
 describe("extractLinkPreview", () => {
   it("extracts the title, collapsing whitespace and trimming", () => {
@@ -50,5 +50,53 @@ describe("extractLinkPreview", () => {
     expect(extractLinkPreview(bad + good, target).favicon).toBe(
       "https://example.com/a.png"
     );
+  });
+});
+
+describe("fetchLinkPreview", () => {
+  const page = (html: string, init: ResponseInit = {}) => new Response(html, init);
+  const redirect = (to: string) => new Response(null, { status: 302, headers: { Location: to } });
+
+  it("follows a few redirects and resolves the favicon against the final page", async () => {
+    const hops = [redirect("/b"), redirect("https://other.example/c"), page("<title>Final</title>")];
+    const seen: string[] = [];
+    const fake = (async (url: string) => {
+      seen.push(url);
+      return hops.shift()!;
+    }) as typeof fetch;
+    expect(await fetchLinkPreview(new URL("https://example.com/a"), fake)).toEqual({
+      title: "Final",
+      favicon: "https://other.example/favicon.ico",
+    });
+    expect(seen).toEqual(["https://example.com/a", "https://example.com/b", "https://other.example/c"]);
+  });
+
+  it("gives up after too many redirects or on a non-http redirect", async () => {
+    const loop = (async () => redirect("/again")) as typeof fetch;
+    expect(await fetchLinkPreview(new URL("https://example.com/"), loop)).toBeNull();
+    const toFile = (async () => redirect("file:///etc/passwd")) as typeof fetch;
+    expect(await fetchLinkPreview(new URL("https://example.com/"), toFile)).toBeNull();
+  });
+
+  it("never reads past the size cap", async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(64 * 1024).fill(0x61);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    });
+    const fake = (async () => new Response(endless)) as typeof fetch;
+    const preview = await fetchLinkPreview(new URL("https://example.com/"), fake);
+    expect(preview?.title).toBe("example.com");
+    expect(pulled).toBeLessThanOrEqual(LINK_PREVIEW_MAX_BYTES + 2 * chunk.byteLength);
+  });
+});
+
+describe("readTextPrefix", () => {
+  it("returns at most maxBytes", async () => {
+    expect(await readTextPrefix(new Response("abcdef"), 4)).toBe("abcd");
+    expect(await readTextPrefix(new Response("ab"), 4)).toBe("ab");
   });
 });

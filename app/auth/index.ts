@@ -13,4 +13,4 @@ export function selectAuth(env: Pick<Env["Bindings"], "DEV_BYPASS_AUTH">): AuthP
   return env.DEV_BYPASS_AUTH ? bypass : sessionAuth;
 }
 
-export { authMiddleware, type AuthProvider } from "./provider";
+export { authMiddleware, browserSessionOnly, type AuthProvider } from "./provider";
