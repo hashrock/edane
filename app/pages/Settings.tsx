@@ -1,7 +1,7 @@
 import { Head, Link } from "@inertiajs/react";
 import { useEffect, useState, useCallback } from "react";
 import type { SessionUser } from "../user";
-import { IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
+import { ALLOWED_IMAGE_TYPES, IMAGE_STORAGE_LIMIT_BYTES } from "../domain/imageStorage";
 import { publicationUrls } from "../application/nodePublication";
 import { siteEditPath } from "../application/siteTemplate";
 import {
@@ -265,7 +265,7 @@ export default function Settings({ user }: { user: User }) {
               {uploading ? t("uploadingImage") : t("addImage")}
               <input
                 type="file"
-                accept="image/*"
+                accept={ALLOWED_IMAGE_TYPES.join(",")}
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) => handleUpload(e.target.files?.[0])}

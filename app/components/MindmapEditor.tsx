@@ -11,6 +11,7 @@ import {
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
+import { ALLOWED_IMAGE_TYPES } from "../domain/imageStorage";
 import {
   findNode,
   firstRootId,
@@ -4109,7 +4110,7 @@ export function MindmapEditorView({
         <input
           ref={imageFileInputRef}
           type="file"
-          accept="image/*"
+          accept={ALLOWED_IMAGE_TYPES.join(",")}
           style={{ display: "none" }}
           onChange={async (e) => {
             const file = e.target.files?.[0];

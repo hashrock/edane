@@ -35,7 +35,7 @@ import {
   effectiveSchema,
 } from "./application/siteAi";
 import { extractLinkPreview } from "./utils/linkPreview";
-import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota } from "./domain/imageStorage";
+import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota, sniffImageType, imageResponseHeaders } from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
@@ -262,8 +262,11 @@ app.post("/api/images", async (c) => {
   if (!(file instanceof File)) {
     return c.json({ error: "No file provided" }, 400);
   }
-  if (!file.type.startsWith("image/")) {
-    return c.json({ error: "Only image files are allowed" }, 400);
+  // The stored type comes from the bytes, never from the client (see sniffImageType).
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentType = sniffImageType(bytes);
+  if (!contentType) {
+    return c.json({ error: "Only PNG, JPEG, GIF, WebP and AVIF images are allowed" }, 400);
   }
 
   const db = drizzle(c.env.DB);
@@ -281,8 +284,8 @@ app.post("/api/images", async (c) => {
 
   const id = crypto.randomUUID();
   const r2Key = `${user.id}/${id}`;
-  await c.env.IMAGES.put(r2Key, await file.arrayBuffer(), {
-    httpMetadata: { contentType: file.type },
+  await c.env.IMAGES.put(r2Key, bytes, {
+    httpMetadata: { contentType },
   });
 
   const createdAt = new Date().toISOString();
@@ -291,7 +294,7 @@ app.post("/api/images", async (c) => {
     userId: user.id,
     r2Key,
     filename: file.name,
-    contentType: file.type,
+    contentType,
     size: file.size,
     createdAt,
   });
@@ -301,7 +304,7 @@ app.post("/api/images", async (c) => {
       id,
       url: `/api/images/${id}/raw`,
       filename: file.name,
-      contentType: file.type,
+      contentType,
       size: file.size,
       createdAt,
     },
@@ -323,7 +326,8 @@ app.delete("/api/images/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// Serve the binary. Public (no auth) so it works inside public notes / <img>.
+// Serve the binary. Public (no auth) so it works inside public notes / <img>;
+// imageResponseHeaders keeps a top-level visit from running script on our origin.
 app.get("/api/images/:id/raw", async (c) => {
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
@@ -331,12 +335,7 @@ app.get("/api/images/:id/raw", async (c) => {
   if (!meta) return c.notFound();
   const obj = await c.env.IMAGES.get(meta.r2Key);
   if (!obj) return c.notFound();
-  return new Response(obj.body, {
-    headers: {
-      "Content-Type": meta.contentType,
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
+  return new Response(obj.body, { headers: imageResponseHeaders(meta.contentType) });
 });
 
 // --- Node publications: serve one branch as JSON / Markdown (public, CORS) ---
