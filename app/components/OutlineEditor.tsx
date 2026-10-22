@@ -6,6 +6,7 @@ import {
   useEffect,
   useLayoutEffect,
 } from "react";
+import { safeExternalUrl } from "../lib/url";
 import { Link, router } from "@inertiajs/react";
 import { findNode } from "../domain/model";
 import type { UndoType } from "../application/editorReducer";
@@ -419,6 +420,7 @@ export default function OutlineEditor({
               const isActive = node.id === activeNodeId;
               const isEditingThis = isActive && editing;
               const type = node.type ?? "text";
+              const linkUrl = type === "link" ? safeExternalUrl(node.text) : null;
               const isCustom = isAuxInputSurface("outline", type);
               // Image/link nodes keep their preview while editing and expose the
               // URL in an inline box below (instead of raw-text editing).
@@ -616,9 +618,9 @@ export default function OutlineEditor({
                     </div>
 
                     {/* Open link */}
-                    {type === "link" && node.text && !isEditingThis && (
+                    {linkUrl && !isEditingThis && (
                       <a
-                        href={node.text}
+                        href={linkUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}

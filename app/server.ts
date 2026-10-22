@@ -1,4 +1,7 @@
 import { Hono, type Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { AGENT_INPUT_LIMITS, codePointLength } from "./application/agentInput";
+import { API_TOKEN_TTL_MS } from "./utils/apiToken";
 import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
@@ -6,11 +9,12 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
-import { authMiddleware, browserSessionOnly, selectAuth } from "./auth";
+import { authMiddleware, selectAuth } from "./auth";
+import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
+import { decodeStoredNoteContent, noteKeys, noteStorageMode, type NoteKeys } from "./utils/crypto";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
@@ -35,18 +39,31 @@ import {
   effectiveSchema,
 } from "./application/siteAi";
 import { fetchLinkPreview } from "./utils/linkPreview";
-import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota, sniffImageType, imageResponseHeaders } from "./domain/imageStorage";
+import {
+  IMAGE_STORAGE_LIMIT_BYTES,
+  MAX_IMAGE_BYTES,
+  totalImageBytes,
+  sniffImageType,
+  imageResponseHeaders,
+} from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
 import { oauthServerRoutes, oauthSessionRoutes, takeOAuthReturn } from "./oauth";
 import { noteRoom } from "./utils/noteRoom";
+import { insertImageWithinQuota } from "./utils/imageRepository";
 import { aiSuggestAllowed } from "./utils/aiQuota";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
+import { securityHeaders } from "./utils/securityHeaders";
 
 const app = new Hono<Env>();
+
+// Baseline headers (CSP frame-ancestors / script-src, nosniff) on every response.
+app.use("*", securityHeaders);
+// Each route's policy (auth/routePolicy.ts), first: CSRF, browser-only, rate limit, body size.
+app.use("*", routePolicyMiddleware());
 
 // --- Signup stats for the repos.hashrock.info admin (Bearer STATS_TOKEN) ---
 // Mounted before the session middleware on purpose: it must not depend on
@@ -67,10 +84,8 @@ app.route("/", oauthServerRoutes());
 // impersonation) only when DEV_BYPASS_AUTH is set. Nothing here branches on
 // the request itself.
 app.use("*", authMiddleware(selectAuth));
-// Tokens and OAuth grants are managed from the web app only (see browserSessionOnly).
-for (const path of ["/api/tokens", "/api/tokens/*", "/api/oauth/grants", "/api/oauth/grants/*", "/oauth/authorize"]) {
-  app.use(path, browserSessionOnly);
-}
+// Then guests are turned away from signed-in routes; handlers take the user from signedInUser.
+app.use("*", requireRouteUser);
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
@@ -121,20 +136,20 @@ app.get(
   }
 );
 
-app.get("/auth/logout", async (c) => {
+app.post("/auth/logout", async (c) => {
   await c.get("auth").signOut(c);
   return c.redirect("/");
 });
 
 // All editor writes go through the note coordinator, including legacy PUT.
 app.get("/api/notes/:id/sync", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
-  // NoteRoom checks owner and trash itself (404 for both, as for a missing note).
-  const identity = { noteId: id, userId: user.id };
+  // NoteRoom checks owner and trash itself (404 for both, as for a missing note),
+  // and, for a socket, that the credential it was opened with is still live.
+  const identity = { noteId: id, userId: user.id, credential: c.get("credential") ?? undefined };
+  // Upgrades from another origin are refused by the route policy (cross-site WebSocket hijacking).
   if (c.req.header("Upgrade")?.toLowerCase() === "websocket") {
-    if (c.req.header("Origin") !== new URL(c.req.url).origin) return c.text("Invalid origin", 403);
     const headers = new Headers(c.req.raw.headers);
     headers.set("X-Note-Identity", JSON.stringify(identity));
     return noteRoom(c.env, id).fetch(new Request(c.req.url, { headers }));
@@ -143,8 +158,7 @@ app.get("/api/notes/:id/sync", async (c) => {
   return result.ok ? c.json(result.value) : roomRejectionResponse(c, result);
 });
 app.put("/api/notes/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
   const body = await c.req.json<{ title?: string; content?: string; isPublic?: boolean; version?: number }>();
   if (!Number.isSafeInteger(body.version)) return c.json({ error: "version required; GET /api/notes/:id/sync first" }, 428);
@@ -174,11 +188,14 @@ function roomRejectionResponse(c: Context<Env>, r: RoomRejection) {
 }
 
 // --- API tokens (JSON; used by the desktop app via Bearer auth) ---
+const MAX_TOKEN_NAME = 100;
 app.post("/api/tokens", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const body = await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string });
+  if (body.name !== undefined && (typeof body.name !== "string" || codePointLength(body.name) > MAX_TOKEN_NAME)) {
+    return c.json({ error: `name must be at most ${MAX_TOKEN_NAME} characters` }, 400);
+  }
   const rawToken = `edane_${crypto.randomUUID().replace(/-/g, "")}`;
   const hash = await hashToken(rawToken);
   const id = crypto.randomUUID();
@@ -190,6 +207,7 @@ app.post("/api/tokens", async (c) => {
     name: body.name || "default",
     tokenHash: hash,
     createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + API_TOKEN_TTL_MS,
   });
 
   // Return the raw token only once — it cannot be retrieved later
@@ -197,8 +215,7 @@ app.post("/api/tokens", async (c) => {
 });
 
 app.get("/api/tokens", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const tokens = await db
@@ -206,6 +223,7 @@ app.get("/api/tokens", async (c) => {
       id: apiTokens.id,
       name: apiTokens.name,
       createdAt: apiTokens.createdAt,
+      expiresAt: apiTokens.expiresAt,
     })
     .from(apiTokens)
     .where(eq(apiTokens.userId, user.id));
@@ -214,8 +232,7 @@ app.get("/api/tokens", async (c) => {
 });
 
 app.delete("/api/tokens/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
@@ -235,8 +252,7 @@ app.delete("/api/tokens/:id", async (c) => {
 
 // --- Images: R2 upload + D1 metadata (JSON; used by the editor & settings) ---
 app.get("/api/images", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const db = drizzle(c.env.DB);
   const rows = await db
     .select()
@@ -259,13 +275,15 @@ app.get("/api/images", async (c) => {
 });
 
 app.post("/api/images", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const form = await c.req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
     return c.json({ error: "No file provided" }, 400);
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return c.json({ error: "Image too large", limit: MAX_IMAGE_BYTES, fileSize: file.size }, 413);
   }
   // The stored type comes from the bytes, never from the client (see sniffImageType).
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -274,41 +292,28 @@ app.post("/api/images", async (c) => {
     return c.json({ error: "Only PNG, JPEG, GIF, WebP and AVIF images are allowed" }, 400);
   }
 
-  const db = drizzle(c.env.DB);
-  const existing = await db
-    .select({ size: images.size })
-    .from(images)
-    .where(eq(images.userId, user.id));
-  const used = totalImageBytes(existing.map((r) => r.size));
-  if (exceedsImageQuota(used, file.size)) {
-    return c.json(
-      { error: "Storage limit exceeded", used, limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size },
-      413
-    );
-  }
-
+  // Reserve the quota first (the check is inside the INSERT, so it holds under
+  // parallel uploads), then store the bytes; a failed store gives the space back.
   const id = crypto.randomUUID();
   const r2Key = `${user.id}/${id}`;
-  await c.env.IMAGES.put(r2Key, bytes, {
-    httpMetadata: { contentType },
-  });
-
   const createdAt = new Date().toISOString();
-  await db.insert(images).values({
-    id,
-    userId: user.id,
-    r2Key,
-    filename: file.name,
-    contentType,
-    size: file.size,
-    createdAt,
-  });
+  const filename = file.name.slice(0, 200);
+  const row = { id, userId: user.id, r2Key, filename, contentType, size: file.size, createdAt };
+  if (!(await insertImageWithinQuota(c.env.DB, row, IMAGE_STORAGE_LIMIT_BYTES))) {
+    return c.json({ error: "Storage limit exceeded", limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size }, 413);
+  }
+  try {
+    await c.env.IMAGES.put(r2Key, bytes, { httpMetadata: { contentType } });
+  } catch (e) {
+    await drizzle(c.env.DB).delete(images).where(eq(images.id, id));
+    throw e;
+  }
 
   return c.json(
     {
       id,
       url: `/api/images/${id}/raw`,
-      filename: file.name,
+      filename,
       contentType,
       size: file.size,
       createdAt,
@@ -318,8 +323,7 @@ app.post("/api/images", async (c) => {
 });
 
 app.delete("/api/images/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
   const meta = await db.select().from(images).where(eq(images.id, id)).get();
@@ -365,7 +369,7 @@ async function loadServablePublication(db: DrizzleD1Database, pubId: string) {
     .get();
   if (!pub) return null;
   const note = await db.select().from(notes).where(eq(notes.id, pub.noteId)).get();
-  if (!note || !canServePublication(note)) return null;
+  if (!note || !canServePublication(note, pub)) return null;
   const node = findNode(parseContent(note.content, note.title), pub.nodeId);
   return node ? { pub, note, node } : null;
 }
@@ -389,17 +393,13 @@ async function loadOwnedPublicationNode(
   db: DrizzleD1Database,
   pubId: string,
   userId: string,
-  encryptionKey: string
+  keys: NoteKeys
 ) {
   const pub = await loadOwnedPublication(db, pubId, userId);
   if (!pub) return { error: "not-found" as const };
   const note = await loadOwnedNote(db, pub.noteId, userId);
   if (!note) return { error: "not-found" as const };
-  const content = await decodeStoredNoteContent(
-    note.content,
-    noteStorageMode(note.isPublic),
-    encryptionKey
-  );
+  const content = await decodeStoredNoteContent(note.content, noteStorageMode(note.isPublic), keys, note.id);
   if (content === null) return { error: "decrypt" as const };
   const node = findNode(parseContent(content, note.title), pub.nodeId);
   if (!node) return { error: "not-found" as const };
@@ -426,12 +426,11 @@ app.get("/pub/:file", async (c) => {
 // twice shows the same URL. Revoke + re-publish DOES mint a new slug — that's
 // the URL-rotation feature, not an accident.
 app.post("/api/notes/:id/publications", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const note = await loadOwnedNote(db, c.req.param("id"), user.id);
-  if (!note) return c.json({ error: "Not found" }, 404);
+  if (!note || note.deletedAt) return c.json({ error: "Not found" }, 404);
   if (!note.isPublic) {
     return c.json({ error: PRIVATE_NOTE_PUBLISH_REASON }, 400);
   }
@@ -455,6 +454,10 @@ app.post("/api/notes/:id/publications", async (c) => {
     )
     .get();
   if (existing) {
+    // Publishing again after the note was private / trashed is the owner's choice to resume this URL.
+    if (existing.publicEpoch !== note.publicEpoch) {
+      await db.update(nodePublications).set({ publicEpoch: note.publicEpoch }).where(eq(nodePublications.id, existing.id));
+    }
     return c.json({
       id: existing.id,
       nodeId: existing.nodeId,
@@ -464,7 +467,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await insertPublication(db, { id, userId: user.id, noteId: note.id, nodeId: body.nodeId, createdAt });
+  await insertPublication(db, { id, userId: user.id, noteId: note.id, nodeId: body.nodeId, createdAt, publicEpoch: note.publicEpoch });
   return c.json({ id, nodeId: body.nodeId, createdAt }, 201);
 });
 
@@ -474,8 +477,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 // back to private still shows its path — the PUBLIC serve path above never
 // decrypts.
 app.get("/api/publications", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -488,6 +490,8 @@ app.get("/api/publications", async (c) => {
       noteContent: notes.content,
       noteIsPublic: notes.isPublic,
       noteDeletedAt: notes.deletedAt,
+      notePublicEpoch: notes.publicEpoch,
+      publicEpoch: nodePublications.publicEpoch,
     })
     .from(nodePublications)
     .innerJoin(notes, eq(nodePublications.noteId, notes.id))
@@ -500,19 +504,15 @@ app.get("/api/publications", async (c) => {
   for (const r of rows) {
     let model = models.get(r.noteId);
     if (model === undefined) {
-      const content = await decodeStoredNoteContent(
-        r.noteContent,
-        noteStorageMode(r.noteIsPublic),
-        c.env.ENCRYPTION_KEY
-      );
+      const content = await decodeStoredNoteContent(r.noteContent, noteStorageMode(r.noteIsPublic), noteKeys(c.env), r.noteId);
       model = content === null ? null : parseContent(content, r.noteTitle);
       models.set(r.noteId, model);
     }
     const path = model ? nodePathTexts(model, r.nodeId) : null;
-    const servable = canServePublication({
-      isPublic: r.noteIsPublic,
-      deletedAt: r.noteDeletedAt,
-    });
+    const servable = canServePublication(
+      { isPublic: r.noteIsPublic, deletedAt: r.noteDeletedAt, publicEpoch: r.notePublicEpoch },
+      r
+    );
     publications.push({
       id: r.id,
       noteId: r.noteId,
@@ -523,7 +523,7 @@ app.get("/api/publications", async (c) => {
       active: servable && path !== null,
       inactiveReason: r.noteDeletedAt
         ? "note-trashed"
-        : !r.noteIsPublic
+        : !r.noteIsPublic || r.notePublicEpoch !== r.publicEpoch
           ? "note-private"
           : path === null
             ? "node-missing"
@@ -534,8 +534,7 @@ app.get("/api/publications", async (c) => {
 });
 
 app.delete("/api/publications/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
@@ -564,8 +563,7 @@ app.get("/sites/:pubId", async (c) => {
 // browser; the server only checks ownership and size — the serve path's CSP
 // is what makes arbitrary author HTML safe on this origin.
 app.put("/api/sites/:pubId", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const db = drizzle(c.env.DB);
   const pubId = c.req.param("pubId");
   if (!(await loadOwnedPublication(db, pubId, user.id))) {
@@ -591,11 +589,10 @@ app.put("/api/sites/:pubId", async (c) => {
 // The result is just text — the author's browser compiles it and shows
 // errors like any hand edit.
 app.post("/api/sites/:pubId/suggest", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   if (!(await aiSuggestAllowed(c.env, user.id))) return c.json({ error: "Too many AI requests; wait a minute" }, 429);
   const [owned, body] = await Promise.all([
-    loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, c.env.ENCRYPTION_KEY),
+    loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, noteKeys(c.env)),
     c.req.json().catch(() => null),
   ]);
   if ("error" in owned) {
@@ -624,7 +621,8 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
       502
     );
   } catch (e) {
-    return c.json({ error: "AI request failed", detail: String(e) }, 502);
+    console.error("AI suggest failed", e);
+    return c.json({ error: "AI request failed" }, 502);
   }
 });
 
@@ -633,6 +631,13 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
 // navigated to from another site); see
 // docs/ui-test-scenarios.md. Everything lives in app/scenarios/.
 app.route("/__scenarios", scenarioRoutes());
+
+// --- Unhandled errors: details go to the log, never to the client ---
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.json({ error: "Internal error" }, 500);
+});
 
 // --- 404: a real page with a way back, not Hono's bare text (usertest #13) ---
 // Every `c.notFound()` in the routes above lands here.
@@ -648,13 +653,8 @@ app.notFound((c) => {
 
 // --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
 // Open to guests (the landing page editor uses it), so it is rate-limited per
-// IP and each fetch is bounded (utils/linkPreview.ts): not a free proxy.
+// IP (the route policy) and each fetch is bounded (utils/linkPreview.ts): not a free proxy.
 app.get("/api/link-preview", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  if (!(await c.env.LINK_PREVIEW_LIMITER.limit({ key: ip })).success) {
-    c.header("Retry-After", "60");
-    return c.json({ error: "Too many requests" }, 429);
-  }
   const url = c.req.query("url");
   if (!url) return c.json({ error: "url is required" }, 400);
   let target: URL;
@@ -680,15 +680,13 @@ const routes = app
     return c.render("Notes/Index", { user: null, notes: [] });
   })
   .get("/notes", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     // Trashed notes live on the /trash page.
     const myNotes = await listLiveNotes(drizzle(c.env.DB), user.id);
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/trash", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const trashed = await db
       .select({
@@ -704,8 +702,7 @@ const routes = app
     return c.render("Notes/Trash", { user, notes: trashed });
   })
   .get("/settings", (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     return c.render("Settings", { user });
   })
   .get("/guest", (c) =>
@@ -717,12 +714,17 @@ const routes = app
     })
   )
   .post("/notes", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
 
     const body = await c.req
       .json<{ title?: string; content?: string }>()
       .catch(() => ({}) as { title?: string; content?: string });
+    if (
+      (body.title !== undefined && (typeof body.title !== "string" || codePointLength(body.title) > AGENT_INPUT_LIMITS.title)) ||
+      (body.content !== undefined && typeof body.content !== "string")
+    ) {
+      return c.json({ error: "Invalid note" }, 400);
+    }
     const id = crypto.randomUUID();
     // Guest-mode imports arrive with their own serialized content; a plain
     // "new note" falls back to the starter topics. There is no new-note form
@@ -738,15 +740,14 @@ const routes = app
         isPublic: false,
         now: new Date().toISOString(),
       },
-      c.env.ENCRYPTION_KEY
+      noteKeys(c.env)
     );
 
     return c.redirect(`/notes/${id}/edit`, 303);
   })
   .post("/notes/:id/trash", async (c) => {
     // Soft delete: move to the trash (restorable). The main list hides it.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -760,8 +761,7 @@ const routes = app
   })
   .post("/notes/:id/restore", async (c) => {
     // Bring a trashed note back to the main list.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -774,8 +774,7 @@ const routes = app
   })
   .delete("/notes/:id", async (c) => {
     // Permanent delete (from the trash page). Irreversible.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -790,11 +789,10 @@ const routes = app
     return c.redirect("/trash", 303);
   })
   .post("/notes/:id/pin", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
-    if (note) {
+    if (note && !note.deletedAt) {
       const body = await c.req
         .json<{ pinned?: boolean }>()
         .catch(() => ({}) as { pinned?: boolean });
@@ -819,7 +817,7 @@ const routes = app
       case "render": {
         const owned = access.note;
         const content =
-          (await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), c.env.ENCRYPTION_KEY)) ??
+          (await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), noteKeys(c.env), owned.id)) ??
           "";
         return c.render("Notes/Edit", {
           user: access.viewer,
@@ -831,12 +829,11 @@ const routes = app
     }
   })
   .get("/sites/:pubId/edit", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const pubId = c.req.param("pubId");
     const [owned, site] = await Promise.all([
-      loadOwnedPublicationNode(db, pubId, user.id, c.env.ENCRYPTION_KEY),
+      loadOwnedPublicationNode(db, pubId, user.id, noteKeys(c.env)),
       db.select({ template: sites.template }).from(sites).where(eq(sites.publicationId, pubId)).get(),
     ]);
     if ("error" in owned) {
@@ -864,7 +861,7 @@ const routes = app
     if (access.kind === "not-found") return c.notFound();
 
     const owned = access.note;
-    const content = await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), c.env.ENCRYPTION_KEY);
+    const content = await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), noteKeys(c.env), owned.id);
     if (content === null) return c.text("Decryption failed", 500);
     return c.render("Notes/Show", {
       user: access.viewer,

@@ -10,6 +10,7 @@
  * ノートに 1 回の順番の中で当てて commit する。開いているエディタの編集と併合され、
  * version が進み、開いているエディタへも配信される。D1 を直接 UPDATE しないこと。
  */
+import { noteKeys } from "../utils/crypto";
 import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "../global.d";
 import type { MindMapDocument } from "../domain/model";
@@ -69,7 +70,7 @@ export function d1NoteStore(env: Env["Bindings"]): NoteStore {
       await insertNote(
         db,
         { id, userId, title: doc.title, plainContent: serializeDocument(doc), isPublic: false, now },
-        env.ENCRYPTION_KEY
+        noteKeys(env)
       );
       return { id };
     },

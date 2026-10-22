@@ -32,7 +32,7 @@ pnpm dev    # Vite + Cloudflare Worker が http://localhost:5173 で起動
 
 ### 認証バイパス（ローカル開発）
 
-`wrangler.jsonc` の `vars.DEV_BYPASS_AUTH` が有効なため、ローカルでは Google OAuth をスキップして Dev User として自動ログインする。シークレットは `.dev.vars` に置く。
+`.dev.vars` の `DEV_BYPASS_AUTH=1` が有効なため、ローカルの `pnpm dev` では Google OAuth をスキップして Dev User として自動ログインする（`vite build` した本番のバンドルではこの経路そのものが無い。`app/auth/index.ts`）。シークレットも `.dev.vars` に置く。
 
 ### リモート MCP（`POST /mcp`）
 

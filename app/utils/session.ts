@@ -1,14 +1,16 @@
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { SessionUser } from "../user";
+import { drizzle } from "drizzle-orm/d1";
+import { and, eq, gt, lte } from "drizzle-orm";
+import { sessions } from "../db/schema";
+import { randomToken } from "./tokenHash";
 import {
   base64ToBytes,
   bytesToBase64,
   decodeBase64Utf8,
   encodeBase64Utf8,
 } from "./base64";
-
-const SESSION_COOKIE = "session";
 
 async function sign(payload: string, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -56,55 +58,82 @@ async function verify(
   return valid ? payload : null;
 }
 
+/** Whether cookies for this request get `Secure` (everything but local dev on http://localhost). */
+const isSecureRequest = (c: Context) => new URL(c.req.url).hostname !== "localhost";
+
 /**
- * A `SessionUser` in an HMAC-signed cookie (SESSION_SECRET). The session
- * cookie and the dev-bypass impersonation cookie (auth/bypassAuth.ts) share
- * this format but use different names, so neither can be read as the other.
+ * A value in an HMAC-signed cookie (SESSION_SECRET). The session cookie and the
+ * dev-bypass impersonation cookie (auth/bypassAuth.ts) share the format under
+ * different names, so neither can be read as the other.
  */
-export async function writeSignedUserCookie(
-  c: Context,
-  name: string,
-  user: SessionUser,
-  maxAge: number
-) {
+export async function writeSignedCookie(c: Context, name: string, value: unknown, maxAge: number) {
   // UTF-8 first: a non-Latin1 display name would make a raw btoa() throw.
-  const payload = encodeBase64Utf8(JSON.stringify(user));
+  const payload = encodeBase64Utf8(JSON.stringify(value));
   const token = await sign(payload, c.env.SESSION_SECRET);
-  const isLocalhost = new URL(c.req.url).hostname === "localhost";
   setCookie(c, name, token, {
     path: "/",
     httpOnly: true,
-    secure: !isLocalhost,
+    secure: isSecureRequest(c),
     sameSite: "Lax",
     maxAge,
   });
 }
 
-export async function readSignedUserCookie(c: Context, name: string): Promise<SessionUser | null> {
+export async function readSignedCookie<T>(c: Context, name: string): Promise<T | null> {
   const token = getCookie(c, name);
   if (!token) return null;
-
   try {
     const payload = await verify(token, c.env.SESSION_SECRET);
     if (!payload) return null;
-    return JSON.parse(decodeBase64Utf8(payload)) as SessionUser;
+    return JSON.parse(decodeBase64Utf8(payload)) as T;
   } catch {
     return null;
   }
 }
 
-export function deleteSignedUserCookie(c: Context, name: string) {
-  deleteCookie(c, name, { path: "/" });
-}
+/** How long a browser sign-in lasts. */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * `__Host-` keeps a sibling subdomain from setting or overwriting the cookie
+ * (it needs Secure and Path=/, no Domain). Local dev is plain http, so it keeps
+ * the bare name there.
+ */
+const sessionCookieName = (c: Context) => (isSecureRequest(c) ? "__Host-session" : "session");
+/** The cookie before server-side sessions: never read, deleted on sign-out. */
+const LEGACY_SESSION_COOKIE = "session";
+
+type SessionCookie = { sid: string; user: SessionUser };
+
+/** Start a server-side session (one row) and point the cookie at it. Expired rows are swept here. */
 export async function setSession(c: Context, user: SessionUser) {
-  await writeSignedUserCookie(c, SESSION_COOKIE, user, 60 * 60 * 24 * 30);
+  const now = Date.now();
+  const sid = randomToken();
+  const db = drizzle(c.env.DB);
+  await db.batch([
+    db.delete(sessions).where(lte(sessions.expiresAt, now)),
+    db.insert(sessions).values({ id: sid, userId: user.id, expiresAt: now + SESSION_TTL_MS }),
+  ]);
+  await writeSignedCookie(c, sessionCookieName(c), { sid, user } satisfies SessionCookie, SESSION_TTL_MS / 1000);
 }
 
-export async function getSession(c: Context): Promise<SessionUser | null> {
-  return readSignedUserCookie(c, SESSION_COOKIE);
+/** The signed-in user and their session row, if the cookie names a live row. One indexed read. */
+export async function getSession(c: Context): Promise<{ user: SessionUser; sid: string } | null> {
+  const cookie = await readSignedCookie<Partial<SessionCookie>>(c, sessionCookieName(c));
+  if (!cookie?.sid || !cookie.user) return null;
+  const row = await drizzle(c.env.DB)
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.id, cookie.sid), gt(sessions.expiresAt, Date.now())))
+    .get();
+  return row ? { user: cookie.user, sid: cookie.sid } : null;
 }
 
-export function clearSession(c: Context) {
-  deleteSignedUserCookie(c, SESSION_COOKIE);
+/** End the session server-side (the row) and in the browser (the cookie). */
+export async function clearSession(c: Context) {
+  const cookie = await readSignedCookie<Partial<SessionCookie>>(c, sessionCookieName(c));
+  if (cookie?.sid) await drizzle(c.env.DB).delete(sessions).where(eq(sessions.id, cookie.sid));
+  deleteCookie(c, sessionCookieName(c), { path: "/", secure: isSecureRequest(c) });
+  deleteCookie(c, LEGACY_SESSION_COOKIE, { path: "/" });
 }
+

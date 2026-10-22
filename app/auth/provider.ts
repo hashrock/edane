@@ -12,7 +12,10 @@
  */
 import type { Context, MiddlewareHandler } from "hono";
 import type { Env } from "../global.d";
-import type { SessionUser } from "../user";
+import type { Credential, SessionUser } from "../user";
+
+/** Who a request is, and the server-side row it was authenticated with (null in the dev bypass). */
+export type Resolved = { user: SessionUser; credential: Credential | null };
 
 export interface AuthProvider {
   /**
@@ -21,7 +24,7 @@ export interface AuthProvider {
    */
   readonly kind: "session" | "bypass";
   /** 毎リクエスト、ミドルウェアが呼ぶ。null = 未ログイン。 */
-  resolve(c: Context<Env>): Promise<SessionUser | null>;
+  resolve(c: Context<Env>): Promise<Resolved | null>;
   /** 以後のリクエストで `resolve` が `user` を返すようにする（ブラウザは複数リクエストをまたぐ）。 */
   signIn(c: Context<Env>, user: SessionUser): Promise<void>;
   signOut(c: Context<Env>): Promise<void>;
@@ -36,21 +39,11 @@ export function authMiddleware(select: (env: Env["Bindings"]) => AuthProvider): 
   return async (c, next) => {
     const auth = select(c.env);
     c.set("auth", auth);
-    c.set("user", await auth.resolve(c));
+    // A route that never reads the user (routePolicy.ts `anonymous`) skips the session lookup.
+    const resolved = c.get("routePolicy")?.access === "anonymous" ? null : await auth.resolve(c);
+    c.set("user", resolved?.user ?? null);
+    c.set("credential", resolved?.credential ?? null);
     await next();
   };
 }
 
-/**
- * Credential management (API tokens, OAuth consent and connected apps) only
- * for a browser session, never for a Bearer token: `sessionAuth` also accepts
- * API tokens everywhere, and a leaked token must not mint more tokens or
- * approve OAuth clients to outlive its own revocation. Browsers never send
- * `Authorization` on their own, so the web UI is unaffected.
- */
-export const browserSessionOnly: MiddlewareHandler<Env> = async (c, next) => {
-  if (c.req.header("Authorization")) {
-    return c.json({ error: "Use the web app to manage tokens and connected apps" }, 403);
-  }
-  await next();
-};

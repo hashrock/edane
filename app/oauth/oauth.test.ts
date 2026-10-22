@@ -10,6 +10,7 @@ import { inertia } from "@hono/inertia";
 import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
 import { oauthServerRoutes, oauthSessionRoutes } from "./index";
+import { requireRouteUser, routePolicyMiddleware } from "../auth/routePolicy";
 import type { OAuthClient, OAuthCode, OAuthGrant, OAuthStore } from "./store";
 import { REFRESH_TOKEN_TTL_MS } from "./protocol";
 import { hashToken } from "../utils/tokenHash";
@@ -23,7 +24,7 @@ const ALICE: SessionUser = { id: "alice", email: "alice@example.com", name: "Ali
 function memoryStore() {
   const clients = new Map<string, OAuthClient & { createdAt: number; authorizedAt: number | null }>();
   const codes = new Map<string, OAuthCode>();
-  const grants = new Map<string, OAuthGrant & { createdAt: string }>();
+  const grants = new Map<string, OAuthGrant & { createdAt: string; previousRefreshHash?: string }>();
   const store: OAuthStore = {
     async createClient(c, { now, unauthorizedClientsBefore }) {
       for (const [k, code] of codes) if (code.expiresAt <= now) codes.delete(k);
@@ -49,11 +50,17 @@ function memoryStore() {
     async rotateGrant(refreshHash, clientId, next, now) {
       for (const g of grants.values()) {
         if (g.refreshTokenHash === refreshHash && g.clientId === clientId && g.refreshExpiresAt > now) {
-          Object.assign(g, next);
+          Object.assign(g, next, { previousRefreshHash: refreshHash });
           return { scope: g.scope };
         }
       }
       return null;
+    },
+    async revokeOnRefreshReuse(refreshHash, clientId) {
+      for (const [k, g] of grants) {
+        if (g.previousRefreshHash === refreshHash && g.clientId === clientId) return grants.delete(k);
+      }
+      return false;
     },
     async listGrants(userId, now) {
       return [...grants.values()]
@@ -75,12 +82,15 @@ function setup(user: SessionUser | null = ALICE) {
   let now = 1_000_000;
   let registrationAllowed = true;
   const deps = { store: () => mem.store, now: () => now, allowRegistration: async () => registrationAllowed };
+  // Same order as server.ts: the route policy (CSRF etc.) first, the user, then the guest check.
   const app = new Hono<Env>()
+    .use("*", routePolicyMiddleware())
     .route("/", oauthServerRoutes(deps))
     .use("*", async (c, next) => {
       c.set("user", user);
       await next();
     })
+    .use("*", requireRouteUser)
     .use(inertia())
     .route("/", oauthSessionRoutes(deps));
   const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${path}`, init);
@@ -194,6 +204,10 @@ describe("authorization code flow", () => {
     expect(grant.accessTokenHash).toBe(await hashToken(next.access_token));
     const replay = await exchange(t, { grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id });
     expect(replay.status).toBe(400);
+    // Replaying a rotated refresh token means it leaked: the whole grant goes, the current pair too.
+    expect(t.grants.size).toBe(0);
+    const afterReuse = await exchange(t, { grant_type: "refresh_token", refresh_token: next.refresh_token, client_id });
+    expect(afterReuse.status).toBe(400);
   });
 
   it("rejects a wrong PKCE verifier, an expired code and another client's code", async () => {
@@ -302,9 +316,9 @@ describe("connected apps", () => {
     expect(list).toEqual([{ id: expect.any(String), clientName: "ChatGPT", createdAt: "t0" }]);
 
     const bob = setup({ ...ALICE, id: "bob" });
-    expect((await bob.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE" })).status).toBe(404);
+    expect((await bob.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE", headers: { Origin: ORIGIN } })).status).toBe(404);
 
-    expect((await t.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await t.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE", headers: { Origin: ORIGIN } })).status).toBe(200);
     expect(t.grants.size).toBe(0);
   });
 });

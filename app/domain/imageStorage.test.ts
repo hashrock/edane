@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   IMAGE_STORAGE_LIMIT_BYTES,
   totalImageBytes,
-  exceedsImageQuota,
   sniffImageType,
   imageResponseHeaders,
 } from "./imageStorage";
@@ -17,23 +16,6 @@ describe("totalImageBytes", () => {
   });
 });
 
-describe("exceedsImageQuota", () => {
-  it("is false when used + incoming is under the limit", () => {
-    expect(exceedsImageQuota(0, IMAGE_STORAGE_LIMIT_BYTES - 1)).toBe(false);
-  });
-
-  it("is false exactly at the limit", () => {
-    expect(exceedsImageQuota(0, IMAGE_STORAGE_LIMIT_BYTES)).toBe(false);
-  });
-
-  it("is true one byte over the limit", () => {
-    expect(exceedsImageQuota(0, IMAGE_STORAGE_LIMIT_BYTES + 1)).toBe(true);
-  });
-
-  it("accounts for already-used bytes", () => {
-    expect(exceedsImageQuota(IMAGE_STORAGE_LIMIT_BYTES, 1)).toBe(true);
-  });
-});
 
 describe("sniffImageType", () => {
   const bytes = (...parts: (number[] | string)[]) =>

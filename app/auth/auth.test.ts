@@ -6,16 +6,19 @@
  *   以後のリクエストの resolve を変える
  * DB は触らない（Dev User の解決はスタブ、Bearer トークンは送らない）。
  */
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
-import { authMiddleware, browserSessionOnly, type AuthProvider } from "./provider";
+import { authMiddleware, type AuthProvider } from "./provider";
 import { selectAuth } from "./index";
 import { sessionAuth } from "./sessionAuth";
 import { bypassAuth, DEV_USER, IMPERSONATE_COOKIE } from "./bypassAuth";
+import { sqliteD1 } from "../../vitest.d1";
+import { insertUser } from "../utils/userRepository";
+import { drizzle } from "drizzle-orm/d1";
 
-const env = { SESSION_SECRET: "test-secret" } as Env["Bindings"];
+const env = { SESSION_SECRET: "test-secret", DB: sqliteD1() } as Env["Bindings"];
 const bob: SessionUser = { id: "bob", email: "bob@example.com", name: "Bob 🙂", avatarUrl: "" };
 
 /** whoami + signin/signout endpoints on top of a provider, so cookies round-trip like a browser. */
@@ -56,6 +59,8 @@ const noDb = bypassAuth({ devUser: async () => DEV_USER });
 describe("selectAuth", () => {
   it("picks the bypass only when DEV_BYPASS_AUTH is set", () => {
     expect(selectAuth({ DEV_BYPASS_AUTH: "true" }).kind).toBe("bypass");
+    expect(selectAuth({ DEV_BYPASS_AUTH: "1" }).kind).toBe("bypass");
+    for (const off of ["false", "0", "no", ""]) expect(selectAuth({ DEV_BYPASS_AUTH: off }).kind).toBe("session");
     expect(selectAuth({ DEV_BYPASS_AUTH: undefined }).kind).toBe("session");
     expect(selectAuth({}).kind).toBe("session");
   });
@@ -97,6 +102,8 @@ describe("bypassAuth", () => {
 });
 
 describe("sessionAuth (production)", () => {
+  beforeAll(() => insertUser(drizzle(env.DB), bob));
+
   it("completely ignores the impersonate cookie, even a validly signed one", async () => {
     const signin = await harness(noDb).request("/signin", { method: "POST" }, env);
     const jar = cookieJar("", signin);
@@ -114,6 +121,16 @@ describe("sessionAuth (production)", () => {
     expect((await whoami(app, jar)).user).toEqual(bob);
     const signout = await app.request("/signout", { method: "POST", headers: { Cookie: jar } }, env);
     expect((await whoami(app, cookieJar(jar, signout))).user).toBeNull();
+    // Signing out deletes the row: a copy of the old cookie no longer works either.
+    expect((await whoami(app, jar)).user).toBeNull();
+  });
+
+  it("a session cookie without a live row (legacy format, expired, or forged sid) is no session", async () => {
+    const app = harness(sessionAuth);
+    const signin = await app.request("/signin", { method: "POST" }, env);
+    const jar = cookieJar("", signin);
+    await env.DB.prepare("UPDATE sessions SET expires_at = 0").run();
+    expect((await whoami(app, jar)).user).toBeNull();
   });
 
   it("never treats the bypass cookies as a session under a different secret either", async () => {
@@ -126,18 +143,22 @@ describe("sessionAuth (production)", () => {
   });
 });
 
-describe("browserSessionOnly", () => {
-  const app = new Hono<Env>();
-  app.use("/api/tokens/*", browserSessionOnly);
-  app.post("/api/tokens/x", (c) => c.text("ok"));
 
-  it("refuses a request carrying Authorization (an API token can't manage credentials)", async () => {
-    const res = await app.request("/api/tokens/x", { method: "POST", headers: { Authorization: "Bearer edane_x" } }, env);
-    expect(res.status).toBe(403);
-  });
-
-  it("lets a browser request (no Authorization header) through", async () => {
-    const res = await app.request("/api/tokens/x", { method: "POST" }, env);
-    expect(res.status).toBe(200);
+describe("authMiddleware on anonymous routes", () => {
+  it("doesn't resolve the user (no session lookup) when the route never reads it", async () => {
+    let resolved = 0;
+    const counting: AuthProvider = { ...sessionAuth, resolve: async () => (resolved++, null) };
+    const app = new Hono<Env>();
+    app.use("*", async (c, next) => {
+      c.set("routePolicy", { access: c.req.path === "/raw" ? "anonymous" : "public" });
+      await next();
+    });
+    app.use("*", authMiddleware(() => counting));
+    app.get("/raw", (c) => c.text("raw"));
+    app.get("/page", (c) => c.text("page"));
+    await app.request("/raw", {}, env);
+    expect(resolved).toBe(0);
+    await app.request("/page", {}, env);
+    expect(resolved).toBe(1);
   });
 });

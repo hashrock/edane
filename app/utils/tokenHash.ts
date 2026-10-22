@@ -4,6 +4,8 @@
  * meant to be used for hashing shouldn't force a DB dependency onto callers.
  */
 
+import { bytesToBase64Url } from "./base64";
+
 /** SHA-256 hash of a token string, returned as hex. */
 export async function hashToken(token: string): Promise<string> {
   const buf = await crypto.subtle.digest(
@@ -13,4 +15,9 @@ export async function hashToken(token: string): Promise<string> {
   return [...new Uint8Array(buf)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** An unguessable opaque token (32 random bytes, base64url) after `prefix`. Only its hash is stored. */
+export function randomToken(prefix = ""): string {
+  return prefix + bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }

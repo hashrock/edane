@@ -6,6 +6,7 @@
  * （暗号化の方針も含めてそこに一本化してある）。FK の順（notes →
  * node_publications → sites）で入れる。
  */
+import type { NoteKeys } from "../utils/crypto";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { insertNote, insertPublication, upsertSite } from "../utils/noteRepository";
 import { serializeDocument } from "../application/persistence";
@@ -15,7 +16,7 @@ export async function applyScenarioPlan(
   db: DrizzleD1Database,
   plan: ScenarioPlan,
   userId: string,
-  encryptionKey: string,
+  keys: NoteKeys,
   now: string = new Date().toISOString()
 ): Promise<void> {
   for (const n of plan.notes) {
@@ -31,7 +32,7 @@ export async function applyScenarioPlan(
         deletedAt: n.trashed ? now : null,
         now,
       },
-      encryptionKey
+      keys
     );
   }
   for (const p of plan.publications) {

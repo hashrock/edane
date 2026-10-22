@@ -103,7 +103,7 @@ describe("nodePathTexts", () => {
 });
 
 describe("canServePublication", () => {
-  it("serves iff the note exists, is public and is not trashed", () => {
+  it("serves iff the note exists, is public, is not trashed, and the publication is of its current epoch", () => {
     fc.assert(
       fc.property(
         fc.oneof(
@@ -112,10 +112,14 @@ describe("canServePublication", () => {
           fc.record({
             isPublic: fc.boolean(),
             deletedAt: fc.constantFrom(null, "2024-01-01T00:00:00Z"),
+            publicEpoch: fc.nat(3),
           })
         ),
-        (note) => {
-          expect(canServePublication(note)).toBe(!!note && note.isPublic && note.deletedAt === null);
+        fc.nat(3),
+        (note, pubEpoch) => {
+          expect(canServePublication(note, { publicEpoch: pubEpoch })).toBe(
+            !!note && note.isPublic && note.deletedAt === null && note.publicEpoch === pubEpoch
+          );
         }
       )
     );

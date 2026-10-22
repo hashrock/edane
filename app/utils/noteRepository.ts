@@ -8,7 +8,7 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { notes, nodePublications, sites } from "../db/schema";
-import { encodeNoteContentForStorage, noteStorageMode } from "./crypto";
+import { encodeNoteContentForStorage, noteStorageMode, type NoteKeys } from "./crypto";
 
 export interface NewNote {
   id: string;
@@ -23,11 +23,12 @@ export interface NewNote {
   now: string;
 }
 
-export async function insertNote(db: DrizzleD1Database, note: NewNote, encryptionKey: string): Promise<void> {
+export async function insertNote(db: DrizzleD1Database, note: NewNote, keys: NoteKeys): Promise<void> {
   const content = await encodeNoteContentForStorage(
     note.plainContent,
     noteStorageMode(note.isPublic),
-    encryptionKey
+    keys,
+    note.id
   );
   await db.insert(notes).values({
     id: note.id,
@@ -63,6 +64,8 @@ export interface NewPublication {
   noteId: string;
   nodeId: string;
   createdAt: string;
+  /** The note's current public_epoch (omitted: 0, a note never made private). */
+  publicEpoch?: number;
 }
 
 export async function insertPublication(db: DrizzleD1Database, pub: NewPublication): Promise<void> {

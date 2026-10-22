@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt } from "drizzle-orm";
 import { oauthGrants } from "../db/schema";
 import { hashToken } from "./tokenHash";
-import { bearerToken, getUserIdByApiToken } from "./apiToken";
+import { bearerToken, findApiToken } from "./apiToken";
 
 /** OAuth のアクセストークンの接頭辞。`/mcp` はこれで API トークンと見分けて 1 回の検索で済ませる。 */
 export const ACCESS_TOKEN_PREFIX = "edane_oat_";
@@ -23,7 +23,7 @@ export function mcpChallenge(origin: string, invalidToken: boolean): string {
 export async function getUserIdByBearer(c: Context): Promise<string | null> {
   const token = bearerToken(c);
   if (!token) return null;
-  if (!token.startsWith(ACCESS_TOKEN_PREFIX)) return getUserIdByApiToken(c, token);
+  if (!token.startsWith(ACCESS_TOKEN_PREFIX)) return (await findApiToken(c, token))?.userId ?? null;
   const row = await drizzle(c.env.DB)
     .select({ userId: oauthGrants.userId })
     .from(oauthGrants)

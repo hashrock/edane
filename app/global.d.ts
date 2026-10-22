@@ -1,10 +1,13 @@
-import type { SessionUser } from "./user";
+import type { Credential, SessionUser } from "./user";
 import type { AuthProvider } from "./auth/provider";
+import type { RoutePolicy } from "./auth/routePolicy";
 
 declare module "hono" {
   interface ContextVariableMap {
     user: SessionUser | null;
     auth: AuthProvider;
+    credential: Credential | null;
+    routePolicy: RoutePolicy;
   }
 }
 
@@ -18,6 +21,8 @@ export type Env = {
     GOOGLE_SECRET: string;
     SESSION_SECRET: string;
     ENCRYPTION_KEY: string;
+    /** The key before the last rotation, still accepted for reading (utils/crypto.ts). */
+    ENCRYPTION_KEY_PREVIOUS?: string;
     DEV_BYPASS_AUTH?: string;
     /** POST /oauth/register の IP ごとのレート制限（wrangler.jsonc の ratelimits）。 */
     OAUTH_REGISTER_LIMITER: RateLimit;
@@ -32,5 +37,9 @@ export type Env = {
     user: SessionUser | null;
     /** このリクエストの認証プロバイダ（auth/index.ts の selectAuth が env から選ぶ）。 */
     auth: AuthProvider;
+    /** 認証に使った行（セッションか API トークン）。dev のバイパスでは null。 */
+    credential: Credential | null;
+    /** このリクエストのルートの方針（auth/routePolicy.ts）。ハンドラーの無い 404 では未設定。 */
+    routePolicy: RoutePolicy;
   };
 };

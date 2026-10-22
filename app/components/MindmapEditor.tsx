@@ -8,6 +8,7 @@ import {
   lazy,
   Suspense,
 } from "react";
+import { safeExternalUrl } from "../lib/url";
 import { Link, router } from "@inertiajs/react";
 import type { MindMapNode } from "../application/nodeUtils";
 import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
@@ -1291,11 +1292,14 @@ export function MindmapEditorView({
     // --- Link actions: open / fetch metadata (link only) ---
     // Single click edits, so opening the URL lives in the menu.
     const linkGroup: ContextMenuAction[] = [];
+    const linkUrl = type === "link" ? safeExternalUrl(node.text) : null;
     if (type === "link" && node.text) {
-      linkGroup.push({
-        label: t("menuOpenLink"),
-        onSelect: () => window.open(node.text, "_blank", "noopener"),
-      });
+      if (linkUrl) {
+        linkGroup.push({
+          label: t("menuOpenLink"),
+          onSelect: () => window.open(linkUrl, "_blank", "noopener"),
+        });
+      }
       if (!readOnly) {
         linkGroup.push({
           label: t("menuFetchLinkMeta"),

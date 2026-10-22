@@ -57,7 +57,13 @@ export function authorizationServerMetadata(origin: string) {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 /** ブラウザ内でスクリプトや別文書として解釈されるスキーム。リダイレクト先にしてはいけない。 */
-const FORBIDDEN_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "blob:", "about:", "ws:", "wss:"]);
+/**
+ * App schemes of MCP clients that don't use the reverse-domain form. Any other
+ * custom scheme must be reverse-domain (`com.example.app:`, RFC 8252 §7.1), so
+ * OS-level handlers (`intent:`, `ms-settings:`, `javascript:`, ...) never qualify.
+ */
+const KNOWN_APP_SCHEMES = new Set(["cursor:", "vscode:", "vscode-insiders:", "windsurf:", "claude:", "zed:"]);
+const isReverseDomainScheme = (protocol: string) => /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+:$/.test(protocol);
 
 function parseUrl(uri: string): URL | null {
   try {
@@ -73,7 +79,7 @@ function isLoopback(url: URL): boolean {
 
 /**
  * 登録してよいリダイレクト URI か。https、ループバックの http（ネイティブアプリ。RFC 8252）、
- * アプリ独自のスキーム（`cursor://…` など）を受け付ける。フラグメント付きは不可。
+ * アプリ独自のスキーム（逆ドメイン形式か、既知の MCP クライアントの `cursor://…` など）を受け付ける。フラグメント付きは不可。
  */
 export function isAllowedRedirectUri(uri: string): boolean {
   if (uri.length > 2000) return false;
@@ -81,7 +87,7 @@ export function isAllowedRedirectUri(uri: string): boolean {
   if (!url || uri.includes("#")) return false;
   if (url.protocol === "https:") return url.hostname !== "";
   if (url.protocol === "http:") return isLoopback(url);
-  return !FORBIDDEN_SCHEMES.has(url.protocol);
+  return KNOWN_APP_SCHEMES.has(url.protocol) || isReverseDomainScheme(url.protocol);
 }
 
 /**
@@ -273,7 +279,3 @@ export async function validateCodeExchange<T extends { clientId: string; redirec
   return { ok: true, code };
 }
 
-/** 推測できない不透明なトークン（32 バイトの乱数）。DB にはハッシュだけを置く。 */
-export function randomToken(prefix: string): string {
-  return prefix + bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
-}

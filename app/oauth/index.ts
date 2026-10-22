@@ -14,7 +14,8 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../global.d";
-import { hashToken } from "../utils/tokenHash";
+import { signedInUser } from "../auth/routePolicy";
+import { hashToken, randomToken } from "../utils/tokenHash";
 import { ACCESS_TOKEN_PREFIX } from "../utils/oauthToken";
 import { d1OAuthStore, type OAuthClient, type OAuthStore, type TokenPair } from "./store";
 import {
@@ -30,7 +31,6 @@ import {
   parseBasicCredentials,
   parseRegistration,
   protectedResourceMetadata,
-  randomToken,
   validateAuthorizeRequest,
   validateCodeExchange,
   type AuthorizeRequest,
@@ -191,8 +191,12 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
       if (form.grant_type === "refresh_token") {
         if (!form.refresh_token) return oauthError(c, 400, "invalid_request", "refresh_token is required");
         const tokens = await issueTokens(now);
-        const rotated = await store.rotateGrant(await hashToken(form.refresh_token), client.id, tokens.pair, now);
-        if (!rotated) return oauthError(c, 400, "invalid_grant", "Invalid or expired refresh token");
+        const refreshHash = await hashToken(form.refresh_token);
+        const rotated = await store.rotateGrant(refreshHash, client.id, tokens.pair, now);
+        if (!rotated) {
+          await store.revokeOnRefreshReuse(refreshHash, client.id);
+          return oauthError(c, 400, "invalid_grant", "Invalid or expired refresh token");
+        }
         return tokenResponse(c, tokens, rotated.scope);
       }
 
@@ -276,10 +280,7 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
   });
 
   r.post(AUTHORIZE_PATH, async (c) => {
-    // SameSite=Lax の Cookie は他サイトからの POST に付かないが、念のため送信元も確かめる。
-    if (c.req.header("Origin") !== originOf(c)) return c.text("Invalid origin", 403);
-    const user = c.get("user");
-    if (!user) return c.text("Unauthorized", 401);
+    const user = signedInUser(c);
 
     const form = await readForm(c);
     const result = await validate(c, form);
@@ -305,13 +306,11 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
 
   // 設定画面の「接続中のアプリ」。
   r.get("/api/oauth/grants", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const user = signedInUser(c);
     return c.json(await deps.store(c.env).listGrants(user.id, deps.now()));
   });
   r.delete("/api/oauth/grants/:id", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const user = signedInUser(c);
     const ok = await deps.store(c.env).deleteGrant(user.id, c.req.param("id"));
     return ok ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
   });

@@ -31,6 +31,9 @@ const APP_ROOT = dirname(fileURLToPath(import.meta.url));
 //   transitively import a UI framework through a re-export and the
 //   UI-framework-specifier check below would never see it.
 const ROOT_SHARED_FILES = new Set(["user.ts", "global.d.ts"]);
+// Test helpers at the repo root (outside app/), for *.test.ts files only:
+// vitest.d1.ts is an in-memory D1 so tests run the real SQL of any layer.
+const TEST_SUPPORT_FILES = new Set(["vitest.d1.ts"]);
 
 // Layer -> buckets it may import from (besides itself). Buckets not listed
 // here (server.ts, root-view.tsx, client.tsx, user.ts, global.d.ts — the
@@ -65,7 +68,8 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   // oauth = the OAuth 2.1 authorization server for /mcp (discovery metadata,
   // client registration, consent, token endpoint). Server infrastructure on
   // db/utils. The Bearer check and 401 challenge /mcp needs live in utils.
-  oauth: ["db", "utils"],
+  // Its consent routes take the signed-in user from auth's route policy.
+  oauth: ["db", "utils", "auth"],
   // sync = the per-note coordinator (NoteRoom, a Durable Object). Server
   // infrastructure on the pure layers plus utils (crypto); reached only via
   // the NOTE_ROOMS binding from server.ts / mcp, never by import.
@@ -162,7 +166,9 @@ describe("dependency direction", () => {
         if (!target) continue;
         const toBucket = bucketOf(target);
         const isSharedRoot = toBucket === "root" && ROOT_SHARED_FILES.has(basename(target));
-        if (toBucket === fromBucket || isSharedRoot || rule.includes(toBucket)) continue;
+        const isTestSupport =
+          /\.test\.tsx?$/.test(file) && !target.startsWith(APP_ROOT) && TEST_SUPPORT_FILES.has(basename(target));
+        if (toBucket === fromBucket || isSharedRoot || isTestSupport || rule.includes(toBucket)) continue;
         violations.push(
           `${relative(APP_ROOT, file)} (${fromBucket}) imports ${relative(APP_ROOT, target)} (${toBucket}); ` +
             `${fromBucket} may only import [${rule.join(", ") || "nothing"}]`

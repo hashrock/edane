@@ -12,6 +12,10 @@ export default defineConfig({
   test: {
     projects: [
       {
+        resolve: {
+          // server.ts re-exports NoteRoom, which extends workerd's DurableObject.
+          alias: { "cloudflare:workers": new URL("./vitest.cloudflare-workers.stub.ts", import.meta.url).pathname },
+        },
         test: {
           name: "node",
           include: ["app/**/*.test.ts"],

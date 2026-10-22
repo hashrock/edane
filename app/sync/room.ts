@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../global.d";
+import type { Credential } from "../user";
 import { parseContent, serializeDocument } from "../application/persistence";
-import { decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "../utils/crypto";
+import { credentialLiveClause } from "../utils/credential";
+import { decodeStoredNoteContent, encodeNoteContentForStorage, noteKeys, noteStorageMode } from "../utils/crypto";
 import {
   applyPatch,
   buildCommit,
@@ -19,7 +21,13 @@ import { applyNoteEditRequest, requestedNodeIds, type NoteEditRequest } from "..
 import { generateId, type IdSource } from "../domain/model";
 import { CLOSE_RATE_LIMITED, acceptsSocket, fullBucket, readableMessage, receiptPruneBelow, takeToken, type Bucket } from "./limits";
 
-type Identity = { noteId: string; userId: string };
+/**
+ * Who is asking. `credential` (a socket's, from when it connected) is re-checked
+ * on every load, so signing out or deleting the token stops an open socket's
+ * writes with no extra query.
+ */
+type Identity = { noteId: string; userId: string; credential?: Credential };
+
 type Row = { id: string; user_id: string; title: string; content: string; is_public: number; version: number; updated_at: string; deleted_at: string | null };
 type Loaded = { row: Row; snapshot: RoomSnapshot };
 
@@ -35,6 +43,9 @@ const idsFor = (operationId: string | undefined): IdSource => {
   let n = 0;
   return () => `op-${operationId}-${++n}`;
 };
+
+/** Close code for a socket whose note (or sign-in) is gone; the client stops reconnecting. */
+const CLOSE_UNAVAILABLE = 4404;
 
 const reject = (rejection: RoomRejection): { ok: false } & RoomRejection => ({ ok: false, ...rejection });
 
@@ -75,10 +86,12 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return result;
   }
   private async load(identity: Identity): Promise<RoomResult<Loaded>> {
-    const row = await this.env.DB.prepare("SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-      .bind(identity.noteId, identity.userId).first<Row>();
+    const live = identity.credential ? credentialLiveClause(identity.credential, Date.now()) : { sql: "", bindings: [] };
+    const row = await this.env.DB.prepare(`SELECT * FROM notes WHERE id = ? AND user_id = ? AND deleted_at IS NULL${live.sql}`)
+      .bind(identity.noteId, identity.userId, ...live.bindings)
+      .first<Row>();
     if (!row) return reject({ code: "not-found" });
-    const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), this.env.ENCRYPTION_KEY);
+    const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), noteKeys(this.env), row.id);
     if (content === null) return reject({ code: "decrypt-failed" });
     // Legacy text had no IDs. Stable IDs make the first snapshots identical
     // even across object eviction, before the first v2 write.
@@ -153,7 +166,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       return reject({ code: "conflict", detail: "Concurrent change: publicity. Read the latest note and retry." });
     }
     const isPublic = commit.publicity?.after ?? snapshot.isPublic;
-    const content = await encodeNoteContentForStorage(serializeDocument(model), noteStorageMode(isPublic), this.env.ENCRYPTION_KEY);
+    const content = await encodeNoteContentForStorage(serializeDocument(model), noteStorageMode(isPublic), noteKeys(this.env), row.id);
     const version = row.version + 1;
     // One timestamp: what's stored is what the receipt reports.
     const updatedAt = new Date().toISOString();
@@ -163,6 +176,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     const result = await this.env.DB.batch([
       this.env.DB.prepare("INSERT INTO note_commits (note_id, operation_id, digest, version) SELECT id, ?, ?, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(commit.id, digest, version, row.id, row.version),
+      // Going private advances public_epoch via the notes_public_epoch trigger (migration 0014).
       this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
       // Receipts only dedupe resends, which come within a few versions (limits.ts).
@@ -216,18 +230,23 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     if (!taken.ok) return ws.close(CLOSE_RATE_LIMITED, "Too many commits; reconnecting");
     let id: string | undefined;
     try {
-      if (!readableMessage(raw)) throw new Error("Invalid message size");
+      if (!readableMessage(raw)) return ws.send(JSON.stringify({ type: "error", message: "Invalid message size" }));
       const input = JSON.parse(raw);
       id = typeof input.id === "string" ? input.id : undefined;
       const result = await this.commit(ws.deserializeAttachment() as Identity, input);
+      // Note trashed or gone, or the socket's sign-in revoked: same as invalidate().
+      if (!result.ok && result.code === "not-found") return ws.close(CLOSE_UNAVAILABLE, "Note unavailable; reconnect");
       // Also send duplicate receipts, which intentionally don't broadcast.
       ws.send(JSON.stringify(result.ok ? { type: "state", ...result.value } : { type: "error", id, message: rejectionMessage(result) }));
     } catch (error) {
-      try { ws.send(JSON.stringify({ type: "error", id, message: (error as Error).message })); } catch { /* disconnected */ }
+      // Bad JSON is the client's; anything else (D1, ...) stays in the log, not on the wire.
+      if (!(error instanceof SyntaxError)) console.error("NoteRoom commit failed", error);
+      const message = error instanceof SyntaxError ? "Invalid JSON" : "Internal error";
+      try { ws.send(JSON.stringify({ type: "error", id, message })); } catch { /* disconnected */ }
     }
   }
   async invalidate() {
-    for (const ws of this.ctx.getWebSockets()) ws.close(4404, "Note unavailable; reconnect");
+    for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_UNAVAILABLE, "Note unavailable; reconnect");
   }
   private broadcast(message: unknown) {
     const raw = JSON.stringify(message);

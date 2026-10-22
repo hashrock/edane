@@ -1,6 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { Link, Script, ViteClient } from "vite-ssr-components/react";
-import { serializePage, type PageObject, type RootView } from "@hono/inertia";
+import type { PageObject, RootView } from "@hono/inertia";
+import { jsonForScript } from "./lib/escapeHtml";
 
 const Document = ({ page }: { page: PageObject }) => (
   <html lang="ja">
@@ -19,7 +20,8 @@ const Document = ({ page }: { page: PageObject }) => (
       <script
         data-page="app"
         type="application/json"
-        dangerouslySetInnerHTML={{ __html: serializePage(page) }}
+        // Not @hono/inertia's serializePage: it leaves `<`, so `<!--<script` in a public note's text derails the page.
+        dangerouslySetInnerHTML={{ __html: jsonForScript(page) }}
       />
       <div id="app" />
     </body>

@@ -7,10 +7,16 @@ import type { AuthProvider } from "./provider";
 import { sessionAuth } from "./sessionAuth";
 import { bypassAuth } from "./bypassAuth";
 
-const bypass = bypassAuth();
-
+/**
+ * The bypass needs both: a dev build (`import.meta.env.DEV`, false in every
+ * `vite build`, so a production bundle can't select it — and drops its code)
+ * and an explicit `DEV_BYPASS_AUTH=1` / `true` in `.dev.vars` (not any
+ * non-empty string: `"false"` used to switch it on).
+ */
 export function selectAuth(env: Pick<Env["Bindings"], "DEV_BYPASS_AUTH">): AuthProvider {
-  return env.DEV_BYPASS_AUTH ? bypass : sessionAuth;
+  return import.meta.env.DEV && BYPASS_ON.has(env.DEV_BYPASS_AUTH ?? "") ? bypassAuth() : sessionAuth;
 }
 
-export { authMiddleware, browserSessionOnly, type AuthProvider } from "./provider";
+const BYPASS_ON = new Set(["1", "true"]);
+
+export { authMiddleware, type AuthProvider } from "./provider";

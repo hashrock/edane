@@ -69,9 +69,15 @@ export interface OAuthStore {
   createGrant(grant: OAuthGrant, now: number): Promise<void>;
   /**
    * リフレッシュトークン（`clientId` のもの、`now` で未失効）を持つ付与のトークンを入れ替える。
-   * 古いリフレッシュトークンは同時に無効になる。該当なしなら null。
+   * 古いリフレッシュトークンは同時に無効になり、再利用の検知用に `previous_refresh_hash` に残る。
+   * 該当なしなら null。
    */
   rotateGrant(refreshTokenHash: string, clientId: string, next: TokenPair, now: number): Promise<{ scope: string } | null>;
+  /**
+   * すでに入れ替えたリフレッシュトークンが再び使われた付与を消す（漏れたとみなす。OAuth 2.1 §4.3.1）。
+   * 正規のクライアントと盗んだ側のどちらが先に使ったかは分からないので、付与ごと無効にする。消したら true。
+   */
+  revokeOnRefreshReuse(refreshTokenHash: string, clientId: string): Promise<boolean>;
   /** リフレッシュトークンが切れていない付与だけ（切れたものは再認可しないと使えない）。 */
   listGrants(userId: string, now: number): Promise<GrantSummary[]>;
   deleteGrant(userId: string, id: string): Promise<boolean>;
@@ -122,7 +128,7 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
     async rotateGrant(refreshTokenHash, clientId, next, now) {
       const rows = await db
         .update(oauthGrants)
-        .set(next)
+        .set({ ...next, previousRefreshHash: refreshTokenHash })
         .where(
           and(
             eq(oauthGrants.refreshTokenHash, refreshTokenHash),
@@ -132,6 +138,13 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
         )
         .returning({ scope: oauthGrants.scope });
       return rows[0] ?? null;
+    },
+    async revokeOnRefreshReuse(refreshTokenHash, clientId) {
+      const rows = await db
+        .delete(oauthGrants)
+        .where(and(eq(oauthGrants.previousRefreshHash, refreshTokenHash), eq(oauthGrants.clientId, clientId)))
+        .returning({ id: oauthGrants.id });
+      return rows.length > 0;
     },
     async listGrants(userId, now) {
       return db
