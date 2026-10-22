@@ -154,12 +154,15 @@ export default function NotesIndex({
               >
                 {t("settingsNav")}
               </Link>
-              <a
-                href="/auth/logout"
-                className="text-slate-500 hover:text-slate-900 transition"
-              >
-                {t("logout")}
-              </a>
+              {/* POST so another site can't sign the user out with a link. */}
+              <form method="post" action="/auth/logout" className="contents">
+                <button
+                  type="submit"
+                  className="text-slate-500 hover:text-slate-900 transition"
+                >
+                  {t("logout")}
+                </button>
+              </form>
             </div>
           ) : (
             <a

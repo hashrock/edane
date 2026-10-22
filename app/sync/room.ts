@@ -216,14 +216,17 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     if (!taken.ok) return ws.close(CLOSE_RATE_LIMITED, "Too many commits; reconnecting");
     let id: string | undefined;
     try {
-      if (!readableMessage(raw)) throw new Error("Invalid message size");
+      if (!readableMessage(raw)) return ws.send(JSON.stringify({ type: "error", message: "Invalid message size" }));
       const input = JSON.parse(raw);
       id = typeof input.id === "string" ? input.id : undefined;
       const result = await this.commit(ws.deserializeAttachment() as Identity, input);
       // Also send duplicate receipts, which intentionally don't broadcast.
       ws.send(JSON.stringify(result.ok ? { type: "state", ...result.value } : { type: "error", id, message: rejectionMessage(result) }));
     } catch (error) {
-      try { ws.send(JSON.stringify({ type: "error", id, message: (error as Error).message })); } catch { /* disconnected */ }
+      // Bad JSON is the client's; anything else (D1, ...) stays in the log, not on the wire.
+      if (!(error instanceof SyntaxError)) console.error("NoteRoom commit failed", error);
+      const message = error instanceof SyntaxError ? "Invalid JSON" : "Internal error";
+      try { ws.send(JSON.stringify({ type: "error", id, message })); } catch { /* disconnected */ }
     }
   }
   async invalidate() {

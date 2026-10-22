@@ -41,16 +41,3 @@ export function authMiddleware(select: (env: Env["Bindings"]) => AuthProvider): 
   };
 }
 
-/**
- * Credential management (API tokens, OAuth consent and connected apps) only
- * for a browser session, never for a Bearer token: `sessionAuth` also accepts
- * API tokens everywhere, and a leaked token must not mint more tokens or
- * approve OAuth clients to outlive its own revocation. Browsers never send
- * `Authorization` on their own, so the web UI is unaffected.
- */
-export const browserSessionOnly: MiddlewareHandler<Env> = async (c, next) => {
-  if (c.req.header("Authorization")) {
-    return c.json({ error: "Use the web app to manage tokens and connected apps" }, 403);
-  }
-  await next();
-};

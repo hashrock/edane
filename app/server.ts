@@ -1,4 +1,6 @@
 import { Hono, type Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { AGENT_INPUT_LIMITS, codePointLength } from "./application/agentInput";
 import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
@@ -6,7 +8,8 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
-import { authMiddleware, browserSessionOnly, selectAuth } from "./auth";
+import { authMiddleware, selectAuth } from "./auth";
+import { routePolicyMiddleware } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
@@ -67,10 +70,8 @@ app.route("/", oauthServerRoutes());
 // impersonation) only when DEV_BYPASS_AUTH is set. Nothing here branches on
 // the request itself.
 app.use("*", authMiddleware(selectAuth));
-// Tokens and OAuth grants are managed from the web app only (see browserSessionOnly).
-for (const path of ["/api/tokens", "/api/tokens/*", "/api/oauth/grants", "/api/oauth/grants/*", "/oauth/authorize"]) {
-  app.use(path, browserSessionOnly);
-}
+// Who may call each route, CSRF, and body size: one table (auth/routePolicy.ts).
+app.use("*", routePolicyMiddleware());
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
@@ -121,7 +122,7 @@ app.get(
   }
 );
 
-app.get("/auth/logout", async (c) => {
+app.post("/auth/logout", async (c) => {
   await c.get("auth").signOut(c);
   return c.redirect("/");
 });
@@ -174,11 +175,15 @@ function roomRejectionResponse(c: Context<Env>, r: RoomRejection) {
 }
 
 // --- API tokens (JSON; used by the desktop app via Bearer auth) ---
+const MAX_TOKEN_NAME = 100;
 app.post("/api/tokens", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const body = await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string });
+  if (body.name !== undefined && (typeof body.name !== "string" || codePointLength(body.name) > MAX_TOKEN_NAME)) {
+    return c.json({ error: `name must be at most ${MAX_TOKEN_NAME} characters` }, 400);
+  }
   const rawToken = `edane_${crypto.randomUUID().replace(/-/g, "")}`;
   const hash = await hashToken(rawToken);
   const id = crypto.randomUUID();
@@ -624,7 +629,8 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
       502
     );
   } catch (e) {
-    return c.json({ error: "AI request failed", detail: String(e) }, 502);
+    console.error("AI suggest failed", e);
+    return c.json({ error: "AI request failed" }, 502);
   }
 });
 
@@ -633,6 +639,13 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
 // navigated to from another site); see
 // docs/ui-test-scenarios.md. Everything lives in app/scenarios/.
 app.route("/__scenarios", scenarioRoutes());
+
+// --- Unhandled errors: details go to the log, never to the client ---
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.json({ error: "Internal error" }, 500);
+});
 
 // --- 404: a real page with a way back, not Hono's bare text (usertest #13) ---
 // Every `c.notFound()` in the routes above lands here.
@@ -723,6 +736,12 @@ const routes = app
     const body = await c.req
       .json<{ title?: string; content?: string }>()
       .catch(() => ({}) as { title?: string; content?: string });
+    if (
+      (body.title !== undefined && (typeof body.title !== "string" || codePointLength(body.title) > AGENT_INPUT_LIMITS.title)) ||
+      (body.content !== undefined && typeof body.content !== "string")
+    ) {
+      return c.json({ error: "Invalid note" }, 400);
+    }
     const id = crypto.randomUUID();
     // Guest-mode imports arrive with their own serialized content; a plain
     // "new note" falls back to the starter topics. There is no new-note form

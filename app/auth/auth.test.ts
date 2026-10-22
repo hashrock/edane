@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
-import { authMiddleware, browserSessionOnly, type AuthProvider } from "./provider";
+import { authMiddleware, type AuthProvider } from "./provider";
 import { selectAuth } from "./index";
 import { sessionAuth } from "./sessionAuth";
 import { bypassAuth, DEV_USER, IMPERSONATE_COOKIE } from "./bypassAuth";
@@ -126,18 +126,3 @@ describe("sessionAuth (production)", () => {
   });
 });
 
-describe("browserSessionOnly", () => {
-  const app = new Hono<Env>();
-  app.use("/api/tokens/*", browserSessionOnly);
-  app.post("/api/tokens/x", (c) => c.text("ok"));
-
-  it("refuses a request carrying Authorization (an API token can't manage credentials)", async () => {
-    const res = await app.request("/api/tokens/x", { method: "POST", headers: { Authorization: "Bearer edane_x" } }, env);
-    expect(res.status).toBe(403);
-  });
-
-  it("lets a browser request (no Authorization header) through", async () => {
-    const res = await app.request("/api/tokens/x", { method: "POST" }, env);
-    expect(res.status).toBe(200);
-  });
-});
