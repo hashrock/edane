@@ -12,9 +12,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../global.d";
-import { getUserIdByToken } from "../utils/apiToken";
-import { getUserIdByOAuthAccessToken } from "../utils/oauthToken";
-import { ACCESS_TOKEN_PREFIX, mcpChallenge } from "../oauth/protocol";
+import { getUserIdByBearer, mcpChallenge } from "../utils/oauthToken";
 import { handleMessage, PARSE_ERROR, INVALID_REQUEST } from "./protocol";
 import { NOTE_TOOLS, type ToolContext } from "./tools";
 import { d1NoteStore, type NoteStore } from "./noteStore";
@@ -25,15 +23,8 @@ export interface McpDeps {
   store(env: Env["Bindings"]): NoteStore;
 }
 
-/** 接頭辞で API トークンか OAuth のアクセストークンかを分け、どちらも 1 回の検索で済ませる。 */
-async function resolveBearer(c: Context<Env>): Promise<string | null> {
-  const token = c.req.header("Authorization")?.match(/^Bearer (.+)$/)?.[1];
-  if (token?.startsWith(ACCESS_TOKEN_PREFIX)) return getUserIdByOAuthAccessToken(c, token);
-  return getUserIdByToken(c);
-}
-
 const defaultDeps: McpDeps = {
-  resolveUserId: resolveBearer,
+  resolveUserId: getUserIdByBearer,
   store: d1NoteStore,
 };
 

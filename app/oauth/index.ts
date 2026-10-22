@@ -15,9 +15,9 @@ import { bodyLimit } from "hono/body-limit";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../global.d";
 import { hashToken } from "../utils/tokenHash";
+import { ACCESS_TOKEN_PREFIX } from "../utils/oauthToken";
 import { d1OAuthStore, type OAuthClient, type OAuthStore, type TokenPair } from "./store";
 import {
-  ACCESS_TOKEN_PREFIX,
   ACCESS_TOKEN_TTL_MS,
   CLIENT_SECRET_PREFIX,
   CODE_PREFIX,
@@ -26,11 +26,12 @@ import {
   REFRESH_TOKEN_TTL_MS,
   authorizationServerMetadata,
   authorizeResponseUrl,
+  parseBasicCredentials,
   parseRegistration,
   protectedResourceMetadata,
   randomToken,
   validateAuthorizeRequest,
-  verifyPkce,
+  validateCodeExchange,
   type AuthorizeRequest,
 } from "./protocol";
 
@@ -53,10 +54,11 @@ function oauthError(c: Context, status: 400 | 401, error: string, error_descript
 async function issueTokens(now: number) {
   const accessToken = randomToken(ACCESS_TOKEN_PREFIX);
   const refreshToken = randomToken(REFRESH_TOKEN_PREFIX);
+  const [accessTokenHash, refreshTokenHash] = await Promise.all([hashToken(accessToken), hashToken(refreshToken)]);
   const pair: TokenPair = {
-    accessTokenHash: await hashToken(accessToken),
+    accessTokenHash,
     accessExpiresAt: now + ACCESS_TOKEN_TTL_MS,
-    refreshTokenHash: await hashToken(refreshToken),
+    refreshTokenHash,
     refreshExpiresAt: now + REFRESH_TOKEN_TTL_MS,
   };
   return { accessToken, refreshToken, pair };
@@ -83,20 +85,10 @@ async function authenticateClient(
   store: OAuthStore,
   form: Record<string, string>
 ): Promise<OAuthClient | null> {
-  let clientId = form.client_id;
-  let secret = form.client_secret;
-  const basic = c.req.header("Authorization")?.match(/^Basic (.+)$/i)?.[1];
-  if (basic) {
-    try {
-      const decoded = atob(basic);
-      const i = decoded.indexOf(":");
-      if (i < 0) return null;
-      clientId = decodeURIComponent(decoded.slice(0, i));
-      secret = decodeURIComponent(decoded.slice(i + 1));
-    } catch {
-      return null;
-    }
-  }
+  const basic = parseBasicCredentials(c.req.header("Authorization"));
+  if (basic === null) return null;
+  const clientId = basic ? basic.clientId : form.client_id;
+  const secret = basic ? basic.secret : form.client_secret;
   if (!clientId) return null;
   const client = await store.findClient(clientId);
   if (!client) return null;
@@ -175,16 +167,9 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
       if (form.grant_type === "authorization_code") {
         if (!form.code) return oauthError(c, 400, "invalid_request", "code is required");
         // 先に消す: 失敗した交換でもコードは使い切り（盗まれたコードの再試行を許さない）。
-        const code = await store.takeCode(await hashToken(form.code));
-        if (!code || code.expiresAt <= now || code.clientId !== client.id) {
-          return oauthError(c, 400, "invalid_grant", "Invalid or expired authorization code");
-        }
-        if (form.redirect_uri !== undefined && form.redirect_uri !== code.redirectUri) {
-          return oauthError(c, 400, "invalid_grant", "redirect_uri does not match");
-        }
-        if (!(await verifyPkce(form.code_verifier, code.codeChallenge))) {
-          return oauthError(c, 400, "invalid_grant", "PKCE verification failed");
-        }
+        const exchange = await validateCodeExchange(await store.takeCode(await hashToken(form.code)), client.id, form, now);
+        if (!exchange.ok) return oauthError(c, 400, exchange.error.error, exchange.error.error_description);
+        const { code } = exchange;
         const tokens = await issueTokens(now);
         await store.createGrant({ id: crypto.randomUUID(), clientId: client.id, userId: code.userId, scope: code.scope, ...tokens.pair });
         return tokenResponse(c, tokens, code.scope);
@@ -240,16 +225,17 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
 
   const validate = async (c: Context<Env>, q: Record<string, string | undefined>) => {
     const client = q.client_id ? await deps.store(c.env).findClient(q.client_id) : null;
-    return { client, result: validateAuthorizeRequest(q, client, originOf(c)) };
+    return validateAuthorizeRequest(q, client, originOf(c));
   };
+  /** 認可応答をクライアントへ返す。state と iss（RFC 9207）はどの応答にも付ける。 */
+  const respond = (c: Context, redirectUri: string, state: string | undefined, params: Record<string, string>) =>
+    c.redirect(authorizeResponseUrl(redirectUri, { ...params, state, iss: originOf(c) }));
 
   r.get(AUTHORIZE_PATH, async (c) => {
     const q = c.req.query();
-    const { client, result } = await validate(c, q);
+    const result = await validate(c, q);
     if (result.kind === "fatal") return fatalPage(c, result.description);
-    if (result.kind === "redirect-error") {
-      return c.redirect(authorizeResponseUrl(result.redirectUri, { ...result.error, state: result.state, iss: originOf(c) }));
-    }
+    if (result.kind === "redirect-error") return respond(c, result.redirectUri, result.state, { ...result.error });
 
     const user = c.get("user");
     if (!user) {
@@ -270,7 +256,7 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
     c.header("Cache-Control", "no-store");
     return c.render("OAuth/Authorize", {
       user,
-      clientName: client!.name,
+      clientName: result.client.name,
       redirectTo: displayRedirect(result.request.redirectUri),
       fields: authorizeFields(result.request, q.resource),
     });
@@ -283,21 +269,12 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
     if (!user) return c.text("Unauthorized", 401);
 
     const form = await readForm(c);
-    const { result } = await validate(c, form);
+    const result = await validate(c, form);
     if (result.kind === "fatal") return fatalPage(c, result.description);
-    if (result.kind === "redirect-error") {
-      return c.redirect(authorizeResponseUrl(result.redirectUri, { ...result.error, state: result.state, iss: originOf(c) }));
-    }
+    if (result.kind === "redirect-error") return respond(c, result.redirectUri, result.state, { ...result.error });
     const req = result.request;
     if (form.decision !== "approve") {
-      return c.redirect(
-        authorizeResponseUrl(req.redirectUri, {
-          error: "access_denied",
-          error_description: "The user denied access",
-          state: req.state,
-          iss: originOf(c),
-        })
-      );
+      return respond(c, req.redirectUri, req.state, { error: "access_denied", error_description: "The user denied access" });
     }
 
     const code = randomToken(CODE_PREFIX);
@@ -310,7 +287,7 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
       scope: req.scope,
       expiresAt: deps.now() + CODE_TTL_MS,
     });
-    return c.redirect(authorizeResponseUrl(req.redirectUri, { code, state: req.state, iss: originOf(c) }));
+    return respond(c, req.redirectUri, req.state, { code });
   });
 
   // 設定画面の「接続中のアプリ」。

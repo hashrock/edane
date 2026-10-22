@@ -9,7 +9,9 @@
  * - スコープは `notes`（ノートの読み書き）の 1 つだけ。知らないスコープは無視して `notes` を与える。
  */
 
-export const OAUTH_SCOPE = "notes";
+import { bytesToBase64Url, decodeBase64Utf8 } from "../utils/base64";
+
+const OAUTH_SCOPE = "notes";
 
 /** 認可コードの寿命。OAuth 2.1 が勧める上限の 10 分。 */
 export const CODE_TTL_MS = 10 * 60 * 1000;
@@ -17,14 +19,11 @@ export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 /** リフレッシュトークンの寿命。使うたびに入れ替わるので、使っている限り切れない。 */
 export const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
-/** アクセストークンの接頭辞。`/mcp` はこれで API トークンと見分けて 1 回の検索で済ませる。 */
-export const ACCESS_TOKEN_PREFIX = "edane_oat_";
 export const REFRESH_TOKEN_PREFIX = "edane_ort_";
 export const CODE_PREFIX = "edane_oac_";
 export const CLIENT_SECRET_PREFIX = "edane_ocs_";
 
-export const mcpResource = (origin: string) => `${origin}/mcp`;
-export const resourceMetadataUrl = (origin: string) => `${origin}/.well-known/oauth-protected-resource/mcp`;
+const mcpResource = (origin: string) => `${origin}/mcp`;
 
 /** RFC 9728: 保護リソースのメタデータ。401 の WWW-Authenticate からここへ辿らせる。 */
 export function protectedResourceMetadata(origin: string) {
@@ -54,12 +53,6 @@ export function authorizationServerMetadata(origin: string) {
   };
 }
 
-/** `/mcp` の 401 に付ける WWW-Authenticate（MCP の認可仕様: resource_metadata で発見させる）。 */
-export function mcpChallenge(origin: string, invalidToken: boolean): string {
-  const error = invalidToken ? ', error="invalid_token"' : "";
-  return `Bearer realm="edane", resource_metadata="${resourceMetadataUrl(origin)}"${error}`;
-}
-
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 /** ブラウザ内でスクリプトや別文書として解釈されるスキーム。リダイレクト先にしてはいけない。 */
 const FORBIDDEN_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "blob:", "about:", "ws:", "wss:"]);
@@ -83,7 +76,7 @@ function isLoopback(url: URL): boolean {
 export function isAllowedRedirectUri(uri: string): boolean {
   if (uri.length > 2000) return false;
   const url = parseUrl(uri);
-  if (!url || url.hash || uri.includes("#")) return false;
+  if (!url || uri.includes("#")) return false;
   if (url.protocol === "https:") return url.hostname !== "";
   if (url.protocol === "http:") return isLoopback(url);
   return !FORBIDDEN_SCHEMES.has(url.protocol);
@@ -109,15 +102,15 @@ export function redirectUriMatches(registered: readonly string[], requested: str
   });
 }
 
-export type TokenEndpointAuthMethod = "none" | "client_secret_post" | "client_secret_basic";
+type TokenEndpointAuthMethod = "none" | "client_secret_post" | "client_secret_basic";
 
-export interface Registration {
+interface Registration {
   name: string;
   redirectUris: string[];
   authMethod: TokenEndpointAuthMethod;
 }
 
-export interface OAuthError {
+interface OAuthError {
   error: string;
   error_description: string;
 }
@@ -171,12 +164,12 @@ export interface AuthorizeRequest {
   scope: string;
 }
 
-export type AuthorizeValidation =
+type AuthorizeValidation<C> =
   /** クライアントかリダイレクト先が信用できない。リダイレクトせずエラー画面を出す（RFC 6749 §4.1.2.1）。 */
   | { kind: "fatal"; description: string }
   /** リダイレクト先は確かなので、エラーをそこへ返す。 */
   | { kind: "redirect-error"; redirectUri: string; state: string | undefined; error: OAuthError }
-  | { kind: "ok"; request: AuthorizeRequest };
+  | { kind: "ok"; request: AuthorizeRequest; client: C };
 
 type Params = Record<string, string | undefined>;
 
@@ -184,11 +177,11 @@ type Params = Record<string, string | undefined>;
  * 認可要求（GET のクエリ、または同意画面の POST）を検証する。`client` は `client_id` で引いた結果。
  * 同意画面の POST でも同じ関数を通し直すので、隠しフィールドの改ざんも同じ規則で弾ける。
  */
-export function validateAuthorizeRequest(
+export function validateAuthorizeRequest<C extends { redirectUris: readonly string[] }>(
   q: Params,
-  client: { redirectUris: readonly string[] } | null,
+  client: C | null,
   origin: string
-): AuthorizeValidation {
+): AuthorizeValidation<C> {
   if (!q.client_id || !client) return { kind: "fatal", description: "Unknown client_id" };
   let redirectUri = q.redirect_uri;
   if (!redirectUri) {
@@ -200,7 +193,7 @@ export function validateAuthorizeRequest(
   }
 
   const state = q.state;
-  const err = (error: string, error_description: string): AuthorizeValidation => ({
+  const err = (error: string, error_description: string): AuthorizeValidation<C> => ({
     kind: "redirect-error",
     redirectUri: redirectUri!,
     state,
@@ -217,11 +210,12 @@ export function validateAuthorizeRequest(
   return {
     kind: "ok",
     request: { clientId: q.client_id, redirectUri, state, codeChallenge: q.code_challenge, scope: OAUTH_SCOPE },
+    client,
   };
 }
 
 /** RFC 8707 の resource。守るリソースは `/mcp` だけなので、それ（末尾スラッシュ違いを含む）以外は断る。 */
-export function isValidResource(resource: string, origin: string): boolean {
+function isValidResource(resource: string, origin: string): boolean {
   const mcp = mcpResource(origin);
   return resource === mcp || resource === `${mcp}/`;
 }
@@ -235,20 +229,49 @@ export function authorizeResponseUrl(redirectUri: string, params: Params): strin
 
 const encoder = new TextEncoder();
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
 /** PKCE S256: base64url(SHA-256(verifier)) === challenge。verifier は RFC 7636 の文字集合と長さ。 */
 export async function verifyPkce(verifier: string | undefined, challenge: string): Promise<boolean> {
   if (!verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return false;
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(verifier)));
-  return base64Url(digest) === challenge;
+  return bytesToBase64Url(digest) === challenge;
+}
+
+/**
+ * `Authorization: Basic` のクライアント認証（RFC 6749 §2.3.1: id と secret はそれぞれ URL エンコード）。
+ * ヘッダーが無ければ undefined、壊れていれば null。
+ */
+export function parseBasicCredentials(header: string | undefined): { clientId: string; secret: string } | null | undefined {
+  const basic = header?.match(/^Basic (.+)$/i)?.[1];
+  if (!basic) return undefined;
+  try {
+    const decoded = decodeBase64Utf8(basic);
+    const i = decoded.indexOf(":");
+    if (i < 0) return null;
+    return { clientId: decodeURIComponent(decoded.slice(0, i)), secret: decodeURIComponent(decoded.slice(i + 1)) };
+  } catch {
+    return null;
+  }
+}
+
+/** 認可コードの交換を検証する。`code` は使い切りで取り出した行（無ければ null）。 */
+export async function validateCodeExchange<T extends { clientId: string; redirectUri: string; codeChallenge: string; expiresAt: number }>(
+  code: T | null,
+  clientId: string,
+  form: Params,
+  now: number
+): Promise<{ ok: true; code: T } | { ok: false; error: OAuthError }> {
+  const invalid = (error_description: string) => ({ ok: false as const, error: { error: "invalid_grant", error_description } });
+  if (!code || code.expiresAt <= now || code.clientId !== clientId) {
+    return invalid("Invalid or expired authorization code");
+  }
+  if (form.redirect_uri !== undefined && form.redirect_uri !== code.redirectUri) {
+    return invalid("redirect_uri does not match");
+  }
+  if (!(await verifyPkce(form.code_verifier, code.codeChallenge))) return invalid("PKCE verification failed");
+  return { ok: true, code };
 }
 
 /** 推測できない不透明なトークン（32 バイトの乱数）。DB にはハッシュだけを置く。 */
 export function randomToken(prefix: string): string {
-  return prefix + base64Url(crypto.getRandomValues(new Uint8Array(32)));
+  return prefix + bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }

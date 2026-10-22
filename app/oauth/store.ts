@@ -71,7 +71,6 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
         name: client.name,
         redirectUris: JSON.stringify(client.redirectUris),
         secretHash: client.secretHash,
-        createdAt: new Date().toISOString(),
       });
     },
     async findClient(id) {
@@ -87,7 +86,7 @@ export function d1OAuthStore(env: Env["Bindings"]): OAuthStore {
       return rows[0] ?? null;
     },
     async createGrant(grant) {
-      await db.insert(oauthGrants).values({ ...grant, createdAt: new Date().toISOString() });
+      await db.insert(oauthGrants).values(grant);
     },
     async rotateGrant(refreshTokenHash, clientId, next, now) {
       const rows = await db

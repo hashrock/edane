@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import {
   authorizeResponseUrl,
   isAllowedRedirectUri,
-  mcpChallenge,
+  parseBasicCredentials,
   parseRegistration,
   redirectUriMatches,
   validateAuthorizeRequest,
+  validateCodeExchange,
   verifyPkce,
 } from "./protocol";
 
@@ -88,6 +89,7 @@ describe("validateAuthorizeRequest", () => {
     expect(validateAuthorizeRequest({ ...good, scope: "openid whatever" }, client, ORIGIN)).toEqual({
       kind: "ok",
       request: { clientId: "c1", redirectUri: "https://a.example/cb", state: "xyz", codeChallenge: CHALLENGE, scope: "notes" },
+      client,
     });
   });
   it("uses the only registered redirect when none is given", () => {
@@ -125,8 +127,33 @@ it("authorizeResponseUrl keeps the client's own query", () => {
   expect(authorizeResponseUrl("https://a.example/cb?x=1", { code: "c", state: undefined })).toBe("https://a.example/cb?x=1&code=c");
 });
 
-it("mcpChallenge points at the resource metadata", () => {
-  expect(mcpChallenge(ORIGIN, true)).toBe(
-    `Bearer realm="edane", resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/mcp", error="invalid_token"`
-  );
+describe("parseBasicCredentials", () => {
+  it("decodes the URL-encoded id and secret", () => {
+    expect(parseBasicCredentials(`Basic ${btoa("my%20id:s%3Acret")}`)).toEqual({ clientId: "my id", secret: "s:cret" });
+  });
+  it("is undefined without a Basic header and null when malformed", () => {
+    expect(parseBasicCredentials(undefined)).toBeUndefined();
+    expect(parseBasicCredentials("Bearer x")).toBeUndefined();
+    expect(parseBasicCredentials(`Basic ${btoa("no-colon")}`)).toBeNull();
+    expect(parseBasicCredentials("Basic %%%")).toBeNull();
+  });
+});
+
+describe("validateCodeExchange", () => {
+  const code = { clientId: "c1", redirectUri: "https://a.example/cb", codeChallenge: CHALLENGE, expiresAt: 1000 };
+  const form = { code_verifier: VERIFIER, redirect_uri: "https://a.example/cb" };
+
+  it("accepts a matching, unexpired code", async () => {
+    expect(await validateCodeExchange(code, "c1", form, 999)).toEqual({ ok: true, code });
+  });
+  it.each([
+    ["missing code", null, "c1", form, 999],
+    ["expired", code, "c1", form, 1000],
+    ["other client", code, "c2", form, 999],
+    ["redirect_uri mismatch", code, "c1", { ...form, redirect_uri: "https://a.example/other" }, 999],
+    ["wrong verifier", code, "c1", { ...form, code_verifier: VERIFIER.replace(/.$/, "x") }, 999],
+  ] as const)("rejects %s as invalid_grant", async (_, c, clientId, f, now) => {
+    const r = await validateCodeExchange(c, clientId, f, now);
+    expect(r.ok ? null : r.error.error).toBe("invalid_grant");
+  });
 });
