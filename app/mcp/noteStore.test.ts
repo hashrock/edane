@@ -24,7 +24,8 @@ describe("rejectionForAgent", () => {
     [{ code: "decrypt-failed" }, "Note could not be decrypted: n1"],
     [{ code: "too-large" }, /too large.*Split/],
     [{ code: "version-conflict" }, /Read the note again and retry/],
-    [{ code: "operation-reused" }, /Read the note again and retry/],
+    [{ code: "operation-reused" }, /already used for a different edit/],
+    [{ code: "invalid-edit", detail: "Node not found: x" }, "Node not found: x"],
     [{ code: "invalid-commit", detail: "Invalid field: text" }, /could not be applied: Invalid field: text/],
   ];
   it.each(cases)("words %o for the agent", (rejection, expected) => {

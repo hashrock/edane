@@ -4,21 +4,48 @@ import { parseContent, serializeDocument } from "../application/persistence";
 import { decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "../utils/crypto";
 import {
   applyPatch,
+  buildCommit,
   Conflict,
-  diffDocument,
   InvalidCommit,
   parseCommit,
+  type Commit,
   type CommitReceipt,
+  type EditReceipt,
   type RoomRejection,
   type RoomResult,
   type RoomSnapshot,
 } from "../application/syncOperations";
+import { applyNoteEditRequest, requestedNodeIds, type NoteEditRequest } from "../application/noteEdits";
+import { generateId, type IdSource } from "../domain/model";
 
 type Identity = { noteId: string; userId: string };
 type Row = { id: string; user_id: string; title: string; content: string; is_public: number; version: number; updated_at: string; deleted_at: string | null };
 type Loaded = { row: Row; snapshot: RoomSnapshot };
 
+const sha256 = async (value: unknown) =>
+  Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value))))).map(b => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * Ids for the nodes an edit makes. With an operation id they're derived from it, so
+ * a retried request names the same nodes; without one they're random as usual.
+ */
+const idsFor = (operationId: string | undefined): IdSource => {
+  if (!operationId) return generateId;
+  let n = 0;
+  return () => `op-${operationId}-${++n}`;
+};
+
 const reject = (rejection: RoomRejection): { ok: false } & RoomRejection => ({ ok: false, ...rejection });
+
+/** The wire boundary: a commit as sent, or why it can't be one. */
+function validated(input: unknown): RoomResult<Commit> {
+  try {
+    return { ok: true, value: parseCommit(input) };
+  } catch (e) {
+    if (!(e instanceof InvalidCommit)) throw e;
+    return reject(e.tooLarge ? { code: "too-large" } : { code: "invalid-commit", detail: e.message });
+  }
+}
 
 /** The WebSocket client's wording (it shows the message as is). */
 function rejectionMessage(r: RoomRejection): string {
@@ -28,6 +55,7 @@ function rejectionMessage(r: RoomRejection): string {
     case "conflict": return r.detail;
     case "version-conflict": return "Version conflict; reload before replacing the note";
     case "invalid-commit": return r.detail;
+    case "invalid-edit": return r.detail;
     case "too-large": return "Commit exceeds 1 MB";
     case "operation-reused": return "Operation ID reused with different content";
   }
@@ -67,23 +95,52 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return this.ordered(() => this.apply(identity, input));
   }
   private async apply(identity: Identity, input: unknown): Promise<RoomResult<CommitReceipt>> {
-    let commit;
-    try {
-      commit = parseCommit(input);
-    } catch (e) {
-      if (!(e instanceof InvalidCommit)) throw e;
-      return reject(e.tooLarge ? { code: "too-large" } : { code: "invalid-commit", detail: e.message });
-    }
+    const parsed = validated(input);
+    if (!parsed.ok) return parsed;
+    const commit = parsed.value;
     const loaded = await this.load(identity);
     if (!loaded.ok) return loaded;
-    const { row, snapshot } = loaded.value;
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(commit))))).map(b => b.toString(16).padStart(2, "0")).join("");
+    const digest = await sha256(commit);
+    const seen = await this.receipt(loaded.value, commit.id, digest);
+    if (seen) return seen;
+    return this.persist(loaded.value, commit, digest);
+  }
+  /**
+   * An agent's edit, applied to the note as it is now, in one turn: no other commit
+   * can land between reading and writing, and the answer is the snapshot as committed.
+   * `operationId` (optional) makes a retry safe: the same request under the same id
+   * is applied once; the receipt's digest is of the request, not of the minted ids.
+   */
+  applyEdit(identity: Identity, input: { request: NoteEditRequest; operationId?: string }): Promise<RoomResult<EditReceipt>> {
+    return this.ordered(async () => {
+      const { request, operationId } = input;
+      const loaded = await this.load(identity);
+      if (!loaded.ok) return loaded;
+      const { snapshot } = loaded.value;
+      const digest = await sha256({ edit: request });
+      if (operationId) {
+        const seen = await this.receipt(loaded.value, operationId, digest);
+        if (seen) return seen.ok ? { ok: true, value: { ...seen.value, nodeIds: requestedNodeIds(request, idsFor(operationId)) } } : seen;
+      }
+      const ids = idsFor(operationId);
+      const edited = applyNoteEditRequest(snapshot.model, request, ids);
+      if (!edited.ok) return reject({ code: "invalid-edit", detail: edited.error });
+      const commit = buildCommit(operationId ?? crypto.randomUUID(), snapshot.model, edited.document);
+      if (!commit) return { ok: true, value: { ...snapshot, ack: operationId ?? "", committedVersion: snapshot.version, nodeIds: edited.nodeIds } };
+      const persisted = await this.persist(loaded.value, commit, digest);
+      return persisted.ok ? { ok: true, value: { ...persisted.value, nodeIds: edited.nodeIds } } : persisted;
+    });
+  }
+  /** A known operation id: its original receipt (same digest), a rejection (different), or null (new). */
+  private async receipt({ row, snapshot }: Loaded, operationId: string, digest: string): Promise<RoomResult<CommitReceipt> | null> {
     const receipt = await this.env.DB.prepare("SELECT digest, version FROM note_commits WHERE note_id = ? AND operation_id = ?")
-      .bind(row.id, commit.id).first<{ digest: string; version: number }>();
-    if (receipt) {
-      if (receipt.digest !== digest) return reject({ code: "operation-reused" });
-      return { ok: true, value: { ...snapshot, ack: commit.id, committedVersion: receipt.version } };
-    }
+      .bind(row.id, operationId).first<{ digest: string; version: number }>();
+    if (!receipt) return null;
+    if (receipt.digest !== digest) return reject({ code: "operation-reused" });
+    return { ok: true, value: { ...snapshot, ack: operationId, committedVersion: receipt.version } };
+  }
+  /** Merge, encrypt and store the commit with its receipt, then tell every open editor. */
+  private async persist({ row, snapshot }: Loaded, commit: Commit, digest: string): Promise<RoomResult<CommitReceipt>> {
     let model;
     try {
       model = applyPatch(snapshot.model, commit.patch);
@@ -122,7 +179,14 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       const { snapshot } = loaded.value;
       if (body.version !== snapshot.version) return reject({ code: "version-conflict" });
       const model = body.content === undefined ? { ...snapshot.model, title: body.title ?? snapshot.model.title } : parseContent(body.content, body.title ?? snapshot.model.title);
-      return this.apply(identity, { id: crypto.randomUUID(), patch: diffDocument(snapshot.model, model), ...(body.isPublic !== undefined && { publicity: { before: snapshot.isPublic, after: body.isPublic } }) });
+      const id = crypto.randomUUID();
+      const commit = buildCommit(id, snapshot.model, model, body.isPublic === undefined ? undefined : { before: snapshot.isPublic, after: body.isPublic });
+      // Nothing to change: answer with the current state, version untouched.
+      if (!commit) return { ok: true, value: { ...snapshot, ack: id, committedVersion: snapshot.version } };
+      // Same wire validation as a socket commit, without reading the row again.
+      const parsed = validated(commit);
+      if (!parsed.ok) return parsed;
+      return this.persist(loaded.value, parsed.value, await sha256(parsed.value));
     });
   }
   async fetch(request: Request) {

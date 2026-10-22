@@ -110,3 +110,40 @@ export function applyNoteEdit(
       return assertNever(edit);
   }
 }
+
+/**
+ * What an agent asks for, before any id is minted — the unit an operation id
+ * names. The same request with the same id source always makes the same
+ * nodes, so a retried request can be recognised and answered with the ids it
+ * made the first time.
+ */
+export type NoteEditRequest =
+  | { kind: "addNodes"; markdown: string; parentId?: string; afterId?: string }
+  | { kind: "updateNode"; nodeId: string; text?: string; checked?: boolean | null }
+  | { kind: "deleteNode"; nodeId: string }
+  | { kind: "rename"; title: string };
+
+/** Ids of the top-level nodes an `addNodes` request makes with `nextId` (none for other kinds). */
+export function requestedNodeIds(request: NoteEditRequest, nextId: IdSource): string[] | undefined {
+  return request.kind === "addNodes" ? nodesFromMarkdown(request.markdown, nextId).map((n) => n.id) : undefined;
+}
+
+export function applyNoteEditRequest(
+  doc: MindMapDocument,
+  request: NoteEditRequest,
+  nextId: IdSource = generateId
+): NoteEditResult {
+  switch (request.kind) {
+    case "addNodes": {
+      const { markdown, parentId, afterId } = request;
+      return applyNoteEdit(doc, { kind: "addNodes", nodes: nodesFromMarkdown(markdown, nextId), parentId, afterId }, nextId);
+    }
+    case "updateNode":
+    case "deleteNode":
+      return applyNoteEdit(doc, request, nextId);
+    case "rename":
+      return { ok: true, document: run(doc, { type: "setTitle", text: request.title }, nextId) };
+    default:
+      return assertNever(request);
+  }
+}

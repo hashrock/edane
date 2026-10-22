@@ -6,21 +6,23 @@
  * ゴミ箱のノートは一覧にも読み書きにも出さない（見つからない扱い）。
  *
  * 既存ノートの読み書きはエディタと同じノートごとの NoteRoom（app/sync/room.ts）を通す。
- * 読んだ時点からの差分だけを commit するので、開いているエディタの編集と併合され、
+ * 編集は依頼（NoteEditRequest）ごと NoteRoom.applyEdit に渡し、NoteRoom がその時点の
+ * ノートに 1 回の順番の中で当てて commit する。開いているエディタの編集と併合され、
  * version が進み、開いているエディタへも配信される。D1 を直接 UPDATE しないこと。
  */
 import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "../global.d";
 import type { MindMapDocument } from "../domain/model";
 import { serializeDocument } from "../application/persistence";
-import { diffDocument, hasChanges, type RoomRejection } from "../application/syncOperations";
+import type { RoomRejection } from "../application/syncOperations";
+import type { NoteEditRequest } from "../application/noteEdits";
 import { insertNote, listLiveNotes } from "../utils/noteRepository";
 import { noteRoom } from "../utils/noteRoom";
 import { ToolInputError } from "./protocol";
 
 export type NoteSummary = Awaited<ReturnType<typeof listLiveNotes>>[number];
 
-/** 復号済みのノート。`doc` は読んだ時点の文書で、保存はこれとの差分になる。 */
+/** 復号済みのノート。 */
 export interface StoredNote {
   id: string;
   updatedAt: string;
@@ -33,8 +35,16 @@ export interface NoteStore {
   /** 自分のノートで、ゴミ箱に無いものだけ。復号に失敗したら "decrypt-failed"。 */
   load(userId: string, noteId: string): Promise<StoredNote | null | "decrypt-failed">;
   create(userId: string, doc: MindMapDocument): Promise<{ id: string }>;
-  /** load したノートを `after` にする。読んだ後の他の編集とは差分の単位で併合される。 */
-  save(userId: string, note: StoredNote, after: MindMapDocument): Promise<void>;
+  /**
+   * ノートに編集を当てて、確定した文書（併合された他の編集も含む）を返す。`operationId` を
+   * 渡すと、同じ依頼の再送は 1 回だけ当たる。断られたら ToolInputError。
+   */
+  edit(
+    userId: string,
+    noteId: string,
+    request: NoteEditRequest,
+    operationId?: string
+  ): Promise<{ doc: MindMapDocument; nodeIds?: string[] }>;
 }
 
 export function d1NoteStore(env: Env["Bindings"]): NoteStore {
@@ -64,16 +74,15 @@ export function d1NoteStore(env: Env["Bindings"]): NoteStore {
       return { id };
     },
 
-    async save(userId, note, after) {
-      const patch = diffDocument(note.doc, after);
-      if (!hasChanges(patch)) return;
-      const result = await noteRoom(env, note.id).commit({ noteId: note.id, userId }, { id: crypto.randomUUID(), patch });
-      if (!result.ok) throw new ToolInputError(rejectionForAgent(note.id, result));
+    async edit(userId, noteId, request, operationId) {
+      const result = await noteRoom(env, noteId).applyEdit({ noteId, userId }, { request, operationId });
+      if (!result.ok) throw new ToolInputError(rejectionForAgent(noteId, result));
+      return { doc: result.value.model, nodeIds: result.value.nodeIds };
     },
   };
 }
 
-/** NoteRoom が commit を断った理由を、エージェントが次に何をすればよいか分かる文言にする。 */
+/** NoteRoom が断った理由を、エージェントが次に何をすればよいか分かる文言にする。 */
 export function rejectionForAgent(noteId: string, r: RoomRejection): string {
   switch (r.code) {
     case "conflict":
@@ -85,9 +94,12 @@ export function rejectionForAgent(noteId: string, r: RoomRejection): string {
     case "too-large":
       return "The edit is too large (over 1 MB). Split it into smaller edits.";
     case "version-conflict":
-    case "operation-reused":
       return `Note ${noteId} changed during the edit. Read the note again and retry.`;
+    case "operation-reused":
+      return "This operationId was already used for a different edit. Use a new operationId for a new edit.";
     case "invalid-commit":
       return `The edit could not be applied: ${r.detail}`;
+    case "invalid-edit":
+      return r.detail;
   }
 }

@@ -21,6 +21,8 @@ export class InvalidCommit extends Error {
 export interface RoomSnapshot extends Snapshot { updatedAt: string }
 /** A persisted commit: the resulting snapshot plus the receipt for the operation id. */
 export interface CommitReceipt extends RoomSnapshot { ack: string; committedVersion: number }
+/** NoteRoom.applyEdit's answer: the snapshot as committed (other clients' merged edits included). */
+export interface EditReceipt extends CommitReceipt { nodeIds?: string[] }
 /**
  * Why NoteRoom refused a request — the expected outcomes. They're returned, not thrown,
  * because exception types don't survive Durable Object RPC; each caller (WebSocket,
@@ -36,6 +38,8 @@ export type RoomRejection =
   /** The legacy full-document PUT named a version that isn't the current one. */
   | { code: "version-conflict" }
   | { code: "invalid-commit"; detail: string }
+  /** An agent's edit names a node that isn't there, or asks for nothing. */
+  | { code: "invalid-edit"; detail: string }
   | { code: "too-large" }
   /** The operation id already has a receipt for a different commit. */
   | { code: "operation-reused" };
@@ -70,6 +74,17 @@ export function diffDocument(before: MindMapDocument, after: MindMapDocument): P
   return patch;
 }
 export const hasChanges = (p: Patch) => !!(p.title || p.roots || Object.keys(p.nodes).length);
+/**
+ * The commit that turns `before` into `after` (and flips publicity), or null when
+ * nothing would change — a no-op must not advance the version. The one place
+ * a commit is put together: the editor's socket, the legacy PUT and NoteRoom.applyEdit.
+ */
+export function buildCommit(id: string, before: MindMapDocument, after: MindMapDocument, publicity?: Change<boolean>): Commit | null {
+  const patch = diffDocument(before, after);
+  const flip = publicity && publicity.before !== publicity.after ? publicity : undefined;
+  if (!hasChanges(patch) && !flip) return null;
+  return { id, patch, ...(flip && { publicity: flip }) };
+}
 
 // Preserve concurrent insertions. Concurrent reorder of the same sibling set
 // is rejected; there is no hidden whole-document last-writer-wins fallback.

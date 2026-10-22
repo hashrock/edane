@@ -40,7 +40,16 @@ D1 migration `0010_note_sync.sql` と Wrangler の `NOTE_ROOMS` binding /
 旧 `PUT /api/notes/:id` は `version` 必須（不足は428、不一致は409）。
 `GET /api/notes/:id/sync` で現状とversionを取得する。
 古い全体保存クライアントを無条件に受け入れると同期の保証が失われるため、
-旧クライアントは更新が必要。PR #205のリモートMCPは未マージ・未統合。
+旧クライアントは更新が必要。内容が変わらない PUT は commit せず、version を進めない。
+
+## リモートMCP（#205 / #207 で統合）
+
+リモートMCP（`POST /mcp`）の編集も同じ NoteRoom を通る。ブラウザと違い、差分ではなく依頼そのもの
+（`NoteEditRequest`）を `NoteRoom.applyEdit` に渡し、NoteRoom がその時点の最新状態に1つの順番の中で当てる。
+したがってエージェントの編集は到着順に最新状態へ当たり、エージェントが以前に読んだ値との競合は検出しない
+（ブラウザの未確認操作のような「読んだ時点」が無いため）。存在しないノードへの編集は拒否する。
+任意の `operationId` で再送を1回にまとめる（受領記録のダイジェストは依頼から取る）。
+NoteRoom の想定内の拒否は例外ではなく型付きの結果（`RoomResult` / `RoomRejection`）で返す。
 
 ## 検証（2026-10-22時点）
 

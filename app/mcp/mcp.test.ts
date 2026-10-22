@@ -9,12 +9,15 @@ import type { Env } from "../global.d";
 import { mcpRoutes, MAX_BODY_BYTES } from "./index";
 import { AGENT_INPUT_LIMITS } from "../application/agentInput";
 import type { NoteStore, StoredNote } from "./noteStore";
-import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol";
+import { SUPPORTED_PROTOCOL_VERSIONS, ToolInputError } from "./protocol";
+import { applyNoteEditRequest } from "../application/noteEdits";
+import { sequentialIds } from "../domain/model.arb";
 
 const TOKEN = "edane_test";
 
 function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: string }> } {
   const notes = new Map<string, StoredNote & { userId: string }>();
+  const receipts = new Map<string, { request: string; nodeIds?: string[] }>();
   let seq = 0;
   return {
     notes,
@@ -32,9 +35,21 @@ function memoryStore(): NoteStore & { notes: Map<string, StoredNote & { userId: 
       notes.set(id, { id, userId, doc, updatedAt: "t0" });
       return { id };
     },
-    async save(userId, note, after) {
-      const n = notes.get(note.id);
-      if (n && n.userId === userId) notes.set(note.id, { ...n, doc: after, updatedAt: "t1" });
+    // Same rules as NoteRoom.applyEdit: the request applied to the note as it is now,
+    // and a repeated operation id answered from its receipt.
+    async edit(userId, noteId, request, operationId) {
+      const n = notes.get(noteId);
+      if (!n || n.userId !== userId) throw new ToolInputError(`Note not found: ${noteId}`);
+      const receipt = operationId && receipts.get(`${noteId}/${operationId}`);
+      if (receipt) {
+        if (receipt.request !== JSON.stringify(request)) throw new ToolInputError("operation reused");
+        return { doc: n.doc, nodeIds: receipt.nodeIds };
+      }
+      const result = applyNoteEditRequest(n.doc, request, sequentialIds(`${noteId}-${seq++}-`));
+      if (!result.ok) throw new ToolInputError(result.error);
+      if (operationId) receipts.set(`${noteId}/${operationId}`, { request: JSON.stringify(request), nodeIds: result.nodeIds });
+      notes.set(noteId, { ...n, doc: result.document, updatedAt: "t1" });
+      return { doc: result.document, nodeIds: result.nodeIds };
     },
   };
 }
@@ -253,7 +268,7 @@ describe("note tools", () => {
 
   it("keeps an internal failure internal: JSON-RPC error to the agent, details only in the server log", async () => {
     const { store, post } = setup();
-    store.save = async () => {
+    store.edit = async () => {
       throw new Error("D1_ERROR: disk I/O error at /secret/path");
     };
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -272,6 +287,20 @@ describe("note tools", () => {
     } finally {
       log.mockRestore();
     }
+  });
+
+  it("applies an edit sent again under the same operationId only once, with the same node ids", async () => {
+    const { call, docOf } = setup();
+    const args = { noteId: "n1", markdown: "- eggs", operationId: "op-1" };
+    const first = await call("add_nodes", args);
+    const again = await call("add_nodes", args);
+    expect(again.isError).toBe(false);
+    expect(/Added node ids: (\S+)/.exec(again.text)![1]).toBe(/Added node ids: (\S+)/.exec(first.text)![1]);
+    expect(docOf("n1").roots[0].children.map((c) => c.text)).toEqual(["milk", "eggs"]);
+
+    expect(await call("add_nodes", { ...args, markdown: "- ham" })).toMatchObject({ isError: true });
+    expect(await call("add_nodes", { ...args, operationId: "not ok!" })).toMatchObject({ isError: true });
+    expect(docOf("n1").roots[0].children.map((c) => c.text)).toEqual(["milk", "eggs"]);
   });
 
   it("returns misuse as isError results without saving", async () => {

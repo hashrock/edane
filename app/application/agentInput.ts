@@ -18,6 +18,8 @@ export const AGENT_INPUT_LIMITS = {
   id: 200,
   /** Search query. */
   query: 200,
+  /** An agent-chosen operation id (the receipt key; NoteRoom's wire format allows 100). */
+  operationId: 100,
 } as const;
 
 export type InputIssue =

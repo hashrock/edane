@@ -5,13 +5,7 @@
 import { CONTENT_FORMAT_VERSION } from "../application/persistence";
 import { absoluteUrl } from "../lib/url";
 import { AGENT_INPUT_LIMITS } from "../application/agentInput";
-import {
-  applyNoteEdit,
-  documentFromMarkdown,
-  documentToOutline,
-  nodesFromMarkdown,
-  type NoteEdit,
-} from "../application/noteEdits";
+import { documentFromMarkdown, documentToOutline, type NoteEditRequest } from "../application/noteEdits";
 import { textResult, ToolInputError, type McpTool, type ToolResult } from "./protocol";
 import type { NoteStore, StoredNote } from "./noteStore";
 
@@ -48,14 +42,19 @@ async function loadNote(ctx: ToolContext, args: Args): Promise<StoredNote> {
   return note;
 }
 
-/** 読んで、編集を当てて、保存して、編集後のアウトラインを返す。 */
-async function editNote(ctx: ToolContext, args: Args, edit: NoteEdit): Promise<ToolResult> {
-  const note = await loadNote(ctx, args);
-  const result = applyNoteEdit(note.doc, edit);
-  if (!result.ok) throw new ToolInputError(result.error);
-  await ctx.store.save(ctx.userId, note, result.document);
-  const created = result.nodeIds ? `Added node ids: ${result.nodeIds.join(", ")}\n\n` : "";
-  return textResult(`${created}${documentToOutline(result.document)}`);
+/**
+ * 編集を NoteRoom に当ててもらい、確定したノートのアウトラインを返す。他のクライアントの
+ * 編集が同時に併合されていれば、それも含まれる。
+ */
+async function editNote(ctx: ToolContext, args: Args, request: NoteEditRequest): Promise<ToolResult> {
+  const noteId = requiredString(args, "noteId");
+  const operationId = optionalString(args, "operationId");
+  if (operationId !== undefined && !/^[\w-]{1,100}$/.test(operationId)) {
+    throw new ToolInputError("operationId must be 1-100 letters, digits, '_' or '-'");
+  }
+  const { doc, nodeIds } = await ctx.store.edit(ctx.userId, noteId, request, operationId);
+  const created = nodeIds ? `Added node ids: ${nodeIds.join(", ")}\n\n` : "";
+  return textResult(`${created}${documentToOutline(doc)}`);
 }
 
 const NOTE_ID = { type: "string", maxLength: AGENT_INPUT_LIMITS.id, description: "list_notes で得たノートの id" };
@@ -65,6 +64,12 @@ const NODE_ID = {
   description: "read_note のアウトラインで {id=…} に書かれたノードの id",
 };
 const TITLE = { type: "string", maxLength: AGENT_INPUT_LIMITS.title };
+const OPERATION_ID = {
+  type: "string",
+  maxLength: AGENT_INPUT_LIMITS.operationId,
+  description:
+    "任意。この編集の識別子（英数字・_・- で 100 文字まで、例: UUID）。応答が届かず同じ編集を送り直すときに同じ値を渡すと、ノートには 1 回だけ当たる。",
+};
 const MARKDOWN = {
   type: "string",
   maxLength: AGENT_INPUT_LIMITS.markdown,
@@ -139,15 +144,14 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     description: "ノートのタイトルを変える。",
     inputSchema: {
       type: "object",
-      properties: { noteId: NOTE_ID, title: TITLE },
+      properties: { noteId: NOTE_ID, title: TITLE, operationId: OPERATION_ID },
       required: ["noteId", "title"],
       additionalProperties: false,
     },
     annotations: { idempotentHint: true },
     async call(args, ctx) {
       const title = requiredString(args, "title").trim();
-      const note = await loadNote(ctx, args);
-      await ctx.store.save(ctx.userId, note, { ...note.doc, title });
+      await editNote(ctx, args, { kind: "rename", title });
       return textResult(`Renamed to "${title}"`);
     },
   },
@@ -158,15 +162,15 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
       "ノードを追加する。parentId を渡すとその子の末尾に、afterId を渡すとそのノードの直後の兄弟に（ルートの直後なら子に）入る。どちらも無ければ最初の木の根の子の末尾。編集後のアウトラインを返す。",
     inputSchema: {
       type: "object",
-      properties: { noteId: NOTE_ID, markdown: MARKDOWN, parentId: NODE_ID, afterId: NODE_ID },
+      properties: { noteId: NOTE_ID, markdown: MARKDOWN, parentId: NODE_ID, afterId: NODE_ID, operationId: OPERATION_ID },
       required: ["noteId", "markdown"],
       additionalProperties: false,
     },
     async call(args, ctx) {
-      const nodes = nodesFromMarkdown(requiredString(args, "markdown"));
+      const markdown = requiredString(args, "markdown");
       const parentId = optionalString(args, "parentId");
       const afterId = optionalString(args, "afterId");
-      return editNote(ctx, args, { kind: "addNodes", nodes, parentId, afterId });
+      return editNote(ctx, args, { kind: "addNodes", markdown, parentId, afterId });
     },
   },
   {
@@ -181,6 +185,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
         nodeId: NODE_ID,
         text: { type: "string", maxLength: AGENT_INPUT_LIMITS.text },
         checked: { type: ["boolean", "null"] },
+        operationId: OPERATION_ID,
       },
       required: ["noteId", "nodeId"],
       additionalProperties: false,
@@ -204,7 +209,7 @@ export const NOTE_TOOLS: McpTool<ToolContext>[] = [
     description: "ノードをサブツリーごと削除する。最後の木の根を消すと空の根が 1 つ残る。",
     inputSchema: {
       type: "object",
-      properties: { noteId: NOTE_ID, nodeId: NODE_ID },
+      properties: { noteId: NOTE_ID, nodeId: NODE_ID, operationId: OPERATION_ID },
       required: ["noteId", "nodeId"],
       additionalProperties: false,
     },
