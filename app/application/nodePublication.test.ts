@@ -74,14 +74,17 @@ describe("parsePublicationPath", () => {
 });
 
 describe("canServePublication", () => {
+  const pub = { publicEpoch: 0 };
   it("serves only live public notes", () => {
-    expect(canServePublication({ isPublic: true, deletedAt: null })).toBe(true);
-    expect(canServePublication({ isPublic: false, deletedAt: null })).toBe(false);
-    expect(canServePublication({ isPublic: true, deletedAt: "2026-01-01" })).toBe(
-      false
-    );
-    expect(canServePublication(null)).toBe(false);
-    expect(canServePublication(undefined)).toBe(false);
+    expect(canServePublication({ isPublic: true, deletedAt: null, publicEpoch: 0 }, pub)).toBe(true);
+    expect(canServePublication({ isPublic: false, deletedAt: null, publicEpoch: 0 }, pub)).toBe(false);
+    expect(canServePublication({ isPublic: true, deletedAt: "2026-01-01", publicEpoch: 0 }, pub)).toBe(false);
+    expect(canServePublication(null, pub)).toBe(false);
+    expect(canServePublication(undefined, pub)).toBe(false);
+  });
+  it("doesn't revive a publication from before the note was made private or trashed", () => {
+    expect(canServePublication({ isPublic: true, deletedAt: null, publicEpoch: 1 }, pub)).toBe(false);
+    expect(canServePublication({ isPublic: true, deletedAt: null, publicEpoch: 1 }, { publicEpoch: 1 })).toBe(true);
   });
 });
 

@@ -25,7 +25,7 @@ describe("NoteRoom credential check", () => {
     await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('s1', 'alice', 'x', ?)")
       .bind(Date.now() + 60_000)
       .run();
-    room = new NoteRoom({} as DurableObjectState, env);
+    room = new NoteRoom({ getWebSockets: () => [] } as unknown as DurableObjectState, env);
   });
   const identity = { noteId: "n1", userId: "alice", credential: { table: "sessions" as const, id: "s1" } };
 

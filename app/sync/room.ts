@@ -179,8 +179,9 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     const result = await this.env.DB.batch([
       this.env.DB.prepare("INSERT INTO note_commits (note_id, operation_id, digest, version) SELECT id, ?, ?, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(commit.id, digest, version, row.id, row.version),
-      this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
-        .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
+      // Going private bumps public_epoch (application/nodePublication.ts: old URLs stay dead if it goes public again).
+      this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, public_epoch = public_epoch + (is_public = 1 AND ? = 0), is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
+        .bind(model.title, content, isPublic ? 1 : 0, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
       // Receipts only dedupe resends, which come within a few versions (limits.ts).
       ...(pruneBelow === null ? [] : [this.env.DB.prepare("DELETE FROM note_commits WHERE note_id = ? AND version <= ?").bind(row.id, pruneBelow)]),
     ]);

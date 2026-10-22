@@ -52,6 +52,12 @@ export const notes = sqliteTable("notes", {
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   /** Soft-delete timestamp (ISO). Non-null = in trash, hidden from the list. */
   deletedAt: text("deleted_at"),
+  /**
+   * Bumped whenever the note stops being served publicly (made private, or
+   * trashed). A publication serves only while its own epoch matches, so making
+   * the note public again (or restoring it) doesn't silently revive old URLs.
+   */
+  publicEpoch: integer("public_epoch").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -92,6 +98,8 @@ export const nodePublications = sqliteTable("node_publications", {
     .references(() => notes.id),
   /** The published node's id inside the note's JSON tree. */
   nodeId: text("node_id").notNull(),
+  /** The note's public_epoch when this was (re)published; serves only while it matches. */
+  publicEpoch: integer("public_epoch").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

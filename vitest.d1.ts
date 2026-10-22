@@ -49,8 +49,12 @@ export function sqliteD1(): D1Database {
     exec() {
       const stmt = db.prepare(this.query);
       const params = this.params.map(param);
-      const results = stmt.columns().length > 0 ? (stmt.all(...params) as Record<string, unknown>[]) : (stmt.run(...params), []);
-      return { results, success: true, meta: {} };
+      if (stmt.columns().length > 0) {
+        const results = stmt.all(...params) as Record<string, unknown>[];
+        return { results, success: true, meta: { changes: results.length } };
+      }
+      const info = stmt.run(...params);
+      return { results: [], success: true, meta: { changes: info.changes, last_row_id: info.lastInsertRowid } };
     }
   }
 

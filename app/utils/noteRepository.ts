@@ -63,6 +63,8 @@ export interface NewPublication {
   noteId: string;
   nodeId: string;
   createdAt: string;
+  /** The note's current public_epoch (omitted: 0, a note never made private). */
+  publicEpoch?: number;
 }
 
 export async function insertPublication(db: DrizzleD1Database, pub: NewPublication): Promise<void> {

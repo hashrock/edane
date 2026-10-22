@@ -52,14 +52,19 @@ export function parsePublicationPath(
 }
 
 /**
- * 配信してよいノートか。row が残っていても、ノートが消えた・ゴミ箱にある・
+ * 配信してよい公開か。row が残っていても、ノートが消えた・ゴミ箱にある・
  * 非公開に戻された、のどれかなら配信しない（404）。「非公開＝暗号化」の
  * モデルを配信経路が破らないための唯一のゲート。
+ *
+ * 一度でも非公開・ゴミ箱になったノートは公開の世代（public_epoch）が進むので、
+ * 公開に戻したり復元したりしても、その前の公開は配信されない（持ち主が
+ * もう一度「公開」すると世代が揃って再開する）。
  */
 export function canServePublication(
-  note: { isPublic: boolean; deletedAt: string | null } | null | undefined
+  note: { isPublic: boolean; deletedAt: string | null; publicEpoch: number } | null | undefined,
+  publication: { publicEpoch: number }
 ): boolean {
-  return !!note && note.isPublic && !note.deletedAt;
+  return !!note && note.isPublic && !note.deletedAt && note.publicEpoch === publication.publicEpoch;
 }
 
 /**

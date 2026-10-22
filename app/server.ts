@@ -6,7 +6,7 @@ import { cors } from "hono/cors";
 import { inertia } from "@hono/inertia";
 import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
@@ -378,7 +378,7 @@ async function loadServablePublication(db: DrizzleD1Database, pubId: string) {
     .get();
   if (!pub) return null;
   const note = await db.select().from(notes).where(eq(notes.id, pub.noteId)).get();
-  if (!note || !canServePublication(note)) return null;
+  if (!note || !canServePublication(note, pub)) return null;
   const node = findNode(parseContent(note.content, note.title), pub.nodeId);
   return node ? { pub, note, node } : null;
 }
@@ -444,7 +444,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 
   const db = drizzle(c.env.DB);
   const note = await loadOwnedNote(db, c.req.param("id"), user.id);
-  if (!note) return c.json({ error: "Not found" }, 404);
+  if (!note || note.deletedAt) return c.json({ error: "Not found" }, 404);
   if (!note.isPublic) {
     return c.json({ error: PRIVATE_NOTE_PUBLISH_REASON }, 400);
   }
@@ -468,6 +468,10 @@ app.post("/api/notes/:id/publications", async (c) => {
     )
     .get();
   if (existing) {
+    // Publishing again after the note was private / trashed is the owner's choice to resume this URL.
+    if (existing.publicEpoch !== note.publicEpoch) {
+      await db.update(nodePublications).set({ publicEpoch: note.publicEpoch }).where(eq(nodePublications.id, existing.id));
+    }
     return c.json({
       id: existing.id,
       nodeId: existing.nodeId,
@@ -477,7 +481,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await insertPublication(db, { id, userId: user.id, noteId: note.id, nodeId: body.nodeId, createdAt });
+  await insertPublication(db, { id, userId: user.id, noteId: note.id, nodeId: body.nodeId, createdAt, publicEpoch: note.publicEpoch });
   return c.json({ id, nodeId: body.nodeId, createdAt }, 201);
 });
 
@@ -501,6 +505,8 @@ app.get("/api/publications", async (c) => {
       noteContent: notes.content,
       noteIsPublic: notes.isPublic,
       noteDeletedAt: notes.deletedAt,
+      notePublicEpoch: notes.publicEpoch,
+      publicEpoch: nodePublications.publicEpoch,
     })
     .from(nodePublications)
     .innerJoin(notes, eq(nodePublications.noteId, notes.id))
@@ -522,10 +528,10 @@ app.get("/api/publications", async (c) => {
       models.set(r.noteId, model);
     }
     const path = model ? nodePathTexts(model, r.nodeId) : null;
-    const servable = canServePublication({
-      isPublic: r.noteIsPublic,
-      deletedAt: r.noteDeletedAt,
-    });
+    const servable = canServePublication(
+      { isPublic: r.noteIsPublic, deletedAt: r.noteDeletedAt, publicEpoch: r.notePublicEpoch },
+      r
+    );
     publications.push({
       id: r.id,
       noteId: r.noteId,
@@ -536,7 +542,7 @@ app.get("/api/publications", async (c) => {
       active: servable && path !== null,
       inactiveReason: r.noteDeletedAt
         ? "note-trashed"
-        : !r.noteIsPublic
+        : !r.noteIsPublic || r.notePublicEpoch !== r.publicEpoch
           ? "note-private"
           : path === null
             ? "node-missing"
@@ -779,7 +785,7 @@ const routes = app
     if (note) {
       await db
         .update(notes)
-        .set({ deletedAt: new Date().toISOString() })
+        .set({ deletedAt: new Date().toISOString(), publicEpoch: sql`${notes.publicEpoch} + 1` })
         .where(eq(notes.id, note.id));
       await noteRoom(c.env, note.id).invalidate();
     }
@@ -821,7 +827,7 @@ const routes = app
     if (!user) return c.redirect("/");
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
-    if (note) {
+    if (note && !note.deletedAt) {
       const body = await c.req
         .json<{ pinned?: boolean }>()
         .catch(() => ({}) as { pinned?: boolean });
