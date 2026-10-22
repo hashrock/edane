@@ -16,6 +16,8 @@ import {
   noteStorageMode,
 } from "./crypto";
 
+const NOTE_ID = "note-1";
+
 const textArb = fc.string({ unit: "grapheme", maxLength: 80 });
 const secretArb = fc.string({ unit: "grapheme", minLength: 1, maxLength: 24 });
 const modeArb = fc.constantFrom("plain", "encrypted") as fc.Arbitrary<"plain" | "encrypted">;
@@ -49,8 +51,8 @@ describe("storage encode / decode", () => {
   it("decodeStoredNoteContent(encodeNoteContentForStorage(c)) === c in both modes", async () => {
     await fc.assert(
       fc.asyncProperty(textArb, modeArb, secretArb, async (content, mode, secret) => {
-        const stored = await encodeNoteContentForStorage(content, mode, secret);
-        expect(await decodeStoredNoteContent(stored, mode, secret)).toBe(content);
+        const stored = await encodeNoteContentForStorage(content, mode, secret, NOTE_ID);
+        expect(await decodeStoredNoteContent(stored, mode, secret, NOTE_ID)).toBe(content);
       }),
       { numRuns: 60 }
     );
@@ -59,7 +61,7 @@ describe("storage encode / decode", () => {
   it("public notes are stored verbatim, private notes never are", async () => {
     await fc.assert(
       fc.asyncProperty(textArb, fc.boolean(), secretArb, async (content, isPublic, secret) => {
-        const stored = await encodeNoteContentForStorage(content, noteStorageMode(isPublic), secret);
+        const stored = await encodeNoteContentForStorage(content, noteStorageMode(isPublic), secret, NOTE_ID);
         expect(stored === content).toBe(isPublic);
       }),
       { numRuns: 40 }
@@ -96,7 +98,7 @@ describe("isEncrypted never mistakes a note for ciphertext", () => {
         fc.string({ unit: "grapheme", maxLength: 120 }).filter((s) => /[^A-Za-z0-9+/=]/.test(s)),
         secretArb,
         async (legacy, secret) => {
-          expect(await decodeStoredNoteContent(legacy, "encrypted", secret)).toBe(legacy);
+          expect(await decodeStoredNoteContent(legacy, "encrypted", secret, NOTE_ID)).toBe(legacy);
         }
       ),
       { numRuns: 60 }

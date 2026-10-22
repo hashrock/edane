@@ -14,7 +14,7 @@ import { routePolicyMiddleware } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
+import { decodeStoredNoteContent, noteKeys, noteStorageMode, type NoteKeys } from "./utils/crypto";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
@@ -402,17 +402,13 @@ async function loadOwnedPublicationNode(
   db: DrizzleD1Database,
   pubId: string,
   userId: string,
-  encryptionKey: string
+  keys: NoteKeys
 ) {
   const pub = await loadOwnedPublication(db, pubId, userId);
   if (!pub) return { error: "not-found" as const };
   const note = await loadOwnedNote(db, pub.noteId, userId);
   if (!note) return { error: "not-found" as const };
-  const content = await decodeStoredNoteContent(
-    note.content,
-    noteStorageMode(note.isPublic),
-    encryptionKey
-  );
+  const content = await decodeStoredNoteContent(note.content, noteStorageMode(note.isPublic), keys, note.id);
   if (content === null) return { error: "decrypt" as const };
   const node = findNode(parseContent(content, note.title), pub.nodeId);
   if (!node) return { error: "not-found" as const };
@@ -519,11 +515,7 @@ app.get("/api/publications", async (c) => {
   for (const r of rows) {
     let model = models.get(r.noteId);
     if (model === undefined) {
-      const content = await decodeStoredNoteContent(
-        r.noteContent,
-        noteStorageMode(r.noteIsPublic),
-        c.env.ENCRYPTION_KEY
-      );
+      const content = await decodeStoredNoteContent(r.noteContent, noteStorageMode(r.noteIsPublic), noteKeys(c.env), r.noteId);
       model = content === null ? null : parseContent(content, r.noteTitle);
       models.set(r.noteId, model);
     }
@@ -614,7 +606,7 @@ app.post("/api/sites/:pubId/suggest", async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   if (!(await aiSuggestAllowed(c.env, user.id))) return c.json({ error: "Too many AI requests; wait a minute" }, 429);
   const [owned, body] = await Promise.all([
-    loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, c.env.ENCRYPTION_KEY),
+    loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, noteKeys(c.env)),
     c.req.json().catch(() => null),
   ]);
   if ("error" in owned) {
@@ -771,7 +763,7 @@ const routes = app
         isPublic: false,
         now: new Date().toISOString(),
       },
-      c.env.ENCRYPTION_KEY
+      noteKeys(c.env)
     );
 
     return c.redirect(`/notes/${id}/edit`, 303);
@@ -852,7 +844,7 @@ const routes = app
       case "render": {
         const owned = access.note;
         const content =
-          (await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), c.env.ENCRYPTION_KEY)) ??
+          (await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), noteKeys(c.env), owned.id)) ??
           "";
         return c.render("Notes/Edit", {
           user: access.viewer,
@@ -869,7 +861,7 @@ const routes = app
     const db = drizzle(c.env.DB);
     const pubId = c.req.param("pubId");
     const [owned, site] = await Promise.all([
-      loadOwnedPublicationNode(db, pubId, user.id, c.env.ENCRYPTION_KEY),
+      loadOwnedPublicationNode(db, pubId, user.id, noteKeys(c.env)),
       db.select({ template: sites.template }).from(sites).where(eq(sites.publicationId, pubId)).get(),
     ]);
     if ("error" in owned) {
@@ -897,7 +889,7 @@ const routes = app
     if (access.kind === "not-found") return c.notFound();
 
     const owned = access.note;
-    const content = await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), c.env.ENCRYPTION_KEY);
+    const content = await decodeStoredNoteContent(owned.content, noteStorageMode(owned.isPublic), noteKeys(c.env), owned.id);
     if (content === null) return c.text("Decryption failed", 500);
     return c.render("Notes/Show", {
       user: access.viewer,

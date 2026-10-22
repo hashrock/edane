@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../global.d";
 import type { Credential } from "../user";
 import { parseContent, serializeDocument } from "../application/persistence";
-import { decodeStoredNoteContent, encodeNoteContentForStorage, noteStorageMode } from "../utils/crypto";
+import { decodeStoredNoteContent, encodeNoteContentForStorage, noteKeys, noteStorageMode } from "../utils/crypto";
 import {
   applyPatch,
   buildCommit,
@@ -94,7 +94,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       : this.env.DB.prepare(base).bind(identity.noteId, identity.userId)
     ).first<Row>();
     if (!row) return reject({ code: "not-found" });
-    const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), this.env.ENCRYPTION_KEY);
+    const content = await decodeStoredNoteContent(row.content, noteStorageMode(!!row.is_public), noteKeys(this.env), row.id);
     if (content === null) return reject({ code: "decrypt-failed" });
     // Legacy text had no IDs. Stable IDs make the first snapshots identical
     // even across object eviction, before the first v2 write.
@@ -169,7 +169,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       return reject({ code: "conflict", detail: "Concurrent change: publicity. Read the latest note and retry." });
     }
     const isPublic = commit.publicity?.after ?? snapshot.isPublic;
-    const content = await encodeNoteContentForStorage(serializeDocument(model), noteStorageMode(isPublic), this.env.ENCRYPTION_KEY);
+    const content = await encodeNoteContentForStorage(serializeDocument(model), noteStorageMode(isPublic), noteKeys(this.env), row.id);
     const version = row.version + 1;
     // One timestamp: what's stored is what the receipt reports.
     const updatedAt = new Date().toISOString();

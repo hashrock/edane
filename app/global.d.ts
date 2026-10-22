@@ -19,6 +19,8 @@ export type Env = {
     GOOGLE_SECRET: string;
     SESSION_SECRET: string;
     ENCRYPTION_KEY: string;
+    /** The key before the last rotation, still accepted for reading (utils/crypto.ts). */
+    ENCRYPTION_KEY_PREVIOUS?: string;
     DEV_BYPASS_AUTH?: string;
     /** POST /oauth/register の IP ごとのレート制限（wrangler.jsonc の ratelimits）。 */
     OAUTH_REGISTER_LIMITER: RateLimit;
