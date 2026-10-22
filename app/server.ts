@@ -10,8 +10,7 @@ import { authMiddleware, selectAuth } from "./auth";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { encrypt, decrypt, isEncrypted, decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
-import { resolveNoteContentAction } from "./utils/noteContentTransition";
+import { decodeStoredNoteContent, noteStorageMode } from "./utils/crypto";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
@@ -106,63 +105,38 @@ app.get("/auth/logout", async (c) => {
   return c.redirect("/");
 });
 
-// --- JSON API used by the editor for debounced autosave (not Inertia) ---
+// All editor writes go through the note coordinator, including legacy PUT.
+const noteRoom = (c: { env: Env["Bindings"] }, id: string) =>
+  c.env.NOTE_ROOMS.get(c.env.NOTE_ROOMS.idFromName(id));
+app.get("/api/notes/:id/sync", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const id = c.req.param("id");
+  const note = await loadOwnedNote(drizzle(c.env.DB), id, user.id);
+  if (!note || note.deletedAt) return c.notFound();
+  const identity = { noteId: id, userId: user.id };
+  if (c.req.header("Upgrade")?.toLowerCase() === "websocket") {
+    if (c.req.header("Origin") !== new URL(c.req.url).origin) return c.text("Invalid origin", 403);
+    const headers = new Headers(c.req.raw.headers);
+    headers.set("X-Note-Identity", JSON.stringify(identity));
+    return noteRoom(c, id).fetch(new Request(c.req.url, { headers }));
+  }
+  return c.json(await noteRoom(c, id).snapshot(identity));
+});
 app.put("/api/notes/:id", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-
   const id = c.req.param("id");
-  const db = drizzle(c.env.DB);
-
-  const note = await loadOwnedNote(db, id, user.id);
-  if (!note) {
-    return c.json({ error: "Not found" }, 404);
+  const note = await loadOwnedNote(drizzle(c.env.DB), id, user.id);
+  if (!note || note.deletedAt) return c.notFound();
+  const body = await c.req.json<{ title?: string; content?: string; isPublic?: boolean; version?: number }>();
+  if (!Number.isSafeInteger(body.version)) return c.json({ error: "version required; GET /api/notes/:id/sync first" }, 428);
+  if ((body.title !== undefined && typeof body.title !== "string") || (body.content !== undefined && typeof body.content !== "string") || (body.isPublic !== undefined && typeof body.isPublic !== "boolean")) return c.json({ error: "Invalid note" }, 400);
+  try {
+    return c.json(await noteRoom(c, id).replace({ noteId: id, userId: user.id }, body));
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 409);
   }
-
-  const body = await c.req.json<{
-    title?: string;
-    content?: string;
-    isPublic?: boolean;
-  }>();
-
-  const action = resolveNoteContentAction({
-    currentIsPublic: note.isPublic,
-    currentContent: note.content,
-    requestedIsPublic: body.isPublic,
-    requestedContent: body.content,
-  });
-
-  let contentToStore: string | undefined;
-  switch (action.kind) {
-    case "store-plain":
-      contentToStore = action.content;
-      break;
-    case "encrypt":
-      contentToStore = await encrypt(action.content, c.env.ENCRYPTION_KEY);
-      break;
-    case "decrypt-if-encrypted":
-      contentToStore = isEncrypted(action.content)
-        ? await decrypt(action.content, c.env.ENCRYPTION_KEY)
-        : undefined;
-      break;
-    case "unchanged":
-      contentToStore = undefined;
-      break;
-    default:
-      assertNever(action);
-  }
-
-  await db
-    .update(notes)
-    .set({
-      ...(body.title !== undefined && { title: body.title }),
-      ...(contentToStore !== undefined && { content: contentToStore }),
-      ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(notes.id, id));
-
-  return c.json({ ok: true });
 });
 
 // --- API tokens (JSON; used by the desktop app via Bearer auth) ---
@@ -759,6 +733,7 @@ const routes = app
         .update(notes)
         .set({ deletedAt: new Date().toISOString() })
         .where(eq(notes.id, note.id));
+      await noteRoom(c, note.id).invalidate();
     }
     return c.redirect("/notes", 303);
   })
@@ -789,6 +764,7 @@ const routes = app
         .delete(nodePublications)
         .where(eq(nodePublications.noteId, note.id));
       await db.delete(notes).where(eq(notes.id, note.id));
+      await noteRoom(c, note.id).invalidate();
     }
     return c.redirect("/trash", 303);
   })
@@ -876,3 +852,5 @@ const routes = app
   });
 
 export default routes;
+
+export { NoteRoom } from "./sync/room";

@@ -11,6 +11,7 @@ declare module "hono" {
 export type Env = {
   Bindings: {
     DB: D1Database;
+    NOTE_ROOMS: DurableObjectNamespace<import("./sync/room").NoteRoom>;
     IMAGES: R2Bucket;
     AI: Ai;
     GOOGLE_ID: string;

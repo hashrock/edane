@@ -11,6 +11,9 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { NoteSyncClient } from "./noteSyncClient";
+import { registerWebMcp, prepareActions } from "./webmcp";
+import { editorReducer } from "../application/editorReducer";
 import { router } from "@inertiajs/react";
 import { type MindMapDocument, findNode, firstRootId } from "../domain/model";
 import {
@@ -21,23 +24,13 @@ import {
 import { guardedStep } from "../application/readOnlyGuard";
 import {
   AUTOSAVE_DELAY_MS,
-  beginSave,
-  classifySaveFailure,
-  initialSaveTracker,
-  isDirty as isTrackerDirty,
   isRetryableFailure,
-  isUntracked,
   nextRetryDelay,
-  settleSave,
-  untrackedSave,
   type SaveDisplay,
   type SaveFailureReason,
-  type SaveOutcome,
-  type SaveTracker,
 } from "../application/saveTracker";
 import {
   parseContent,
-  serializeDocument,
 } from "../application/persistence";
 import { publicNoteUrl } from "../application/publicNoteLink";
 import { t } from "../application/i18n";
@@ -103,9 +96,6 @@ const SAVE_STATUS_PARAMS: Partial<
   "storage-limit": { limit: formatBytes(IMAGE_STORAGE_LIMIT_BYTES) },
 };
 
-/** 保存の応答がこれより遅いときだけ「保存中...」を出す（ms）。 */
-const SAVING_INDICATOR_DELAY_MS = 1000;
-
 export interface NoteEditorInit {
   noteId?: string;
   initialContent?: string;
@@ -127,6 +117,8 @@ export interface LeaveConfirm {
 
 export interface NoteEditorEngine {
   /** The full editor state (re-renders consumers on change). */
+  syncError: string | null;
+  syncRecovery: string;
   state: EditorState;
   stateRef: React.MutableRefObject<EditorState>;
   /** Convenience alias for state.document.model. */
@@ -167,16 +159,6 @@ export interface NoteEditorEngine {
   bypassNavGuardRef: React.MutableRefObject<boolean>;
 }
 
-/**
- * What a save persists, as one comparable string: the content column plus the
- * title column. The title is not part of the serialized content (see
- * persistence.ts), so comparing content alone would miss a title-only edit
- * and the navigation guard would let it be lost.
- */
-function saveSnapshot(doc: MindMapDocument): string {
-  return JSON.stringify({ title: doc.title, content: serializeDocument(doc) });
-}
-
 export function useNoteEditor({
   noteId,
   initialContent,
@@ -214,15 +196,6 @@ export function useNoteEditor({
   const [saveFailure, setSaveFailure] = useState<SaveFailureReason | null>(null);
 
   const saveTimerRef = useRef<any>(null);
-  // Autosave bookkeeping (baseline + out-of-order acks) — the rules live in
-  // application/saveTracker.ts; this ref just holds the value. Lazily
-  // initialized: useRef(arg) は毎レンダーで引数を評価するので、素直に書くと
-  // レンダー毎にモデル全体を serialize してしまう（readOnly では丸ごと不要）。
-  // The server just handed us the initial model, so that's the clean baseline.
-  const saveRef = useRef<SaveTracker>(untrackedSave);
-  if (isUntracked(saveRef.current) && noteId && !readOnly) {
-    saveRef.current = initialSaveTracker(saveSnapshot(model));
-  }
   // Set true just before re-issuing a visit we already flushed, so the
   // navigation guard lets that one visit pass through instead of re-flushing.
   const bypassNavGuardRef = useRef(false);
@@ -232,12 +205,19 @@ export function useNoteEditor({
   const saveFailureRef = useRef<SaveFailureReason | null>(null);
   saveFailureRef.current = saveFailure;
 
+  const syncRef = useRef<NoteSyncClient | null>(null);
+  const [syncReady, setSyncReady] = useState(!noteId || readOnly);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncRecovery, setSyncRecovery] = useState("");
+  const lastCommitRef = useRef<Promise<void>>(Promise.resolve());
+
   // --- Central dispatch: state -> action -> newState ---
   // Pure reducer computes the complete next state; a no-op returns the same
   // reference so we skip re-render and undo bookkeeping.
   const dispatch = useCallback(
     (action: EditorAction, undoType?: UndoType): EditorState => {
       const prev = stateRef.current;
+      if (noteId && !readOnly && !syncRef.current?.snapshot) return prev;
       // 閲覧専用: どのビュー・どの経路から来ても、ここで編集を一括遮断する
       // （規則は application/readOnlyGuard.ts）。
       const next = guardedStep(prev, action, readOnly);
@@ -245,21 +225,21 @@ export function useNoteEditor({
       if (!readOnly && undoType && next.document !== prev.document) {
         undoManagerRef.current.push(undoType, prev.document, next.document);
       }
+      if (!readOnly && next.document.model !== prev.document.model && syncRef.current) {
+        lastCommitRef.current = syncRef.current.commit(prev.document.model, next.document.model);
+      }
       stateRef.current = next;
+      modelRef.current = next.document.model;
       setStateRaw(next);
       return next;
     },
-    [readOnly]
+    [readOnly, noteId]
   );
 
   // --- Save ---
   // いまステータス行に出しているコード。同じ表示への書き直しや、保存の
   // 往復ごとの消える→出る（フェード）を避けるために覚えておく。
   const currentStatusRef = useRef<SaveStatusText>("");
-  // 「保存中...」を遅らせて出すタイマー。速い保存では出さない。
-  const savingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
   const updateSaveStatus = useCallback((status: SaveStatusText) => {
     const el = saveStatusRef.current;
     if (!el) return;
@@ -287,6 +267,50 @@ export function useNoteEditor({
     }
   }, []);
 
+  useEffect(() => {
+    if (!noteId || readOnly) return;
+    const client = new NoteSyncClient(`/api/notes/${noteId}/sync`, snapshot => {
+      const prev = stateRef.current;
+      if (JSON.stringify(prev.document.model) !== JSON.stringify(snapshot.model)) undoManagerRef.current.commitPendingText();
+      const active = prev.view.activeNodeId;
+      const sameActiveText = active && findNode(prev.document.model, active)?.text === findNode(snapshot.model, active)?.text;
+      let next = editorReducer(prev, { type: "replace", state: { document: { ...prev.document, model: snapshot.model }, view: prev.view } });
+      // An unrelated remote edit must not interrupt an IME composition.
+      if (sameActiveText) next = { ...next, view: prev.view };
+      stateRef.current = next;
+      modelRef.current = next.document.model;
+      setStateRaw(next);
+      setIsPublic(snapshot.isPublic);
+      setSyncReady(true);
+      if (!client.isDirty()) {
+        setSaveFailure(null);
+        updateSaveStatus("saved");
+      }
+    }, (message, commit) => {
+      setSyncError(message);
+      if (commit) setSyncRecovery(previous => previous + JSON.stringify(commit) + "\n");
+      setSaveFailure("other");
+      updateSaveStatus("save-failed");
+    });
+    syncRef.current = client;
+    const stop = client.connect();
+    return () => { stop(); syncRef.current = null; };
+  }, [noteId, readOnly, updateSaveStatus]);
+
+  useEffect(() => registerWebMcp({
+    readOnly,
+    read: () => ({ noteId: noteId ?? null, model: stateRef.current.document.model, selectedNodeId: stateRef.current.view.activeNodeId, version: syncRef.current?.snapshot?.version ?? null, pending: syncRef.current?.isDirty() ?? false, ready: !noteId || readOnly || !!syncRef.current?.snapshot }),
+    apply: async input => {
+      if (readOnly) throw new Error("Read-only note");
+      if (noteId && !syncRef.current?.snapshot) throw new Error("Waiting for initial sync");
+      const next = prepareActions(stateRef.current, input);
+      dispatch({ type: "replace", state: next }, "paste");
+      if (syncRef.current) await syncRef.current.flush();
+      else await lastCommitRef.current;
+      return { model: stateRef.current.document.model, version: syncRef.current?.snapshot?.version ?? null };
+    },
+  }), [noteId, readOnly, dispatch]);
+
   // 共有リンクのコピー。エディタは canvas / outline の2ビューがあるので、
   // 「URLの組み立て → コピー → フィードバック」はここに一本化して両方から使う。
   const copyPublicLink = useCallback(() => {
@@ -304,66 +328,32 @@ export function useNoteEditor({
   const saveNote = useCallback(
     async (currentModel: MindMapDocument, pub?: boolean): Promise<boolean> => {
       if (!noteId || readOnly) return true;
-      const content = serializeDocument(currentModel);
-      // The tracker's baseline is the whole save payload (title + content),
-      // so a title-only edit counts as dirty too.
-      const snapshot = saveSnapshot(currentModel);
-      saveRef.current = beginSave(saveRef.current);
-      const seq = saveRef.current.issued;
-      // 通常の自動保存は一瞬で終わるので「保存中...」は出さない（毎回の
-      // 保存中→保存済みの切り替わりが視覚的ノイズになる）。応答が遅いとき
-      // だけ出して、保存が進んでいることを伝える。
-      if (savingIndicatorTimerRef.current)
-        clearTimeout(savingIndicatorTimerRef.current);
-      savingIndicatorTimerRef.current = setTimeout(() => {
-        savingIndicatorTimerRef.current = null;
-        if (saveRef.current.settled < seq) updateSaveStatus("saving");
-      }, SAVING_INDICATOR_DELAY_MS);
-      // 結末の反映は一本化する。追い越された応答が表示を動かさない規則は
-      // saveTracker が持っていて、ここは言われたとおり出すだけ。失敗理由も
-      // 同じ規則に従う（追い越された失敗は理由も出さない）。
-      const settle = (outcome: SaveOutcome) => {
-        const { tracker, display } = settleSave(saveRef.current, seq, outcome);
-        saveRef.current = tracker;
-        // 最新の保存の結末が出たら、遅延表示の「保存中...」は要らない。
-        if (seq === tracker.issued && savingIndicatorTimerRef.current) {
-          clearTimeout(savingIndicatorTimerRef.current);
-          savingIndicatorTimerRef.current = null;
-        }
-        if (!display) return;
-        updateSaveStatus(display);
-        setSaveFailure(outcome.ok ? null : (outcome.reason ?? "other"));
-      };
+      const client = syncRef.current;
+      if (!client?.snapshot) return false;
       try {
-        const res = await fetch(`/api/notes/${noteId}`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content,
-            title: currentModel.title,
-            isPublic: pub ?? isPublic,
-          }),
-        });
-        settle(
-          res.ok
-            ? { ok: true, content: snapshot }
-            : { ok: false, reason: classifySaveFailure(res.status) }
-        );
-        return res.ok;
+        // Document operations are queued by dispatch. Save only waits for
+        // those operations; an old caller's model is never a replacement.
+        if (pub !== undefined && pub !== client.snapshot.isPublic) {
+          await client.commit(modelRef.current, modelRef.current, { before: client.snapshot.isPublic, after: pub });
+        }
+        await client.flush();
+        setSaveFailure(null);
+        updateSaveStatus("saved");
+        return true;
       } catch {
-        settle({ ok: false, reason: classifySaveFailure(null) });
+        setSaveFailure("network");
+        updateSaveStatus("save-failed");
         return false;
       }
     },
-    [noteId, isPublic, updateSaveStatus]
+    [noteId, readOnly, updateSaveStatus]
   );
 
   // Are there edits not yet confirmed persisted? Only meaningful with a noteId
   // (guest/embed mode has no autosave and nothing to guard — the tracker has
   // no baseline there, so this is false).
   const isDirty = useCallback(
-    () => isTrackerDirty(saveRef.current, saveSnapshot(modelRef.current)),
+    () => syncRef.current?.isDirty() ?? false,
     []
   );
 
@@ -426,18 +416,8 @@ export function useNoteEditor({
     if (!noteId || readOnly) return;
     const handler = (e: BeforeUnloadEvent) => {
       if (!isDirty()) return;
-      const current = modelRef.current;
-      fetch(`/api/notes/${noteId}`, {
-        method: "PUT",
-        credentials: "include",
-        keepalive: true,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: serializeDocument(current),
-          title: current.title,
-          isPublic,
-        }),
-      }).catch(() => {});
+      // Pending operation IDs survive reconnect within this editor. A full
+      // document keepalive PUT would bypass merging and is deliberately gone.
       e.preventDefault();
       e.returnValue = "";
     };
@@ -499,15 +479,23 @@ export function useNoteEditor({
     [dispatch]
   );
   const undo = useCallback(
-    () => restoreDocument(undoManagerRef.current.undo()),
+    () => {
+      try { restoreDocument(syncRef.current ? undoManagerRef.current.collaborativeStep("undo") : undoManagerRef.current.undo()); }
+      catch (error) { setSyncError((error as Error).message); }
+    },
     [restoreDocument]
   );
   const redo = useCallback(
-    () => restoreDocument(undoManagerRef.current.redo()),
+    () => {
+      try { restoreDocument(syncRef.current ? undoManagerRef.current.collaborativeStep("redo") : undoManagerRef.current.redo()); }
+      catch (error) { setSyncError((error as Error).message); }
+    },
     [restoreDocument]
   );
 
   return {
+    syncError,
+    syncRecovery,
     state,
     stateRef,
     model,
@@ -527,7 +515,7 @@ export function useNoteEditor({
     undo,
     redo,
     noteId,
-    readOnly,
+    readOnly: readOnly || !syncReady,
     leaveConfirm,
     setLeaveConfirm,
     bypassNavGuardRef,

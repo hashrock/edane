@@ -15,6 +15,7 @@
  */
 
 import type { DocumentState, UndoType } from "./editorReducer";
+import { applyPatch, diffDocument } from "../application/syncOperations";
 import { assertNever } from "../lib/assertNever";
 
 /** UndoType plus the one label the manager itself generates (batched text edits). */
@@ -298,6 +299,22 @@ export class UndoManager {
       : popRedo(this.state);
     this.state = state;
     return restore;
+  }
+
+  /** Undo only this command's delta against the live shared document. */
+  collaborativeStep(direction: "undo" | "redo"): DocumentState | null {
+    this.commitPendingText();
+    const current = this.getCurrent?.();
+    if (!current || this.state.tx) return null;
+    const stack = direction === "undo" ? this.state.undoStack : this.state.redoStack;
+    const command = stack[stack.length - 1];
+    if (!command) return null;
+    const from = direction === "undo" ? command.stateAfter : command.stateBefore;
+    const to = direction === "undo" ? command.stateBefore : command.stateAfter;
+    // Conflict leaves the history intact, and never rolls back another client.
+    const model = applyPatch(current.model, diffDocument(from.model, to.model));
+    this.state = (direction === "undo" ? popUndo(this.state) : popRedo(this.state)).state;
+    return { ...current, model };
   }
 
   canUndo(): boolean {

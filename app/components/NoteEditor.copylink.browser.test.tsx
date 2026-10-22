@@ -3,6 +3,7 @@ import { render } from "vitest-browser-react";
 import { page } from "vitest/browser";
 import NoteEditor from "./NoteEditor";
 import type { MindMapModel } from "../domain/model";
+import { stubSyncSocket } from "./fakeSyncSocket";
 
 /**
  * エディタ（canvas / outline の両レイアウト）から公開ノートのリンクをコピーする
@@ -38,6 +39,17 @@ function stubFetch() {
   restores.push(() => {
     window.fetch = prev;
   });
+}
+
+/** noteId 付きのエディタは同期の初回 state を待つので、同期サーバーを立てる。 */
+function stubSync(isPublic: boolean) {
+  restores.push(
+    stubSyncSocket({
+      content: JSON.stringify({ version: 2, roots: MODEL.children }),
+      title: "Root",
+      isPublic,
+    })
+  );
 }
 
 async function waitFor(fn: () => boolean) {
@@ -82,6 +94,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     const written: string[] = [];
     stubClipboard(written);
     await page.viewport(1280, 800);
+    stubSync(true);
     render(
       <NoteEditor
         noteId={NOTE_ID}
@@ -107,6 +120,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     stubClipboard(written);
     // 狭いビューポートでは outline レイアウトになる。
     await page.viewport(600, 800);
+    stubSync(true);
     render(
       <NoteEditor
         noteId={NOTE_ID}
@@ -130,6 +144,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     const written: string[] = [];
     stubClipboard(written);
     await page.viewport(1280, 800);
+    stubSync(false);
     render(
       <NoteEditor
         noteId={NOTE_ID}
@@ -167,6 +182,7 @@ describe("NoteEditor リンクをコピー (browser e2e)", () => {
     });
 
     await page.viewport(1280, 800);
+    stubSync(true);
     render(
       <NoteEditor
         noteId={NOTE_ID}
