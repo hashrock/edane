@@ -10,7 +10,7 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
-import { routePolicyMiddleware } from "./auth/routePolicy";
+import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
@@ -63,6 +63,8 @@ const app = new Hono<Env>();
 
 // Baseline headers (CSP frame-ancestors / script-src, nosniff) on every response.
 app.use("*", securityHeaders);
+// Each route's policy (auth/routePolicy.ts), first: CSRF, browser-only, rate limit, body size.
+app.use("*", routePolicyMiddleware());
 
 // --- Signup stats for the repos.hashrock.info admin (Bearer STATS_TOKEN) ---
 // Mounted before the session middleware on purpose: it must not depend on
@@ -83,8 +85,8 @@ app.route("/", oauthServerRoutes());
 // impersonation) only when DEV_BYPASS_AUTH is set. Nothing here branches on
 // the request itself.
 app.use("*", authMiddleware(selectAuth));
-// Who may call each route, CSRF, and body size: one table (auth/routePolicy.ts).
-app.use("*", routePolicyMiddleware());
+// Then guests are turned away from signed-in routes; handlers take the user from signedInUser.
+app.use("*", requireRouteUser);
 
 // --- Inertia middleware ---
 app.use(inertia({ rootView }));
@@ -142,14 +144,13 @@ app.post("/auth/logout", async (c) => {
 
 // All editor writes go through the note coordinator, including legacy PUT.
 app.get("/api/notes/:id/sync", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
   // NoteRoom checks owner and trash itself (404 for both, as for a missing note),
   // and, for a socket, that the credential it was opened with is still live.
   const identity = { noteId: id, userId: user.id, credential: c.get("credential") ?? undefined };
+  // Upgrades from another origin are refused by the route policy (cross-site WebSocket hijacking).
   if (c.req.header("Upgrade")?.toLowerCase() === "websocket") {
-    if (c.req.header("Origin") !== new URL(c.req.url).origin) return c.text("Invalid origin", 403);
     const headers = new Headers(c.req.raw.headers);
     headers.set("X-Note-Identity", JSON.stringify(identity));
     return noteRoom(c.env, id).fetch(new Request(c.req.url, { headers }));
@@ -158,8 +159,7 @@ app.get("/api/notes/:id/sync", async (c) => {
   return result.ok ? c.json(result.value) : roomRejectionResponse(c, result);
 });
 app.put("/api/notes/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
   const body = await c.req.json<{ title?: string; content?: string; isPublic?: boolean; version?: number }>();
   if (!Number.isSafeInteger(body.version)) return c.json({ error: "version required; GET /api/notes/:id/sync first" }, 428);
@@ -191,8 +191,7 @@ function roomRejectionResponse(c: Context<Env>, r: RoomRejection) {
 // --- API tokens (JSON; used by the desktop app via Bearer auth) ---
 const MAX_TOKEN_NAME = 100;
 app.post("/api/tokens", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const body = await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string });
   if (body.name !== undefined && (typeof body.name !== "string" || codePointLength(body.name) > MAX_TOKEN_NAME)) {
@@ -217,8 +216,7 @@ app.post("/api/tokens", async (c) => {
 });
 
 app.get("/api/tokens", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const tokens = await db
@@ -235,8 +233,7 @@ app.get("/api/tokens", async (c) => {
 });
 
 app.delete("/api/tokens/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
@@ -256,8 +253,7 @@ app.delete("/api/tokens/:id", async (c) => {
 
 // --- Images: R2 upload + D1 metadata (JSON; used by the editor & settings) ---
 app.get("/api/images", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const db = drizzle(c.env.DB);
   const rows = await db
     .select()
@@ -280,8 +276,7 @@ app.get("/api/images", async (c) => {
 });
 
 app.post("/api/images", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const form = await c.req.formData();
   const file = form.get("file");
@@ -340,8 +335,7 @@ app.post("/api/images", async (c) => {
 });
 
 app.delete("/api/images/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
   const meta = await db.select().from(images).where(eq(images.id, id)).get();
@@ -444,8 +438,7 @@ app.get("/pub/:file", async (c) => {
 // twice shows the same URL. Revoke + re-publish DOES mint a new slug — that's
 // the URL-rotation feature, not an accident.
 app.post("/api/notes/:id/publications", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const note = await loadOwnedNote(db, c.req.param("id"), user.id);
@@ -496,8 +489,7 @@ app.post("/api/notes/:id/publications", async (c) => {
 // back to private still shows its path — the PUBLIC serve path above never
 // decrypts.
 app.get("/api/publications", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -554,8 +546,7 @@ app.get("/api/publications", async (c) => {
 });
 
 app.delete("/api/publications/:id", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
 
   const id = c.req.param("id");
   const db = drizzle(c.env.DB);
@@ -584,8 +575,7 @@ app.get("/sites/:pubId", async (c) => {
 // browser; the server only checks ownership and size — the serve path's CSP
 // is what makes arbitrary author HTML safe on this origin.
 app.put("/api/sites/:pubId", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   const db = drizzle(c.env.DB);
   const pubId = c.req.param("pubId");
   if (!(await loadOwnedPublication(db, pubId, user.id))) {
@@ -611,8 +601,7 @@ app.put("/api/sites/:pubId", async (c) => {
 // The result is just text — the author's browser compiles it and shows
 // errors like any hand edit.
 app.post("/api/sites/:pubId/suggest", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const user = signedInUser(c);
   if (!(await aiSuggestAllowed(c.env, user.id))) return c.json({ error: "Too many AI requests; wait a minute" }, 429);
   const [owned, body] = await Promise.all([
     loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, noteKeys(c.env)),
@@ -676,13 +665,8 @@ app.notFound((c) => {
 
 // --- Link preview: server-side fetch of <title> + favicon (avoids CORS) ---
 // Open to guests (the landing page editor uses it), so it is rate-limited per
-// IP and each fetch is bounded (utils/linkPreview.ts): not a free proxy.
+// IP (the route policy) and each fetch is bounded (utils/linkPreview.ts): not a free proxy.
 app.get("/api/link-preview", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  if (!(await c.env.LINK_PREVIEW_LIMITER.limit({ key: ip })).success) {
-    c.header("Retry-After", "60");
-    return c.json({ error: "Too many requests" }, 429);
-  }
   const url = c.req.query("url");
   if (!url) return c.json({ error: "url is required" }, 400);
   let target: URL;
@@ -708,15 +692,13 @@ const routes = app
     return c.render("Notes/Index", { user: null, notes: [] });
   })
   .get("/notes", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     // Trashed notes live on the /trash page.
     const myNotes = await listLiveNotes(drizzle(c.env.DB), user.id);
     return c.render("Notes/Index", { user, notes: myNotes });
   })
   .get("/trash", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const trashed = await db
       .select({
@@ -732,8 +714,7 @@ const routes = app
     return c.render("Notes/Trash", { user, notes: trashed });
   })
   .get("/settings", (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     return c.render("Settings", { user });
   })
   .get("/guest", (c) =>
@@ -745,8 +726,7 @@ const routes = app
     })
   )
   .post("/notes", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
 
     const body = await c.req
       .json<{ title?: string; content?: string }>()
@@ -779,8 +759,7 @@ const routes = app
   })
   .post("/notes/:id/trash", async (c) => {
     // Soft delete: move to the trash (restorable). The main list hides it.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -794,8 +773,7 @@ const routes = app
   })
   .post("/notes/:id/restore", async (c) => {
     // Bring a trashed note back to the main list.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -808,8 +786,7 @@ const routes = app
   })
   .delete("/notes/:id", async (c) => {
     // Permanent delete (from the trash page). Irreversible.
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
@@ -824,8 +801,7 @@ const routes = app
     return c.redirect("/trash", 303);
   })
   .post("/notes/:id/pin", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note && !note.deletedAt) {
@@ -865,8 +841,7 @@ const routes = app
     }
   })
   .get("/sites/:pubId/edit", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.redirect("/");
+    const user = signedInUser(c);
     const db = drizzle(c.env.DB);
     const pubId = c.req.param("pubId");
     const [owned, site] = await Promise.all([

@@ -15,7 +15,8 @@ import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
 import type { AuthProvider } from "./provider";
 import { resolveDevGuestPreference, clearDevGuestCookieHeader } from "../utils/devAuthBypass";
-import { deleteSignedUserCookie, readSignedUserCookie, writeSignedUserCookie } from "../utils/session";
+import { deleteCookie } from "hono/cookie";
+import { readSignedCookie, writeSignedCookie } from "../utils/session";
 import { findUserById, insertUser } from "../utils/userRepository";
 
 export const IMPERSONATE_COOKIE = "dev_impersonate";
@@ -50,14 +51,15 @@ export function bypassAuth(deps: BypassDeps = { devUser: ensureDevUser }): AuthP
       );
       if (setCookieHeader) c.header("Set-Cookie", setCookieHeader, { append: true });
       if (guest) return null;
-      return (await readSignedUserCookie(c, IMPERSONATE_COOKIE)) ?? deps.devUser(c);
+      const user = (await readSignedCookie<SessionUser>(c, IMPERSONATE_COOKIE)) ?? (await deps.devUser(c));
+      return { user, credential: null };
     },
     async signIn(c, user) {
       c.header("Set-Cookie", clearDevGuestCookieHeader(), { append: true });
-      await writeSignedUserCookie(c, IMPERSONATE_COOKIE, user, IMPERSONATE_MAX_AGE);
+      await writeSignedCookie(c, IMPERSONATE_COOKIE, user, IMPERSONATE_MAX_AGE);
     },
     async signOut(c) {
-      deleteSignedUserCookie(c, IMPERSONATE_COOKIE);
+      deleteCookie(c, IMPERSONATE_COOKIE, { path: "/" });
     },
   };
 }

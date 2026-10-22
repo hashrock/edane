@@ -61,7 +61,12 @@ async function verify(
 /** Whether cookies for this request get `Secure` (everything but local dev on http://localhost). */
 const isSecureRequest = (c: Context) => new URL(c.req.url).hostname !== "localhost";
 
-async function writeSignedCookie(c: Context, name: string, value: unknown, maxAge: number) {
+/**
+ * A value in an HMAC-signed cookie (SESSION_SECRET). The session cookie and the
+ * dev-bypass impersonation cookie (auth/bypassAuth.ts) share the format under
+ * different names, so neither can be read as the other.
+ */
+export async function writeSignedCookie(c: Context, name: string, value: unknown, maxAge: number) {
   // UTF-8 first: a non-Latin1 display name would make a raw btoa() throw.
   const payload = encodeBase64Utf8(JSON.stringify(value));
   const token = await sign(payload, c.env.SESSION_SECRET);
@@ -74,7 +79,7 @@ async function writeSignedCookie(c: Context, name: string, value: unknown, maxAg
   });
 }
 
-async function readSignedCookie<T>(c: Context, name: string): Promise<T | null> {
+export async function readSignedCookie<T>(c: Context, name: string): Promise<T | null> {
   const token = getCookie(c, name);
   if (!token) return null;
   try {
@@ -86,24 +91,6 @@ async function readSignedCookie<T>(c: Context, name: string): Promise<T | null> 
   }
 }
 
-/**
- * A `SessionUser` in an HMAC-signed cookie (SESSION_SECRET), for the dev-bypass
- * impersonation cookie (auth/bypassAuth.ts). The real session cookie names a
- * server-side row instead (below); the two use different names, so neither can
- * be read as the other.
- */
-export async function writeSignedUserCookie(c: Context, name: string, user: SessionUser, maxAge: number) {
-  await writeSignedCookie(c, name, user, maxAge);
-}
-
-export async function readSignedUserCookie(c: Context, name: string): Promise<SessionUser | null> {
-  return readSignedCookie<SessionUser>(c, name);
-}
-
-export function deleteSignedUserCookie(c: Context, name: string) {
-  deleteCookie(c, name, { path: "/" });
-}
-
 /** How long a browser sign-in lasts. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -113,7 +100,7 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  * the bare name there.
  */
 const sessionCookieName = (c: Context) => (isSecureRequest(c) ? "__Host-session" : "session");
-/** The cookie before server-side sessions; cleared when seen, never trusted. */
+/** The cookie before server-side sessions: never read, deleted on sign-out. */
 const LEGACY_SESSION_COOKIE = "session";
 
 type SessionCookie = { sid: string; user: SessionUser };

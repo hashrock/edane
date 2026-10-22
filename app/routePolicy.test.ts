@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import type { Env } from "./global.d";
 import app from "./server";
-import { ROUTE_POLICY, routePolicyMiddleware, type RoutePolicy } from "./auth/routePolicy";
+import { ROUTE_POLICY, requireRouteUser, routePolicyMiddleware, type RoutePolicy } from "./auth/routePolicy";
 
 describe("ROUTE_POLICY covers every route", () => {
   const registered = new Set(app.routes.filter((r) => r.method !== "ALL").map((r) => `${r.method} ${r.path}`));
@@ -33,19 +33,22 @@ describe("routePolicyMiddleware", () => {
     "POST /notes": { access: "user", maxBody: 10 },
     "GET /page": { access: "user-page" },
     "POST /tokens": { access: "browser-user" },
+    "GET /preview": { access: "anonymous", rateLimit: "LINK_PREVIEW_LIMITER" },
   };
-  function harness(signedIn: boolean) {
+  function harness(signedIn: boolean, allowed = () => true) {
     const a = new Hono<Env>();
+    a.use("*", routePolicyMiddleware(table));
     a.use("*", async (c, next) => {
       c.set("user", signedIn ? user : null);
       await next();
     });
-    a.use("*", routePolicyMiddleware(table));
+    a.use("*", requireRouteUser);
     for (const key of [...Object.keys(table), "GET /unlisted"]) {
       const [method, path] = key.split(" ");
       a.on(method, path, async (c) => c.text(method === "POST" ? `ok ${(await c.req.text()).length}` : "ok"));
     }
-    return (path: string, init: RequestInit = {}) => a.request(`${ORIGIN}${path}`, init);
+    const env = { LINK_PREVIEW_LIMITER: { limit: async () => ({ success: allowed() }) } } as unknown as Env["Bindings"];
+    return (path: string, init: RequestInit = {}) => a.request(`${ORIGIN}${path}`, init, env);
   }
   const post = (body = "{}", headers: Record<string, string> = { Origin: ORIGIN }) => ({ method: "POST", body, headers });
 
@@ -77,6 +80,20 @@ describe("routePolicyMiddleware", () => {
     const page = await req("/page");
     expect(page.status).toBe(302);
     expect(page.headers.get("Location")).toBe("/");
+  });
+
+  it("refuses a WebSocket upgrade from another origin (cross-site WebSocket hijacking)", async () => {
+    const req = harness(true);
+    const upgrade = (origin: string) => req("/notes", { headers: { Upgrade: "websocket", Origin: origin } });
+    expect((await upgrade("https://evil.example")).status).toBe(403);
+    expect((await upgrade(ORIGIN)).status).toBe(200);
+  });
+
+  it("applies the route's per-IP rate limit", async () => {
+    expect((await harness(false)("/preview")).status).toBe(200);
+    const limited = await harness(false, () => false)("/preview");
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("60");
   });
 
   it("caps the body per route", async () => {

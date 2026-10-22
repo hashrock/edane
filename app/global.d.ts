@@ -1,11 +1,13 @@
 import type { Credential, SessionUser } from "./user";
 import type { AuthProvider } from "./auth/provider";
+import type { RoutePolicy } from "./auth/routePolicy";
 
 declare module "hono" {
   interface ContextVariableMap {
     user: SessionUser | null;
     auth: AuthProvider;
     credential: Credential | null;
+    routePolicy: RoutePolicy;
   }
 }
 
@@ -37,5 +39,7 @@ export type Env = {
     auth: AuthProvider;
     /** 認証に使った行（セッションか API トークン）。dev のバイパスでは null。 */
     credential: Credential | null;
+    /** このリクエストのルートの方針（auth/routePolicy.ts）。ハンドラーの無い 404 では未設定。 */
+    routePolicy: RoutePolicy;
   };
 };

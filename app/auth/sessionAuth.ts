@@ -11,15 +11,9 @@ export const sessionAuth: AuthProvider = {
   kind: "session",
   async resolve(c) {
     const session = await getSession(c);
-    if (session) {
-      c.set("credential", { table: "sessions", id: session.sid });
-      return session.user;
-    }
+    if (session) return { user: session.user, credential: { table: "sessions", id: session.sid } };
     const token = await getUserByToken(c);
-    if (token) {
-      c.set("credential", { table: "api_tokens", id: token.tokenId });
-      return token.user;
-    }
+    if (token) return { user: token.user, credential: { table: "api_tokens", id: token.tokenId } };
     return null;
   },
   async signIn(c, user) {

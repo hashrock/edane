@@ -8,6 +8,8 @@
  * match exactly, so adding a route without deciding its policy fails CI.
  *
  * Access levels:
+ * - `anonymous`: anyone, and the handler never reads the user, so the session
+ *   isn't looked up at all (no D1 read): raw images, published data, sites.
  * - `public`: anyone, guests included.
  * - `user`: signed in, by browser session or API token (Bearer). API tokens
  *   are scoped to notes (ADR 0005), so only note routes use this.
@@ -16,31 +18,41 @@
  * - `browser-user`: signed in by the browser session, never by an API token.
  *   Credential management and the other web-app-only APIs: a leaked token
  *   must not mint more tokens or reach beyond notes.
- * - `self`: mounted before the session middleware and authenticates itself
- *   (Bearer / OAuth / stats token); this middleware never sees it.
+ * - `self`: authenticates itself before the session middleware (Bearer /
+ *   OAuth / stats token) and never takes a cookie; only the table lookup applies.
  *
- * Cross-cutting rules for every non-`self` route:
- * - CSRF: an unsafe method without `Authorization` (that is, one a browser
- *   could send with our cookie) must come from our own origin. SameSite=Lax
- *   alone lets sibling subdomains of the same site through.
- * - Body size: {@link DEFAULT_MAX_BODY} unless the route says otherwise.
+ * Two middlewares, because some rules need the signed-in user and some must
+ * run before anything reads the request:
+ * - {@link routePolicyMiddleware} (first): finds the policy (refusing routes
+ *   without one), and for every non-`self` route applies CSRF (an unsafe
+ *   method or a WebSocket upgrade without `Authorization` must come from our
+ *   own origin; SameSite=Lax alone lets sibling subdomains through), the
+ *   browser-only rule, the route's rate limit and its body size.
+ * - {@link requireRouteUser} (after the session middleware): guests on
+ *   signed-in routes get 401, or the landing page for `user-page`.
+ * Handlers then take the user from {@link signedInUser}.
  */
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { matchedRoutes } from "hono/route";
 import type { Env } from "../global.d";
+import type { SessionUser } from "../user";
 
-export type Access = "public" | "user" | "user-page" | "browser" | "browser-user" | "self";
+export type Access = "anonymous" | "public" | "user" | "user-page" | "browser" | "browser-user" | "self";
+
+/** IP-keyed rate limit bindings (wrangler.jsonc `ratelimits`). */
+type RateLimitBinding = "LINK_PREVIEW_LIMITER";
 
 export interface RoutePolicy {
   access: Access;
-  /** Request body limit in bytes (default {@link DEFAULT_MAX_BODY}). */
+  /** Request body limit in bytes (default 1 MiB). */
   maxBody?: number;
+  /** Per-IP rate limit; over it, 429. */
+  rateLimit?: RateLimitBinding;
 }
 
-export const DEFAULT_MAX_BODY = 1024 * 1024;
-
 const MiB = 1024 * 1024;
+const DEFAULT_MAX_BODY = MiB;
 
 /** `"<METHOD> <path pattern>"` → policy, for every route the app registers. */
 export const ROUTE_POLICY = {
@@ -85,19 +97,19 @@ export const ROUTE_POLICY = {
   // One image (MAX_IMAGE_BYTES, domain/imageStorage.ts) plus the multipart envelope.
   "POST /api/images": { access: "browser-user", maxBody: 6 * MiB },
   "DELETE /api/images/:id": { access: "browser-user" },
-  "GET /api/images/:id/raw": { access: "public" },
+  "GET /api/images/:id/raw": { access: "anonymous" },
 
   // Publications and sites.
-  "GET /pub/:file": { access: "public" },
+  "GET /pub/:file": { access: "anonymous" },
   "POST /api/notes/:id/publications": { access: "browser-user" },
   "GET /api/publications": { access: "browser-user" },
   "DELETE /api/publications/:id": { access: "browser-user" },
-  "GET /sites/:pubId": { access: "public" },
+  "GET /sites/:pubId": { access: "anonymous" },
   "PUT /api/sites/:pubId": { access: "browser-user" },
   "POST /api/sites/:pubId/suggest": { access: "browser-user" },
 
-  // Open helpers (rate-limited in their handlers).
-  "GET /api/link-preview": { access: "public" },
+  // Open helpers. Link previews fetch third-party pages: 60 per minute per IP.
+  "GET /api/link-preview": { access: "anonymous", rateLimit: "LINK_PREVIEW_LIMITER" },
   "GET /__scenarios": { access: "public" },
   "GET /__scenarios/:name": { access: "public" },
 
@@ -113,27 +125,26 @@ export const ROUTE_POLICY = {
   "GET /notes/:id": { access: "public" },
 } satisfies Record<string, RoutePolicy>;
 
-export type RouteKey = keyof typeof ROUTE_POLICY;
-
 const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /** The registered route that handles this request (`METHOD /pattern`), or null if none does. */
-export function handlerRouteKey(c: Context): string | null {
+function handlerRouteKey(c: Context): string | null {
   const handler = matchedRoutes(c).findLast((r) => r.method !== "ALL");
   return handler ? `${handler.method} ${handler.path}` : null;
 }
 
 /**
- * Whether an unsafe request carrying no `Authorization` came from our own
- * origin. Browsers send `Origin` on every cross-origin and same-origin POST;
- * `Sec-Fetch-Site` covers the rare one that doesn't.
+ * Whether a request carrying no `Authorization` came from our own origin.
+ * Browsers send `Origin` on every POST and WebSocket upgrade; `Sec-Fetch-Site`
+ * covers the rare request that doesn't.
  */
-export function sameOriginRequest(c: Context): boolean {
+function sameOriginRequest(c: Context): boolean {
   const origin = c.req.header("Origin");
   if (origin) return origin === new URL(c.req.url).origin;
   return c.req.header("Sec-Fetch-Site") === "same-origin";
 }
 
+/** Phase one: runs first, before any route (see the module comment). */
 export function routePolicyMiddleware(
   table: Record<string, RoutePolicy> = ROUTE_POLICY
 ): MiddlewareHandler<Env> {
@@ -146,19 +157,22 @@ export function routePolicyMiddleware(
       console.error(`Route without a policy: ${key}`);
       return c.json({ error: "Forbidden" }, 403);
     }
+    c.set("routePolicy", policy);
     if (policy.access === "self") return next();
 
     const bearer = !!c.req.header("Authorization");
-    if (UNSAFE.has(c.req.method) && !bearer && !sameOriginRequest(c)) {
+    const upgrade = c.req.header("Upgrade")?.toLowerCase() === "websocket";
+    if ((UNSAFE.has(c.req.method) || upgrade) && !bearer && !sameOriginRequest(c)) {
       return c.json({ error: "Cross-origin request refused" }, 403);
     }
     if ((policy.access === "browser" || policy.access === "browser-user") && bearer) {
       return c.json({ error: "Use the web app for this; API tokens only reach notes" }, 403);
     }
-    if (!c.get("user")) {
-      if (policy.access === "user-page") return c.redirect("/");
-      if (policy.access === "user" || policy.access === "browser-user") {
-        return c.json({ error: "Unauthorized" }, 401);
+    if (policy.rateLimit) {
+      const key = c.req.header("CF-Connecting-IP") ?? "unknown";
+      if (!(await c.env[policy.rateLimit].limit({ key })).success) {
+        c.header("Retry-After", "60");
+        return c.json({ error: "Too many requests" }, 429);
       }
     }
 
@@ -168,4 +182,26 @@ export function routePolicyMiddleware(
       onError: (c) => c.json({ error: "Payload Too Large" }, 413),
     })(c, next);
   };
+}
+
+/** Phase two: after the session middleware, turn guests away from signed-in routes. */
+export const requireRouteUser: MiddlewareHandler<Env> = async (c, next) => {
+  const access = c.get("routePolicy")?.access;
+  if (!c.get("user")) {
+    if (access === "user-page") return c.redirect("/");
+    if (access === "user" || access === "browser-user") return c.json({ error: "Unauthorized" }, 401);
+  }
+  await next();
+};
+
+/**
+ * The signed-in user, in a handler whose route requires one (`user`,
+ * `user-page`, `browser-user`): {@link requireRouteUser} already turned
+ * guests away, so a missing user means the table is wrong (a 500, not a guest
+ * path to handle).
+ */
+export function signedInUser(c: Context<Env>): SessionUser {
+  const user = c.get("user");
+  if (!user) throw new Error(`Route ${handlerRouteKey(c)} has no user; check ROUTE_POLICY`);
+  return user;
 }

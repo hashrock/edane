@@ -13,7 +13,7 @@ import { scenarioRoutes } from "./index";
 const alice: SessionUser = { id: "alice", email: "alice@example.com", name: "Alice", avatarUrl: "" };
 
 export function mockAuth(user: SessionUser | null, kind: AuthProvider["kind"] = "session"): AuthProvider {
-  return { kind, resolve: async () => user, signIn: vi.fn(async () => {}), signOut: vi.fn(async () => {}) };
+  return { kind, resolve: async () => (user ? { user, credential: null } : null), signIn: vi.fn(async () => {}), signOut: vi.fn(async () => {}) };
 }
 
 function appWith(auth: AuthProvider) {

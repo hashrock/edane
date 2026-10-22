@@ -143,3 +143,22 @@ describe("sessionAuth (production)", () => {
   });
 });
 
+
+describe("authMiddleware on anonymous routes", () => {
+  it("doesn't resolve the user (no session lookup) when the route never reads it", async () => {
+    let resolved = 0;
+    const counting: AuthProvider = { ...sessionAuth, resolve: async () => (resolved++, null) };
+    const app = new Hono<Env>();
+    app.use("*", async (c, next) => {
+      c.set("routePolicy", { access: c.req.path === "/raw" ? "anonymous" : "public" });
+      await next();
+    });
+    app.use("*", authMiddleware(() => counting));
+    app.get("/raw", (c) => c.text("raw"));
+    app.get("/page", (c) => c.text("page"));
+    await app.request("/raw", {}, env);
+    expect(resolved).toBe(0);
+    await app.request("/page", {}, env);
+    expect(resolved).toBe(1);
+  });
+});

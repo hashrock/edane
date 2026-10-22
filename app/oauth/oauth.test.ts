@@ -10,6 +10,7 @@ import { inertia } from "@hono/inertia";
 import type { Env } from "../global.d";
 import type { SessionUser } from "../user";
 import { oauthServerRoutes, oauthSessionRoutes } from "./index";
+import { requireRouteUser, routePolicyMiddleware } from "../auth/routePolicy";
 import type { OAuthClient, OAuthCode, OAuthGrant, OAuthStore } from "./store";
 import { REFRESH_TOKEN_TTL_MS } from "./protocol";
 import { hashToken } from "../utils/tokenHash";
@@ -81,12 +82,15 @@ function setup(user: SessionUser | null = ALICE) {
   let now = 1_000_000;
   let registrationAllowed = true;
   const deps = { store: () => mem.store, now: () => now, allowRegistration: async () => registrationAllowed };
+  // Same order as server.ts: the route policy (CSRF etc.) first, the user, then the guest check.
   const app = new Hono<Env>()
+    .use("*", routePolicyMiddleware())
     .route("/", oauthServerRoutes(deps))
     .use("*", async (c, next) => {
       c.set("user", user);
       await next();
     })
+    .use("*", requireRouteUser)
     .use(inertia())
     .route("/", oauthSessionRoutes(deps));
   const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${path}`, init);
@@ -312,9 +316,9 @@ describe("connected apps", () => {
     expect(list).toEqual([{ id: expect.any(String), clientName: "ChatGPT", createdAt: "t0" }]);
 
     const bob = setup({ ...ALICE, id: "bob" });
-    expect((await bob.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE" })).status).toBe(404);
+    expect((await bob.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE", headers: { Origin: ORIGIN } })).status).toBe(404);
 
-    expect((await t.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await t.req(`/api/oauth/grants/${list[0].id}`, { method: "DELETE", headers: { Origin: ORIGIN } })).status).toBe(200);
     expect(t.grants.size).toBe(0);
   });
 });

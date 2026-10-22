@@ -12,7 +12,10 @@
  */
 import type { Context, MiddlewareHandler } from "hono";
 import type { Env } from "../global.d";
-import type { SessionUser } from "../user";
+import type { Credential, SessionUser } from "../user";
+
+/** Who a request is, and the server-side row it was authenticated with (null in the dev bypass). */
+export type Resolved = { user: SessionUser; credential: Credential | null };
 
 export interface AuthProvider {
   /**
@@ -21,7 +24,7 @@ export interface AuthProvider {
    */
   readonly kind: "session" | "bypass";
   /** 毎リクエスト、ミドルウェアが呼ぶ。null = 未ログイン。 */
-  resolve(c: Context<Env>): Promise<SessionUser | null>;
+  resolve(c: Context<Env>): Promise<Resolved | null>;
   /** 以後のリクエストで `resolve` が `user` を返すようにする（ブラウザは複数リクエストをまたぐ）。 */
   signIn(c: Context<Env>, user: SessionUser): Promise<void>;
   signOut(c: Context<Env>): Promise<void>;
@@ -36,8 +39,10 @@ export function authMiddleware(select: (env: Env["Bindings"]) => AuthProvider): 
   return async (c, next) => {
     const auth = select(c.env);
     c.set("auth", auth);
-    c.set("credential", null);
-    c.set("user", await auth.resolve(c));
+    // A route that never reads the user (routePolicy.ts `anonymous`) skips the session lookup.
+    const resolved = c.get("routePolicy")?.access === "anonymous" ? null : await auth.resolve(c);
+    c.set("user", resolved?.user ?? null);
+    c.set("credential", resolved?.credential ?? null);
     await next();
   };
 }
