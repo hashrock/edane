@@ -1,5 +1,5 @@
 import type { MindMapDocument, MindMapModel } from "../domain/model";
-import { normalizeDocument } from "../application/persistence";
+import { normalizeDocument, normalizeTree } from "../application/persistence";
 
 export type Fields = Omit<MindMapModel, "children" | "id">;
 type FlatNode = { fields: Fields; children: string[] };
@@ -50,6 +50,16 @@ function canonical(value: unknown): unknown {
   return value;
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+/**
+ * Fields as storage keeps them. Persistence drops `collapsed: false`, `bold: false` and a
+ * blank `schema`, and NoteRoom reloads every commit's base from storage, so the reducer's
+ * explicit default and the reloaded absence must count as the same value when checking
+ * a patch's `before` — or collapsing a branch this session expanded conflicts with itself.
+ */
+function stored(fields: Fields): Record<string, unknown> {
+  const { id: _, children: __, ...kept } = normalizeTree({ ...fields, id: "_", children: [] }, new Set())!;
+  return kept;
+}
 function fail(where: string): never { throw new Conflict(`Concurrent change: ${where}. Read the latest note and retry.`); }
 function flatten(doc: MindMapDocument) {
   const nodes = new Map<string, FlatNode>();
@@ -124,16 +134,17 @@ export function applyPatch(doc: MindMapDocument, patch: Patch): MindMapDocument 
       if (current || !after) fail(`duplicate node ${id}`);
       nodes.set(id, structuredClone(after));
     } else if (!after) {
-      if (!same(current, before)) fail(`deleted node ${id}`);
+      if (!current || !same(current.children, before.children) || !same(stored(current.fields), stored(before.fields))) fail(`deleted node ${id}`);
       nodes.delete(id);
     } else {
       if (!current) fail(`missing node ${id}`);
       const fields = { ...current.fields } as Record<string, unknown>;
+      const currentStored = stored(current.fields), beforeStored = stored(before.fields);
       const oldFields = before.fields as Record<string, unknown>;
       const newFields = after.fields as Record<string, unknown>;
       for (const key of new Set([...Object.keys(oldFields), ...Object.keys(newFields)])) {
         if (same(oldFields[key], newFields[key])) continue;
-        if (!same(fields[key], oldFields[key])) fail(`${id}.${key}`);
+        if (!same(currentStored[key], beforeStored[key])) fail(`${id}.${key}`);
         if (newFields[key] === undefined) delete fields[key];
         else fields[key] = newFields[key];
       }
