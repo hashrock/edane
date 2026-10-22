@@ -39,12 +39,20 @@ import {
   effectiveSchema,
 } from "./application/siteAi";
 import { fetchLinkPreview } from "./utils/linkPreview";
-import { IMAGE_STORAGE_LIMIT_BYTES, totalImageBytes, exceedsImageQuota, sniffImageType, imageResponseHeaders } from "./domain/imageStorage";
+import {
+  IMAGE_STORAGE_LIMIT_BYTES,
+  MAX_IMAGE_BYTES,
+  totalImageBytes,
+  exceedsImageQuota,
+  sniffImageType,
+  imageResponseHeaders,
+} from "./domain/imageStorage";
 import { scenarioRoutes } from "./scenarios";
 import { statsRoutes } from "./stats";
 import { mcpRoutes } from "./mcp";
 import { oauthServerRoutes, oauthSessionRoutes, takeOAuthReturn } from "./oauth";
 import { noteRoom } from "./utils/noteRoom";
+import { insertImageWithinQuota } from "./utils/imageRepository";
 import { aiSuggestAllowed } from "./utils/aiQuota";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
@@ -280,6 +288,9 @@ app.post("/api/images", async (c) => {
   if (!(file instanceof File)) {
     return c.json({ error: "No file provided" }, 400);
   }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return c.json({ error: "Image too large", limit: MAX_IMAGE_BYTES, fileSize: file.size }, 413);
+  }
   // The stored type comes from the bytes, never from the client (see sniffImageType).
   const bytes = new Uint8Array(await file.arrayBuffer());
   const contentType = sniffImageType(bytes);
@@ -307,21 +318,19 @@ app.post("/api/images", async (c) => {
   });
 
   const createdAt = new Date().toISOString();
-  await db.insert(images).values({
-    id,
-    userId: user.id,
-    r2Key,
-    filename: file.name,
-    contentType,
-    size: file.size,
-    createdAt,
-  });
+  const filename = file.name.slice(0, 200);
+  // The check above answers early; this one, inside the INSERT, holds under parallel uploads.
+  const row = { id, userId: user.id, r2Key, filename, contentType, size: file.size, createdAt };
+  if (!(await insertImageWithinQuota(c.env.DB, row, IMAGE_STORAGE_LIMIT_BYTES))) {
+    await c.env.IMAGES.delete(r2Key);
+    return c.json({ error: "Storage limit exceeded", limit: IMAGE_STORAGE_LIMIT_BYTES, fileSize: file.size }, 413);
+  }
 
   return c.json(
     {
       id,
       url: `/api/images/${id}/raw`,
-      filename: file.name,
+      filename,
       contentType,
       size: file.size,
       createdAt,
