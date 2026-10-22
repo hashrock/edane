@@ -55,6 +55,12 @@ describe("markdownToModel", () => {
     expect(code.text).toContain("const b = 2;");
   });
 
+  it("reads an unmarked line indented under a list item as that item's next line", () => {
+    const root = markdownToModel("- one\n  more of one\n  - child\n    more of child\n- two\nafter the list");
+    expect(childTexts(root)).toEqual(["one\nmore of one", "two", "after the list"]);
+    expect(childTexts(root.children[0])).toEqual(["child\nmore of child"]);
+  });
+
   it("handles content before any heading as top-level nodes", () => {
     const root = markdownToModel("intro line\n- a\n- b");
     expect(childTexts(root)).toEqual(["intro line", "a", "b"]);

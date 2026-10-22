@@ -24,6 +24,16 @@ const ok = (r: ReturnType<typeof applyNoteEdit>) => {
 };
 
 describe("documentToOutline", () => {
+  it("keeps a multi-line text inside its item: continuation lines indented, the id on the bullet line", () => {
+    const d = doc();
+    d.roots[1].children.push({ id: "ml", text: "Hello, world\ntest", children: [] });
+    const lines = documentToOutline(d).split("\n");
+    expect(lines.slice(-2)).toEqual(["  - Hello, world {id=ml}", "    test"]);
+    // Read back as Markdown, it's still one node — "test" doesn't become a node of its own.
+    const second = nodesFromMarkdown(lines.slice(-3).join("\n").replace(/ \{id=[^}]+\}/g, ""));
+    expect(second[0].children.map((c) => c.text)).toEqual(["Hello, world\ntest"]);
+  });
+
   it("lists every node as Markdown with its id and folded state", () => {
     const d = doc();
     d.roots[1].children.push(

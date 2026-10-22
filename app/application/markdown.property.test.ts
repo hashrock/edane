@@ -2,7 +2,8 @@
  * modelToMarkdown → markdownToModel round trip. The Markdown side can only
  * carry text, nesting and the task checkbox (bold is stripped on the way in,
  * image/link/markdown kinds become their syntax), so the property is stated
- * over plain text nodes whose text contains no Markdown syntax.
+ * over plain text nodes whose text contains no Markdown syntax (one or more
+ * non-blank lines).
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
@@ -13,7 +14,10 @@ import { sequentialIds } from "../domain/model.arb";
 type Plain = { text: string; checked?: boolean; children: Plain[] };
 
 const word = fc.stringMatching(/^[a-zA-Z0-9]{1,6}$/);
-const plainText = fc.array(word, { minLength: 1, maxLength: 3 }).map((w) => w.join(" "));
+const plainLine = fc.array(word, { minLength: 1, maxLength: 3 }).map((w) => w.join(" "));
+// A node's text may span lines (Shift+Enter); each line is written under the
+// bullet and read back into the same node.
+const plainText = fc.array(plainLine, { minLength: 1, maxLength: 3 }).map((l) => l.join("\n"));
 
 const plainArb: fc.Arbitrary<Plain> = fc.letrec<{ p: Plain }>((tie) => ({
   p: fc.record(
