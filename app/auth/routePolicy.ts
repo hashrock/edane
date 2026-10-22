@@ -107,6 +107,10 @@ export const ROUTE_POLICY = {
   "GET /sites/:pubId": { access: "anonymous" },
   "PUT /api/sites/:pubId": { access: "browser-user" },
   "POST /api/sites/:pubId/suggest": { access: "browser-user" },
+  "GET /w/:id": { access: "anonymous" },
+  "GET /api/notes/:id/webpage": { access: "browser-user" },
+  "POST /api/notes/:id/webpage": { access: "browser-user" },
+  "DELETE /api/notes/:id/webpage": { access: "browser-user" },
 
   // Open helpers. Link previews fetch third-party pages: 60 per minute per IP.
   "GET /api/link-preview": { access: "anonymous", rateLimit: "LINK_PREVIEW_LIMITER" },

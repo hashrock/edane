@@ -100,6 +100,7 @@ const READ_ONLY_ALLOWED = {
   deleteNodes: false,
   insertNodes: false,
   setTitle: false,
+  setTheme: false,
   // undo/redo の文書丸ごと差し替え。閲覧専用では undo スタックに何も積まれない
   // ので実際には来ないが、通す理由もない。
   replace: false,

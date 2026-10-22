@@ -1,5 +1,6 @@
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { normalizeDocument, normalizeTree } from "../application/persistence";
+import { normalizePageTheme, type PageTheme } from "../domain/pageTheme";
 
 export type Fields = Omit<MindMapModel, "children" | "id">;
 type FlatNode = { fields: Fields; children: string[] };
@@ -8,6 +9,8 @@ export interface Patch {
   title?: Change<string>;
   nodes: Record<string, Change<FlatNode | null>>;
   roots?: Change<string[]>;
+  /** The page theme as a whole (null = none). Two sessions editing it at once conflict. */
+  theme?: Change<PageTheme | null>;
 }
 export interface Snapshot { model: MindMapDocument; version: number; isPublic: boolean }
 export interface Commit { id: string; patch: Patch; publicity?: Change<boolean> }
@@ -81,9 +84,11 @@ export function diffDocument(before: MindMapDocument, after: MindMapDocument): P
   if (before.title !== after.title) patch.title = { before: before.title, after: after.title };
   const roots = { before: before.roots.map(n => n.id), after: after.roots.map(n => n.id) };
   if (!same(roots.before, roots.after)) patch.roots = roots;
+  const theme = { before: before.theme ?? null, after: after.theme ?? null };
+  if (!same(theme.before, theme.after)) patch.theme = theme;
   return patch;
 }
-export const hasChanges = (p: Patch) => !!(p.title || p.roots || Object.keys(p.nodes).length);
+export const hasChanges = (p: Patch) => !!(p.title || p.roots || p.theme || Object.keys(p.nodes).length);
 /**
  * The commit that turns `before` into `after` (and flips publicity), or null when
  * nothing would change — a no-op must not advance the version. The one place
@@ -128,6 +133,11 @@ export function applyPatch(doc: MindMapDocument, patch: Patch): MindMapDocument 
     if (title !== patch.title.before) fail("title");
     title = patch.title.after;
   }
+  let theme = doc.theme ?? null;
+  if (patch.theme) {
+    if (!same(theme, patch.theme.before)) fail("theme");
+    theme = patch.theme.after;
+  }
   for (const [id, { before, after }] of Object.entries(patch.nodes)) {
     const current = nodes.get(id);
     if (!before) {
@@ -160,7 +170,7 @@ export function applyPatch(doc: MindMapDocument, patch: Patch): MindMapDocument 
     if (!node) fail(`missing child ${id}`);
     return { ...node.fields, id, children: node.children.map(child => build(child, depth + 1)) };
   };
-  const result = { title, roots: roots.map(id => build(id, 0)) };
+  const result: MindMapDocument = { title, roots: roots.map(id => build(id, 0)), ...(theme && { theme }) };
   if (!roots.length || seen.size !== nodes.size || nodes.size > 20000) fail("orphan or empty document");
   return result;
 }
@@ -176,6 +186,7 @@ export function parseCommit(value: unknown): Commit {
   if (v.patch.title && !change(v.patch.title, x => typeof x === "string")) throw new InvalidCommit("Invalid title");
   if (v.publicity && !change(v.publicity, x => typeof x === "boolean")) throw new InvalidCommit("Invalid publicity");
   if (v.patch.roots && !change(v.patch.roots, strings)) throw new InvalidCommit("Invalid roots");
+  if (v.patch.theme && !change(v.patch.theme, x => x === null || same(normalizePageTheme(x), x))) throw new InvalidCommit("Invalid theme");
   for (const [id, c] of Object.entries(v.patch.nodes)) {
     if (!id || id.length > 200 || !c || typeof c !== "object") throw new InvalidCommit("Invalid node change");
     for (const n of [c.before, c.after]) {

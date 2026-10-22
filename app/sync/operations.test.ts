@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_PAGE_THEME } from "../domain/pageTheme";
 import { applyPatch, diffDocument, parseCommit } from "../application/syncOperations";
 import type { MindMapDocument } from "../domain/model";
 import { editorReducer, type EditorState } from "../application/editorReducer";
@@ -89,6 +90,23 @@ describe("shared note operation semantics", () => {
     const next = prepareActions(initial, { actions: [{ type: "setTitle", text: "new" }, { type: "addChild", nodeId: "r" }] });
     expect(next.document.model.title).toBe("new");
     expect(next.view.activeNodeId).toBe("r");
+  });
+  it("carries the page theme, and two sessions editing it at once conflict", () => {
+    const before = base();
+    const mine = { ...before, theme: { ...DEFAULT_PAGE_THEME, accentColor: "#ff0000" } };
+    const theirs = { ...before, theme: { ...DEFAULT_PAGE_THEME, accentColor: "#0000ff" } };
+    const patch = parseCommit({ id: "t", patch: diffDocument(before, mine) }).patch;
+    expect(applyPatch(before, patch)).toEqual(mine);
+    expect(() => applyPatch(applyPatch(before, diffDocument(before, theirs)), patch)).toThrow(/theme/);
+    // Back to no theme at all.
+    expect(applyPatch(mine, diffDocument(mine, before))).toEqual(before);
+  });
+  it("rejects a theme that isn't well-formed", () => {
+    const bad = (theme: unknown) => () => parseCommit({ id: "t", patch: { nodes: {}, theme: { before: null, after: theme } } });
+    expect(bad({ ...DEFAULT_PAGE_THEME, textColor: "red" })).toThrow(/theme/);
+    expect(bad({ ...DEFAULT_PAGE_THEME, extra: 1 })).toThrow(/theme/);
+    expect(bad("x")).toThrow(/theme/);
+    expect(bad(DEFAULT_PAGE_THEME)).not.toThrow();
   });
   it("rejects malformed/unrecognized field values and graph cycles", () => {
     expect(() => parseCommit({ id: "ok", patch: { nodes: { x: { before: null, after: { fields: { text: "x", unknown: true }, children: [] } } } } })).toThrow();

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DEFAULT_PAGE_THEME } from "../domain/pageTheme";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
 import { getFlatOrder, findNode, updateNodeText } from "../domain/model";
 import {
@@ -576,6 +577,27 @@ describe("setTitle", () => {
     const model = sampleModel();
     const s = stateAt(model, "a");
     expect(editorReducer(s, { type: "setTitle", text: "Root" })).toBe(s);
+  });
+});
+
+describe("setTheme", () => {
+  const theme = { ...DEFAULT_PAGE_THEME, accentColor: "#ff0000" };
+
+  it("stores the theme, and null removes it; the trees and the view stay", () => {
+    const s = stateAt(sampleModel(), "a");
+    const themed = editorReducer(s, { type: "setTheme", theme });
+    expect(themed.document.model.theme).toEqual(theme);
+    expect(themed.document.model.roots).toBe(s.document.model.roots);
+    expect(themed.view).toBe(s.view);
+    const plain = editorReducer(themed, { type: "setTheme", theme: null });
+    expect("theme" in plain.document.model).toBe(false);
+  });
+
+  it("is a no-op (same state) when the theme is unchanged", () => {
+    const s = editorReducer(stateAt(sampleModel(), "a"), { type: "setTheme", theme });
+    expect(editorReducer(s, { type: "setTheme", theme: { ...theme } })).toBe(s);
+    const plain = stateAt(sampleModel(), "a");
+    expect(editorReducer(plain, { type: "setTheme", theme: null })).toBe(plain);
   });
 });
 

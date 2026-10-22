@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/webpage.css";
 @source "./";
 
 /* Accent colour: the UI's accent is the emerald ramp, derived from --accent

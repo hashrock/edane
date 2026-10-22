@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { safeExternalUrl } from "../lib/url";
-import type { MindMapDocument, MindMapModel } from "../domain/model";
+import type { MindMapDocument } from "../domain/model";
+import { effectiveTheme } from "../domain/pageTheme";
 import { buildSlides, slideIndexOf, type Slide } from "../application/slides";
-import { nodeDisplayText, supportsCheckbox } from "../application/nodeUtils";
-import { renderMarkdownHtml } from "../lib/markdownHtml";
 import { t } from "../application/i18n";
+import { PageBackground, PageRoot, PageSection, PageThemeAssets } from "./PageView";
 
 interface Props {
   doc: MindMapDocument;
@@ -19,8 +18,9 @@ const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace"]);
 
 /**
  * Full-screen presentation of the document (see application/slides.ts for
- * how the tree becomes slides). The 16:9 stage is a size container, so every
- * size below is in `cqw` and the slide looks the same at any window size.
+ * how the tree becomes slides), drawn with the note's page theme by the
+ * shared page view (PageView.tsx, variant `slide`): a 16:9 size container,
+ * so the slide looks the same at any window size.
  *
  * Keys are taken in the capture phase and stopped there, so the editor
  * underneath never sees them while the show is up.
@@ -56,6 +56,8 @@ export default function SlideShow({ doc, startNodeId, onExit }: Props) {
     go(e.clientX - left < width / 3 ? index - 1 : index + 1);
   };
 
+  const theme = effectiveTheme(doc.theme);
+
   return (
     <div
       role="dialog"
@@ -63,30 +65,37 @@ export default function SlideShow({ doc, startNodeId, onExit }: Props) {
       data-testid="slideshow"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950"
     >
+      <PageThemeAssets theme={theme} />
       <div
         data-testid="slide"
         onClick={onClick}
-        style={{ containerType: "inline-size", width: "min(100vw, calc(100vh * 16 / 9))" }}
-        className="relative aspect-video cursor-pointer overflow-hidden bg-white text-slate-900"
+        style={{ width: "min(100vw, calc(100vh * 16 / 9))" }}
+        className="wp-frame relative aspect-video cursor-pointer"
       >
-        {slide ? (
+        <PageRoot theme={theme} variant="slide" className="h-full w-full">
+          <PageBackground background={theme.background} />
+          {slide ? (
+            <PageSection slide={slide} index={index} />
+          ) : (
+            <p className="relative flex h-full items-center justify-center text-[3cqw] opacity-50">
+              {t("presentEmpty")}
+            </p>
+          )}
+        </PageRoot>
+        {slide && (
           <>
-            <SlideBody slide={slide} />
             <div
-              className="absolute inset-x-0 bottom-0 h-[0.4cqw] bg-emerald-500 transition-[width]"
-              style={{ width: `${((index + 1) / slides.length) * 100}%` }}
+              className="absolute inset-x-0 bottom-0 h-[0.4%] min-h-[2px] transition-[width]"
+              style={{ width: `${((index + 1) / slides.length) * 100}%`, background: theme.accentColor }}
             />
             <span
               data-testid="slide-counter"
-              className="absolute bottom-[1.5cqw] right-[2cqw] text-[1.2cqw] tabular-nums text-slate-400"
+              className="absolute bottom-[2.5%] right-[1.5%] text-xs tabular-nums opacity-50"
+              style={{ color: theme.textColor }}
             >
               {index + 1} / {slides.length}
             </span>
           </>
-        ) : (
-          <p className="flex h-full items-center justify-center text-[3cqw] text-slate-400">
-            {t("presentEmpty")}
-          </p>
         )}
       </div>
       <button
@@ -97,89 +106,5 @@ export default function SlideShow({ doc, startNodeId, onExit }: Props) {
         {t("presentExit")}
       </button>
     </div>
-  );
-}
-
-function SlideBody({ slide }: { slide: Slide }) {
-  if (slide.kind === "title") {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-[2cqw] px-[8cqw] text-center">
-        <div className="text-[5.5cqw] font-bold leading-tight">
-          <NodeContent node={slide.heading} />
-        </div>
-        <div className="h-[0.4cqw] w-[8cqw] bg-emerald-500" />
-      </div>
-    );
-  }
-  // Fewer bullets → bigger type, so a short slide doesn't look empty.
-  const n = slide.items.length;
-  const itemSize = n <= 4 ? "text-[3cqw]" : n <= 7 ? "text-[2.5cqw]" : "text-[2.1cqw]";
-  return (
-    <div className="flex h-full flex-col px-[6cqw] pb-[5cqw] pt-[4.5cqw]">
-      {slide.trail.length > 0 && (
-        <div className="mb-[1cqw] truncate text-[1.4cqw] text-slate-400">
-          {slide.trail.join(" › ")}
-        </div>
-      )}
-      <h2 className="mb-[2.5cqw] text-[4cqw] font-bold leading-tight">
-        <NodeContent node={slide.heading} />
-      </h2>
-      <ul className={`min-h-0 flex-1 space-y-[0.9cqw] overflow-hidden ${itemSize}`}>
-        {slide.items.map(({ node, depth }) => (
-          <li
-            key={node.id}
-            className={`flex gap-[1cqw] leading-snug ${
-              slide.kind === "section" ? "font-medium" : depth > 0 ? "text-slate-600" : ""
-            }`}
-            style={{ marginLeft: `${depth * 3}cqw`, fontSize: depth > 0 ? "0.85em" : undefined }}
-          >
-            {(node.type ?? "text") !== "image" && (
-              <span className="shrink-0 text-emerald-500">{slide.kind === "section" ? "▸" : "•"}</span>
-            )}
-            <div className="min-w-0">
-              <NodeContent node={node} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/** One node as slide content, by kind. */
-function NodeContent({ node }: { node: MindMapModel }) {
-  const type = node.type ?? "text";
-  if (type === "image") {
-    return node.text ? (
-      <img src={node.text} alt="" className="max-h-[30cqw] max-w-full rounded-[0.5cqw] object-contain" />
-    ) : null;
-  }
-  if (type === "markdown") {
-    return (
-      <div
-        className="md-body"
-        style={{ fontSize: "inherit" }}
-        // Sanitized by renderMarkdownHtml (DOMPurify).
-        dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(node.text) }}
-      />
-    );
-  }
-  const text = nodeDisplayText(node);
-  return (
-    <span className={`whitespace-pre-wrap break-words ${node.bold ? "font-bold" : ""}`}>
-      {node.checked !== undefined && supportsCheckbox(type) && (
-        <span className={`mr-[0.6cqw] ${node.checked ? "text-emerald-500" : "text-slate-400"}`}>
-          {node.checked ? "☑" : "☐"}
-        </span>
-      )}
-      {type === "link" ? (
-        <a href={safeExternalUrl(node.text) ?? undefined} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">
-          {node.favicon && <img src={node.favicon} alt="" className="mr-[0.5cqw] inline h-[1em] w-[1em] align-[-0.1em]" />}
-          {text}
-        </a>
-      ) : (
-        text
-      )}
-    </span>
   );
 }

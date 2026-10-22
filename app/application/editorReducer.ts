@@ -68,6 +68,7 @@ import {
   moveBranch,
   setNodeSchema,
 } from "../domain/model";
+import type { PageTheme } from "../domain/pageTheme";
 import { conformEntering } from "../domain/branchSchema";
 import { assertNever } from "../lib/assertNever";
 
@@ -151,7 +152,8 @@ export type UndoType =
   | "link-meta"
   | "check"
   | "set-type"
-  | "schema";
+  | "schema"
+  | "theme";
 
 export type EditorAction =
   // --- structural keyboard edits ---
@@ -300,6 +302,8 @@ export type EditorAction =
   // always for a root target — as the target's last children.
   | { type: "insertNodes"; targetId: string; nodes: MindMapModel[]; into?: boolean }
   | { type: "setTitle"; text: string }
+  /** Replace the page theme (null = back to the default). */
+  | { type: "setTheme"; theme: PageTheme | null }
   | { type: "replace"; state: EditorState };
 
 // --- Document reducer ---
@@ -748,6 +752,13 @@ function documentReducer(
         };
       }
       return { document: newDocument };
+    }
+
+    case "setTheme": {
+      const { theme: _old, ...rest } = document.model;
+      const model: MindMapDocument = action.theme ? { ...rest, theme: action.theme } : rest;
+      if (JSON.stringify(model.theme ?? null) === JSON.stringify(document.model.theme ?? null)) return { document };
+      return { document: { ...document, model } };
     }
 
     case "setTitle": {
@@ -1275,7 +1286,8 @@ function viewReducer(
     }
 
     case "setTitle":
-      return view; // the title is not a node; the selection is untouched
+    case "setTheme":
+      return view; // neither is a node; the selection is untouched
 
     case "replace":
       return view; // handled directly by editorReducer
@@ -1438,6 +1450,7 @@ const CONFORMS_TO_SCHEMA = {
   deleteNodes: false,
   insertNodes: true,
   setTitle: false,
+  setTheme: false,
   replace: false,
 } as const satisfies Record<EditorAction["type"], boolean>;
 

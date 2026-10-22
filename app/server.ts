@@ -8,7 +8,7 @@ import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
-import { users, notes, apiTokens, images, nodePublications, sites } from "./db/schema";
+import { users, notes, apiTokens, images, nodePublications, sites, webPages } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
 import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
@@ -57,6 +57,8 @@ import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
 import { securityHeaders } from "./utils/securityHeaders";
+import { renderWebPage } from "./webpage-view";
+import { WEB_PAGE_CSP, type WebPagePublicationStatus } from "./application/webPagePublication";
 
 const app = new Hono<Env>();
 
@@ -545,6 +547,73 @@ app.delete("/api/publications/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Web pages: a whole note as themed pages (Webページモード) ---
+// Rendered from the LIVE note on every request (see
+// application/webPagePublication.ts): only public notes serve, and only while
+// the publication's epoch matches the note's.
+
+app.get("/w/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const page = await db.select().from(webPages).where(eq(webPages.id, c.req.param("id"))).get();
+  if (!page) return c.notFound();
+  const note = await db.select().from(notes).where(eq(notes.id, page.noteId)).get();
+  if (!note || !canServePublication(note, page)) return c.notFound();
+  return c.html(renderWebPage(parseContent(note.content, note.title)), 200, {
+    "Content-Security-Policy": WEB_PAGE_CSP,
+    "Cache-Control": "no-cache",
+  });
+});
+
+/** The owned, live note and its web page row (if published), or null (= not found). */
+async function loadOwnedWebPage(db: DrizzleD1Database, noteId: string, userId: string) {
+  const note = await loadOwnedNote(db, noteId, userId);
+  if (!note || note.deletedAt) return null;
+  const page = await db.select().from(webPages).where(eq(webPages.noteId, note.id)).get();
+  return { note, page: page ?? null };
+}
+
+const webPageStatus = (
+  note: { isPublic: boolean; deletedAt: string | null; publicEpoch: number },
+  page: { id: string; publicEpoch: number } | null
+): { publication: WebPagePublicationStatus | null } => ({
+  publication: page ? { id: page.id, active: canServePublication(note, page) } : null,
+});
+
+app.get("/api/notes/:id/webpage", async (c) => {
+  const owned = await loadOwnedWebPage(drizzle(c.env.DB), c.req.param("id"), signedInUser(c).id);
+  if (!owned) return c.json({ error: "Not found" }, 404);
+  return c.json(webPageStatus(owned.note, owned.page));
+});
+
+// Publish (or resume, after the note was private / trashed) — idempotent per note.
+app.post("/api/notes/:id/webpage", async (c) => {
+  const user = signedInUser(c);
+  const db = drizzle(c.env.DB);
+  const owned = await loadOwnedWebPage(db, c.req.param("id"), user.id);
+  if (!owned) return c.json({ error: "Not found" }, 404);
+  const { note, page } = owned;
+  if (!note.isPublic) return c.json({ error: PRIVATE_NOTE_PUBLISH_REASON }, 400);
+  if (page) {
+    if (page.publicEpoch !== note.publicEpoch) {
+      await db.update(webPages).set({ publicEpoch: note.publicEpoch }).where(eq(webPages.id, page.id));
+    }
+    return c.json(webPageStatus(note, { ...page, publicEpoch: note.publicEpoch }));
+  }
+  const created = { id: crypto.randomUUID(), userId: user.id, noteId: note.id, publicEpoch: note.publicEpoch, createdAt: new Date().toISOString() };
+  // The unique index on note_id settles a double click: the loser reads the winner's row.
+  await db.insert(webPages).values(created).onConflictDoNothing();
+  const row = await db.select().from(webPages).where(eq(webPages.noteId, note.id)).get();
+  return c.json(webPageStatus(note, row ?? null), 201);
+});
+
+app.delete("/api/notes/:id/webpage", async (c) => {
+  const db = drizzle(c.env.DB);
+  const owned = await loadOwnedWebPage(db, c.req.param("id"), signedInUser(c).id);
+  if (!owned) return c.json({ error: "Not found" }, 404);
+  await db.delete(webPages).where(eq(webPages.noteId, owned.note.id));
+  return c.json(webPageStatus(owned.note, null));
+});
+
 // --- Sites: a JSX-templated static page per node publication ---
 
 app.get("/sites/:pubId", async (c) => {
@@ -783,6 +852,7 @@ const routes = app
       await db
         .delete(nodePublications)
         .where(eq(nodePublications.noteId, note.id));
+      await db.delete(webPages).where(eq(webPages.noteId, note.id));
       await db.delete(notes).where(eq(notes.id, note.id));
       await noteRoom(c.env, note.id).invalidate();
     }
