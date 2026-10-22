@@ -23,6 +23,8 @@ export type Env = {
     OAUTH_REGISTER_LIMITER: RateLimit;
     /** GET /api/link-preview の IP ごとのレート制限（wrangler.jsonc の ratelimits）。 */
     LINK_PREVIEW_LIMITER: RateLimit;
+    /** POST /api/sites/:pubId/suggest のユーザーごとのレート制限（utils/aiQuota.ts）。 */
+    AI_SUGGEST_LIMITER: RateLimit;
     /** GET /api/stats の Bearer トークン（secret）。未設定なら endpoint は 404。 */
     STATS_TOKEN?: string;
   };

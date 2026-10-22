@@ -2,6 +2,18 @@ import { applyPatch, buildCommit, type Commit, type Snapshot } from "../applicat
 import type { MindMapDocument } from "../domain/model";
 
 type Pending = { commit: Commit; resolve: () => void; reject: (e: Error) => void; done: Promise<void> };
+
+/**
+ * Reconnect backoff. It doubles from the first delay up to the cap, and starts over only
+ * after a connection that stayed up for `healthyMs`: a server that accepts and then closes
+ * at once (rate limit, deploy restart loop) mustn't turn into a reconnect every 500 ms.
+ * No attempt limit: unconfirmed commits live only in this page, so giving up would lose
+ * them. The cap bounds an open tab on a note gone elsewhere to 2 tries a minute.
+ */
+export const RECONNECT = { firstMs: 500, maxMs: 30_000, healthyMs: 30_000 } as const;
+/** NoteRoom.invalidate: the note was trashed or deleted. Reconnecting can't succeed. */
+const CLOSE_NOTE_UNAVAILABLE = 4404;
+
 export class NoteSyncClient {
   snapshot: Snapshot | null = null;
   private pending: Pending[] = [];
@@ -9,7 +21,7 @@ export class NoteSyncClient {
   private sent: string | null = null;
   private stopped = false;
   private timer?: ReturnType<typeof setTimeout>;
-  private retry = 500;
+  private retry: number = RECONNECT.firstMs;
   private ready = false;
   constructor(private path: string, private onState: (s: Snapshot) => void, private onError: (message: string, commit?: Commit) => void) {}
   connect() {
@@ -20,22 +32,31 @@ export class NoteSyncClient {
   private open() {
     if (this.stopped) return;
     const socket = new WebSocket(new URL(this.path, location.href).href.replace(/^http/, "ws"));
+    const openedAt = Date.now();
     this.socket = socket;
     this.ready = false;
     socket.onmessage = event => this.receive(JSON.parse(event.data));
-    socket.onclose = () => {
+    socket.onclose = event => {
       this.ready = false;
       this.sent = null;
       if (this.stopped) return;
+      if (event.code === CLOSE_NOTE_UNAVAILABLE) {
+        this.onError("このノートは開けなくなりました（ゴミ箱に移動または削除）。再読み込みしてください。");
+        return;
+      }
       this.onError("接続が切れました。未確認の操作を保持して再接続します。");
+      if (Date.now() - openedAt >= RECONNECT.healthyMs) this.retry = RECONNECT.firstMs;
       this.timer = setTimeout(() => this.open(), this.retry);
-      this.retry = Math.min(this.retry * 2, 10000);
+      this.retry = Math.min(this.retry * 2, RECONNECT.maxMs);
     };
   }
   // Kept independent of the transport for deterministic multi-client tests.
   receive(message: Snapshot & { type: string; ack?: string; id?: string; message?: string }) {
     if (message.type === "error") {
-      const p = this.pending.find(p => p.commit.id === message.id);
+      // An error without an id (unreadable message) is about the one commit in flight;
+      // left pending it would be resent at once, forever.
+      const id = message.id ?? this.sent;
+      const p = this.pending.find(p => p.commit.id === id);
       if (p) {
         this.pending = this.pending.filter(x => x !== p);
         p.reject(new Error(message.message));
@@ -56,7 +77,6 @@ export class NoteSyncClient {
       acknowledged.resolve();
     }
     this.ready = true;
-    this.retry = 500;
     // Reconnect can contain an applied operation whose ack was lost. Keep
     // the exact operation until its persisted receipt is obtained by resend.
     this.rebuild(false);

@@ -17,6 +17,7 @@ import {
 } from "../application/syncOperations";
 import { applyNoteEditRequest, requestedNodeIds, type NoteEditRequest } from "../application/noteEdits";
 import { generateId, type IdSource } from "../domain/model";
+import { CLOSE_RATE_LIMITED, acceptsSocket, fullBucket, readableMessage, receiptPruneBelow, takeToken, type Bucket } from "./limits";
 
 type Identity = { noteId: string; userId: string };
 type Row = { id: string; user_id: string; title: string; content: string; is_public: number; version: number; updated_at: string; deleted_at: string | null };
@@ -158,11 +159,14 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     const updatedAt = new Date().toISOString();
     // The receipt and content change commit atomically. The predicate also
     // handles trash/delete racing an already authenticated open socket.
+    const pruneBelow = receiptPruneBelow(version);
     const result = await this.env.DB.batch([
       this.env.DB.prepare("INSERT INTO note_commits (note_id, operation_id, digest, version) SELECT id, ?, ?, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(commit.id, digest, version, row.id, row.version),
       this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
+      // Receipts only dedupe resends, which come within a few versions (limits.ts).
+      ...(pruneBelow === null ? [] : [this.env.DB.prepare("DELETE FROM note_commits WHERE note_id = ? AND version <= ?").bind(row.id, pruneBelow)]),
     ]);
     if (result[1].meta.changes !== 1) {
       return reject({ code: "conflict", detail: "The note changed or was deleted during the commit. Read the latest note and retry." });
@@ -191,6 +195,8 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
   }
   async fetch(request: Request) {
     const identity: Identity = JSON.parse(request.headers.get("X-Note-Identity")!);
+    // Checked before the D1 read: a reconnect loop shouldn't cost a query each time.
+    if (!acceptsSocket(this.ctx.getWebSockets().length)) return new Response("Too many connections", { status: 429 });
     return this.ordered(async () => {
       const loaded = await this.load(identity);
       if (!loaded.ok) return new Response(rejectionMessage(loaded), { status: loaded.code === "not-found" ? 404 : 500 });
@@ -201,10 +207,16 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       return new Response(null, { status: 101, webSocket: client });
     });
   }
+  /** Socket commits, shared by every connection to this note (limits.ts). In memory: hibernation only follows idle time, by which it has refilled. */
+  private bucket: Bucket = fullBucket(Date.now());
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    const taken = takeToken(this.bucket, Date.now());
+    this.bucket = taken.bucket;
+    // Dropped, not rejected: the client keeps the commit and resends it after reconnecting.
+    if (!taken.ok) return ws.close(CLOSE_RATE_LIMITED, "Too many commits; reconnecting");
     let id: string | undefined;
     try {
-      if (typeof raw !== "string" || raw.length > 1_000_000) throw new Error("Invalid message size");
+      if (!readableMessage(raw)) throw new Error("Invalid message size");
       const input = JSON.parse(raw);
       id = typeof input.id === "string" ? input.id : undefined;
       const result = await this.commit(ws.deserializeAttachment() as Identity, input);
