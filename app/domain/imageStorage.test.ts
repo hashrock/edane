@@ -33,9 +33,19 @@ describe("sniffImageType", () => {
   });
 
   it.each([
-    ["SVG", bytes('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')],
-    ["SVG with an XML prolog", bytes('<?xml version="1.0"?><svg/>')],
+    ["plain", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
+    ["with an XML declaration", '<?xml version="1.0" encoding="UTF-8"?>\n<svg/>'],
+    ["with a BOM, comments and a DOCTYPE", '\uFEFF  <!-- made by hand -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg viewBox="0 0 1 1">'],
+  ])("recognizes SVG (%s)", (_, text) => {
+    expect(sniffImageType(new TextEncoder().encode(text))).toBe("image/svg+xml");
+  });
+
+  it.each([
     ["HTML", bytes("<!doctype html><script>alert(1)</script>")],
+    ["HTML that mentions svg", bytes("<html><svg/></html>")],
+    ["an element that only starts with svg", bytes("<svgx/>")],
+    ["a DOCTYPE with an internal subset", bytes('<!DOCTYPE svg [<!ENTITY x "y">]><svg/>')],
+    ["SVG that is not UTF-8", bytes([0xff, 0xfe], "<svg/>")],
     ["an empty file", bytes()],
     ["a truncated PNG header", bytes([0x89, 0x50, 0x4e])],
     ["RIFF that is not WebP", bytes("RIFF", [0, 0, 0, 0], "WAVE")],
@@ -46,7 +56,7 @@ describe("sniffImageType", () => {
 
 describe("imageResponseHeaders", () => {
   it("serves an allowed type inline, without sniffing, sandboxed", () => {
-    const h = imageResponseHeaders("image/png");
+    const h = imageResponseHeaders("image/png", false);
     expect(h["Content-Type"]).toBe("image/png");
     expect(h["X-Content-Type-Options"]).toBe("nosniff");
     expect(h["Content-Security-Policy"]).toContain("sandbox");
@@ -54,8 +64,15 @@ describe("imageResponseHeaders", () => {
     expect(h["Content-Disposition"]).toBeUndefined();
   });
 
-  it("sends a legacy SVG as a sandboxed attachment but keeps its type for <img>", () => {
-    const h = imageResponseHeaders("image/svg+xml");
+  it("serves SVG inline, sandboxed, only from the isolated assets origin", () => {
+    const h = imageResponseHeaders("image/svg+xml", true);
+    expect(h["Content-Type"]).toBe("image/svg+xml");
+    expect(h["Content-Disposition"]).toBeUndefined();
+    expect(h["Content-Security-Policy"]).toContain("sandbox");
+  });
+
+  it("sends SVG from the app's own origin as a sandboxed attachment but keeps its type for <img>", () => {
+    const h = imageResponseHeaders("image/svg+xml", false);
     expect(h["Content-Type"]).toBe("image/svg+xml");
     expect(h["Content-Disposition"]).toBe("attachment");
     expect(h["Content-Security-Policy"]).toContain("sandbox");
@@ -64,7 +81,7 @@ describe("imageResponseHeaders", () => {
   it.each(["text/html", "image/x,text/html", "image/svg+xml; charset=utf-8"])(
     "never echoes another stored type (%s)",
     (type) => {
-      const h = imageResponseHeaders(type);
+      const h = imageResponseHeaders(type, true);
       expect(h["Content-Type"]).toBe("application/octet-stream");
       expect(h["Content-Disposition"]).toBe("attachment");
     }

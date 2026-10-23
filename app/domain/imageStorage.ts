@@ -20,11 +20,13 @@ export function totalImageBytes(sizes: number[]): number {
 
 
 /**
- * Image types an upload may be stored as. Raster only: an SVG (or HTML, or
- * anything a browser runs scripts in) served from our origin would be stored
- * XSS, so it is refused rather than trusted to the serving headers alone.
+ * Image types an upload may be stored as. SVG can carry script, so it is
+ * only safe because images are served from their own origin
+ * (utils/assetsHost.ts) under a sandbox CSP, and the app only ever shows
+ * them through `<img>` (never fetched and inlined into the DOM). Without an
+ * assets origin the upload route refuses SVG.
  */
-export const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"] as const;
+export const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml"] as const;
 export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
 
 const startsWith = (bytes: Uint8Array, offset: number, sig: readonly number[]) =>
@@ -44,28 +46,47 @@ export function sniffImageType(bytes: Uint8Array): AllowedImageType | null {
   if (startsWith(bytes, 4, ascii("ftyp")) && (startsWith(bytes, 8, ascii("avif")) || startsWith(bytes, 8, ascii("avis")))) {
     return "image/avif";
   }
+  if (isSvg(bytes)) return "image/svg+xml";
   return null;
 }
 
 /**
- * Headers for serving a stored image. Images are served from our own origin
- * without auth (they appear in public notes), so opening one as a top-level
- * document must never run script: nosniff stops content sniffing, and the
- * sandbox CSP gives the document an opaque origin with scripts disabled.
- * Rows from before {@link sniffImageType} may hold other client-declared
- * types: those are also sent as attachments so navigating to one downloads it
- * instead of rendering a page. A legacy SVG keeps its type so existing
- * `<img>` tags still show it (an `<img>` never runs SVG script); anything
- * else becomes octet-stream.
+ * SVG has no magic number: UTF-8 text whose first element is `<svg`, after an
+ * optional BOM, whitespace, XML declaration, comments and a DOCTYPE. A DOCTYPE
+ * with an internal subset (`[...]`, entity declarations) is refused rather
+ * than parsed.
  */
-export function imageResponseHeaders(contentType: string): Record<string, string> {
+function isSvg(bytes: Uint8Array): boolean {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+  } catch {
+    return false;
+  }
+  const prolog = /^(?:\s|<\?xml\b[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE\s+svg\b[^[>]*>)*/i;
+  const rest = text.slice(prolog.exec(text)![0].length);
+  return /^<svg[\s/>]/.test(rest);
+}
+
+/**
+ * Headers for serving a stored image. Images are served without auth (they
+ * appear in public notes), so opening one as a top-level document must never
+ * run script: nosniff stops content sniffing, and the sandbox CSP gives the
+ * document an opaque origin with scripts disabled. Rows from before
+ * {@link sniffImageType} may hold other client-declared types: those become
+ * octet-stream attachments, so navigating to one downloads it instead of
+ * rendering a page. An SVG renders inline only on the isolated assets origin;
+ * served from the app's own origin (dev, or no assets host) it keeps its type
+ * for `<img>` (which never runs SVG script) but is sent as an attachment.
+ */
+export function imageResponseHeaders(contentType: string, isolatedOrigin: boolean): Record<string, string> {
   const allowed = (ALLOWED_IMAGE_TYPES as readonly string[]).includes(contentType);
-  const legacySvg = contentType === "image/svg+xml";
+  const inline = allowed && (contentType !== "image/svg+xml" || isolatedOrigin);
   return {
-    "Content-Type": allowed || legacySvg ? contentType : "application/octet-stream",
+    "Content-Type": allowed ? contentType : "application/octet-stream",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
-    ...(allowed ? {} : { "Content-Disposition": "attachment" }),
+    ...(inline ? {} : { "Content-Disposition": "attachment" }),
     // A day, not a year: once deleted, an image shouldn't linger in caches for long.
     "Cache-Control": "public, max-age=86400",
   };

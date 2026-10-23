@@ -293,9 +293,12 @@ app.post("/api/images", async (c) => {
   }
   // The stored type comes from the bytes, never from the client (see sniffImageType).
   const bytes = new Uint8Array(await file.arrayBuffer());
+  // SVG only with an assets origin to serve it from (see ALLOWED_IMAGE_TYPES).
   const contentType = sniffImageType(bytes);
-  if (!contentType) {
-    return c.json({ error: "Only PNG, JPEG, GIF, WebP and AVIF images are allowed" }, 400);
+  const svgAllowed = assetsOrigin(c.env) !== null;
+  if (!contentType || (contentType === "image/svg+xml" && !svgAllowed)) {
+    const types = svgAllowed ? "PNG, JPEG, GIF, WebP, AVIF and SVG" : "PNG, JPEG, GIF, WebP and AVIF";
+    return c.json({ error: `Only ${types} images are allowed` }, 400);
   }
 
   // Reserve the quota first (the check is inside the INSERT, so it holds under
@@ -354,7 +357,7 @@ app.get("/api/images/:id/raw", async (c) => {
   if (!meta) return c.notFound();
   const obj = await c.env.IMAGES.get(meta.r2Key);
   if (!obj) return c.notFound();
-  return new Response(obj.body, { headers: imageResponseHeaders(meta.contentType) });
+  return new Response(obj.body, { headers: imageResponseHeaders(meta.contentType, origin !== null) });
 });
 
 // --- Node publications: serve one branch as JSON / Markdown (public, CORS) ---

@@ -122,10 +122,10 @@
 - [x] アップロード API が返す URL を assets ホストの絶対 URL にする（`app/server.ts` の `GET /api/images` が組み立てている `url` と、`POST /api/images` の応答）。
 - [x] 既存ノートに保存済みの相対 URL `/api/images/:id/raw` の互換: 本体ホストの旧ルートは assets ホストへの 301/302 リダイレクトにする（`<img>` はリダイレクトを追える）。content は暗号化されている行もあるので、SQL で書き換えない。
 - [x] 本体ページの CSP（`app/utils/securityHeaders.ts` など）に `img-src` の制限があれば assets ホストを許可する。公開ページ（`/w/:id`、`PageView.tsx`）、スライドショー、公開サイトの描画も確認する。
-- [ ] SVG を許可する: `ALLOWED_IMAGE_TYPES` に `image/svg+xml` を追加し、`sniffImageType` に SVG 判定を足す（テキストなので、先頭の空白・BOM・`<?xml …?>`・コメント・DOCTYPE を飛ばして最初の要素が `<svg` か、くらいの判定）。`imageResponseHeaders` の `legacySvg` 特例を整理する。
+- [x] SVG を許可する: `ALLOWED_IMAGE_TYPES` に `image/svg+xml` を追加し、`sniffImageType` に SVG 判定を足す（テキストなので、先頭の空白・BOM・`<?xml …?>`・コメント・DOCTYPE を飛ばして最初の要素が `<svg` か、くらいの判定）。`imageResponseHeaders` の `legacySvg` 特例を整理する。
   - `app/domain/imageStorage.test.ts` は今「SVG を拒否する」ことをテストしているので書き換える。
   - アップロード時の拒否メッセージ（`app/server.ts`）、エディタのファイル選択の `accept`（`app/components/MindmapEditor.tsx` の `ALLOWED_IMAGE_TYPES.join(",")`）も追従する。
-- [ ] **SVG はどこでも `<img>` でだけ描く**ことを守る（`fetch` して DOM にインライン化しない）。必要ならこのルールを CLAUDE.md か ADR に書く。
+- [x] **SVG はどこでも `<img>` でだけ描く**ことを守る（`fetch` して DOM にインライン化しない）。必要ならこのルールを CLAUDE.md か ADR に書く。
 - [x] ついでに `app/oauth/index.ts` の `oauth_return` Cookie を `__Host-` 付きにする（今はサブドメインから上書きできる。中身はログイン後の戻り先パスなので影響は小さいが、assets サブドメインを作るなら塞いでおく）。
 - [ ] `hashrock.info` 配下に他のサービスがあるなら、SameSite だけの CSRF 対策や `Domain=hashrock.info` の Cookie に頼っていないか確認する（assets サブドメインの SVG から狙えるため）。
-- [ ] 決定を ADR（`docs/adr/0008-...`）に残す。
+- [x] 決定を ADR（`docs/adr/0008-isolated-image-origin.md`）に残す。

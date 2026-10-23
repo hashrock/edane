@@ -37,6 +37,10 @@
 
 `MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドショー・エディタ右上のプレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。`wp-*` クラス名はユーザー CSS が狙う契約なので改名しない。ユーザー CSS は必ず `scopeUserCss` を通す（`@scope` 化・括弧の検査・at-rule の許可リスト）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
 
+### アップロード画像と SVG
+
+アップロード画像は別オリジン（`edane-assets.hashrock.info`、`app/utils/assetsHost.ts`）から配信し、SVG も許可している。**SVG は `<img>`（または CSS の画像）でだけ描くこと。`fetch` して DOM にインライン化したり、本体オリジンから inline で配信したりしない**（stored XSS になる）。詳細は `docs/adr/0008-isolated-image-origin.md`。
+
 ### 守り方
 
 - 編集面の宣言は `app/application/editSurface.ts` の `EDIT_SURFACE` テーブル（layout × NodeType、`satisfies` で網羅強制）。**`NodeType` を追加するとここがコンパイルエラーになるので、必ず編集面の種類を宣言する。**
