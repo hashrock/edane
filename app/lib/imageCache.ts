@@ -73,8 +73,9 @@ export function getImageEntry(url: string): Entry | undefined {
     cache.set(url, {
       status: "loaded",
       img,
-      naturalWidth: img.naturalWidth,
-      naturalHeight: img.naturalHeight,
+      // An SVG with only a viewBox has no intrinsic size (0 in some browsers).
+      naturalWidth: img.naturalWidth || IMAGE_MAX_HEIGHT,
+      naturalHeight: img.naturalHeight || IMAGE_MAX_HEIGHT,
     });
     notify();
   };
