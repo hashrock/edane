@@ -86,6 +86,12 @@ export interface MindMapModel {
    */
   checked?: boolean;
   /**
+   * Slides (see application/slides.ts): `true` gives each child slides of its
+   * own even when the branch would fit on one; `false` keeps the branch one
+   * list continued over pages. Absent = decided by size and shape.
+   */
+  slideSplit?: boolean;
+  /**
    * Canvas position of this node's tree, world coordinates of the box's left
    * edge (x) and vertical centre (y) — the same point the layout assigns.
    * Only meaningful on a ROOT (see {@link MindMapDocument.roots}): a placed
@@ -465,6 +471,14 @@ const applyChecked = (checked: boolean | null) => (node: MindMapModel) => {
   if (checked === null) delete node.checked;
   else node.checked = checked;
 };
+
+/** Set how a node's branch is split into slides; `null` = automatic. Returns a new document. */
+export function setSlideSplit(doc: MindMapDocument, nodeId: string, split: boolean | null): MindMapDocument {
+  return updateNodes(doc, [nodeId], (node) => {
+    if (split === null) delete node.slideSplit;
+    else node.slideSplit = split;
+  });
+}
 
 /**
  * Bulk form of {@link setChecked}: apply the same checkbox state to several

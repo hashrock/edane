@@ -137,6 +137,7 @@ export function normalizeTree(
   if (typeof v.linkTitle === "string") node.linkTitle = v.linkTitle;
   if (typeof v.favicon === "string") node.favicon = v.favicon;
   if (typeof v.checked === "boolean") node.checked = v.checked;
+  if (typeof v.slideSplit === "boolean") node.slideSplit = v.slideSplit;
   if (
     isRoot &&
     v.position &&

@@ -122,6 +122,11 @@ export default function NoteEditor(props: Props) {
     [dispatch]
   );
 
+  const setSlideSplit = useCallback(
+    (nodeId: string, split: boolean | null) => dispatch({ type: "setSlideSplit", nodeId, split }, "style"),
+    [dispatch]
+  );
+
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
   const layout: Layout = override ?? defaultLayout;
 
@@ -161,6 +166,7 @@ export default function NoteEditor(props: Props) {
             onPresent={present}
             publish={engine.noteId && !engine.readOnly ? { noteId: engine.noteId, isPublic: engine.isPublic } : undefined}
             onOpenTheme={engine.readOnly ? undefined : openTheme}
+            onSlideSplit={engine.readOnly ? undefined : setSlideSplit}
             onExit={pageModeToggle.toggle}
           />
         </div>

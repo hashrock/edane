@@ -188,6 +188,7 @@ const KINDS = {
   setNodeStyle: true,
   setLinkMeta: true,
   setChecked: true,
+  setSlideSplit: true,
   setSelectedIds: true,
   setCheckedMany: true,
   setNodeTypeMany: true,
@@ -359,6 +360,8 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       return { type: kind, nodeId: id(a), linkTitle: text, favicon: flag ? null : "f.ico" };
     case "setChecked":
       return { type: kind, nodeId: vis(a), checked: flag ? null : c % 2 === 0 };
+    case "setSlideSplit":
+      return { type: kind, nodeId: id(a), split: flag ? null : c % 2 === 0 };
     case "setSelectedIds":
     case "setCheckedMany":
     case "setNodeTypeMany":

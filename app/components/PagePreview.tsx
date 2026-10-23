@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { MindMapDocument } from "../domain/model";
+import { findNode, type MindMapDocument } from "../domain/model";
 import { effectiveTheme } from "../domain/pageTheme";
-import { buildSlides, slideIndexOf } from "../application/slides";
+import { branchSlideCount, buildSlides, slideIndexOf, splittable } from "../application/slides";
 import {
   DEFAULT_PREVIEW_SCALE,
   PREVIEW_VIRTUAL_HEIGHT as VIRTUAL_HEIGHT,
@@ -12,15 +12,63 @@ import {
   type PreviewResizeEdge,
 } from "../application/pagePreviewSize";
 import { t } from "../application/i18n";
+import type { MessageKey } from "../application/messages";
 import { useLocale } from "./useLocale";
 import { PlayIcon } from "./icons";
 import PagePublish from "./PagePublish";
 import { PageBackground, PageRoot, PageSection, PageThemeAssets, type PageVariant } from "./PageView";
 
-const FORMATS: { value: PageVariant; label: "pageFormatSlide" | "pageFormatWeb" }[] = [
-  { value: "slide", label: "pageFormatSlide" },
-  { value: "web", label: "pageFormatWeb" },
+interface Choice<T> {
+  value: T;
+  /** Suffix of the button's test id. */
+  id: string;
+  label: MessageKey;
+  hint?: MessageKey;
+}
+
+const FORMATS: Choice<PageVariant>[] = [
+  { value: "slide", id: "slide", label: "pageFormatSlide" },
+  { value: "web", id: "web", label: "pageFormatWeb" },
 ];
+
+/** `MindMapModel.slideSplit`: automatic (absent), a slide per child, or one list. */
+const SPLITS: Choice<boolean | null>[] = [
+  { value: null, id: "auto", label: "pageSplitAuto", hint: "pageSplitAutoHint" },
+  { value: true, id: "each", label: "pageSplitEach", hint: "pageSplitEachHint" },
+  { value: false, id: "list", label: "pageSplitList", hint: "pageSplitListHint" },
+];
+
+/** A small segmented control: one radio button per choice. */
+function Segmented<T>({ label, testId, choices, value, onChange, className = "" }: {
+  label: string;
+  testId: string;
+  choices: Choice<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} data-testid={testId} className={`flex rounded-md bg-slate-100 p-0.5 ${className}`}>
+      {choices.map((c) => {
+        const on = c.value === value;
+        return (
+          <button
+            key={c.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            data-testid={`${testId}-${c.id}`}
+            title={c.hint && t(c.hint)}
+            onClick={() => onChange(c.value)}
+            className={`rounded px-2 py-0.5 text-[11px] ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+          >
+            {t(c.label)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 interface Props {
   doc: MindMapDocument;
@@ -34,6 +82,8 @@ interface Props {
   /** Publishing as a web page (the web page's action). Absent = can't publish here (a guest or read-only note). */
   publish?: { noteId: string; isPublic: boolean };
   onOpenTheme?: () => void;
+  /** Set how the selected node's branch is split into slides (`null` = automatic). Absent = read-only. */
+  onSlideSplit?: (nodeId: string, split: boolean | null) => void;
   onExit: () => void;
 }
 
@@ -47,7 +97,7 @@ interface Props {
  * Follows the selection and every edit live. It never takes the keyboard.
  * Its left and bottom edges drag to resize it, keeping the page's 16:9.
  */
-export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onExit }: Props) {
+export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onSlideSplit, onExit }: Props) {
   useLocale();
   const [open, setOpen] = useState(true);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -106,6 +156,9 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
   const width = VIRTUAL_WIDTH * scale;
   const height = VIRTUAL_HEIGHT * scale;
   const theme = effectiveTheme(doc.theme);
+  // How many pages the selected branch takes, and the choice of how to split it.
+  const active = activeNodeId ? findNode(doc, activeNodeId) : null;
+  const branch = active && splittable(active) ? branchSlideCount(slides, doc, active.id) : 0;
   const button = "rounded-md px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100";
   const primary =
     "flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50";
@@ -124,26 +177,17 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
         </>
       )}
       <div className="flex items-center gap-1 px-0.5 pb-1">
-        <div role="radiogroup" aria-label={t("pageFormat")} className="mr-auto flex rounded-md bg-slate-100 p-0.5">
-          {FORMATS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              role="radio"
-              aria-checked={format === f.value}
-              data-testid={`page-format-${f.value}`}
-              onClick={() => {
-                onFormatChange(f.value);
-                setPublishOpen(false);
-              }}
-              className={`rounded px-2 py-0.5 text-[11px] ${
-                format === f.value ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {t(f.label)}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label={t("pageFormat")}
+          testId="page-format"
+          className="mr-auto"
+          choices={FORMATS}
+          value={format}
+          onChange={(f) => {
+            onFormatChange(f);
+            setPublishOpen(false);
+          }}
+        />
         <button
           type="button"
           className={button}
@@ -227,6 +271,22 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
           )
         )}
       </div>
+      {active && branch > 0 && (
+        <div className="flex items-center gap-1 px-0.5 pt-1">
+          <span data-testid="page-branch-count" className="mr-auto truncate text-[11px] tabular-nums text-slate-500">
+            {t("pageBranchCount", { n: String(branch) })}
+          </span>
+          {onSlideSplit && (
+            <Segmented
+              label={t("pageSlideSplit")}
+              testId="page-split"
+              choices={SPLITS}
+              value={active.slideSplit ?? null}
+              onChange={(split) => onSlideSplit(active.id, split)}
+            />
+          )}
+        </div>
+      )}
       {format === "web" && publish && publishOpen && <PagePublish noteId={publish.noteId} isPublic={publish.isPublic} />}
     </div>
   );

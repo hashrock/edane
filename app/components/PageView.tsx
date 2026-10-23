@@ -71,11 +71,6 @@ export function PageRoot({ theme, variant, children, className, style, rootRef, 
   );
 }
 
-/** Item size by count: fewer bullets → bigger type, so a short page doesn't look empty. */
-function itemSize(n: number): "l" | "m" | "s" {
-  return n <= 4 ? "l" : n <= 7 ? "m" : "s";
-}
-
 /** One page (slide) of the document. */
 export function PageSection({ slide, index }: { slide: Slide; index: number }) {
   if (slide.kind === "title") {
@@ -96,8 +91,14 @@ export function PageSection({ slide, index }: { slide: Slide; index: number }) {
         {slide.trail.length > 0 && <div className="wp-trail">{slide.trail.join(" › ")}</div>}
         <h2 className="wp-heading">
           <NodeContent node={slide.heading} />
+          {slide.part && (
+            <span className="wp-part">
+              {" "}
+              ({slide.part.index}/{slide.part.count})
+            </span>
+          )}
         </h2>
-        <ul className="wp-items" data-size={itemSize(slide.items.length)}>
+        <ul className="wp-items" data-size={slide.size}>
           {slide.items.map(({ node, depth }, i) => (
             <li
               key={node.id}
