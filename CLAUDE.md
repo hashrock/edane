@@ -33,9 +33,9 @@
 
 `content` 列の JSON は **v2 `{ "version": 2, "roots": [...] }`**（`serializeDocument`）。タイトルは content に含めず、保存 API の `title` フィールド（`notes.title` 列）で運ぶ。`parseContent(content, title)` は v2 / v1（旧: ルートノード1個 `{ id, text, children }`）/ 旧インデントテキストの3形式を読み、必ず `MindMapDocument` を返す。**旧形式は単一ルートとして移行する**: v1 のルートノードは id・サブツリーごと `roots[0]` になり（#135 で一時的に「子＝別々の木」として表示していたものも、元の1本の木に戻る）、テキスト形式はタイトルを持つルート1個の下に行を並べる。木が複数になるのはユーザーがルートを追加したときだけ。**書き込みは常に v2** なので、開いて保存した時点でそのノートは移行される（暗号化された行を SQL で書き換える必要はない）。詳細は `docs/adr/0002-multi-root-document.md`。
 
-### ページのテーマ（Webページモード）
+### ページモード（スライド / Webページ）とテーマ
 
-`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドショー・エディタ右上のプレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。`wp-*` クラス名はユーザー CSS が狙う契約なので改名しない。ユーザー CSS は必ず `scopeUserCss` を通す（`@scope` 化・括弧の検査・at-rule の許可リスト）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
+`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドと Web ページは同じページ（`buildSlides`）の2形式で、エディタではヘッダーの「プレゼン」トグル1つにまとめている（右上の `PagePreview` が形式を切り替え、形式ごとの操作 — スライドは ▶ 開始、Webページは公開 — とテーマパネルを持つ）。スライドショー・プレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。テーマは閉じた選択肢と範囲付きの値だけで作る（タイトル・見出しのスタイルなど。ユーザー CSS は廃止した — 自由記述の見た目を足さないこと）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
 
 ### アップロード画像と SVG
 

@@ -417,7 +417,7 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
     case "setTheme":
       return {
         type: kind,
-        theme: flag ? null : { ...DEFAULT_PAGE_THEME, css: text, stagger: b % 2 === 0, background: { ...DEFAULT_PAGE_THEME.background, speed: c % 3 } },
+        theme: flag ? null : { ...DEFAULT_PAGE_THEME, headingStyle: text.length % 2 ? "band" : "simple", stagger: b % 2 === 0, background: { ...DEFAULT_PAGE_THEME.background, speed: c % 3 } },
       };
     case "replace": {
       // Undo/redo: the document is swapped, the view is whatever it was. Half

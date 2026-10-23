@@ -2,22 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BACKGROUND_PRESET,
   DEFAULT_PAGE_THEME,
+  HEADING_STYLE,
   MAX_SPEED,
-  MAX_THEME_CSS,
+  TITLE_STYLE,
   PAGE_FONT,
   SCROLL_EFFECT,
   effectiveTheme,
   rebaseTheme,
   type BackgroundPreset,
+  type HeadingStyle,
+  type TitleStyle,
   type PageFont,
   type PageTheme,
   type ScrollEffect,
 } from "../domain/pageTheme";
 import { fontFamilyName } from "../application/pageThemeStyle";
-import { webPageUrl, type WebPagePublicationStatus } from "../application/webPagePublication";
 import type { MessageKey } from "../application/messages";
 import { t } from "../application/i18n";
-import { copyText } from "../lib/clipboard";
 import { useLocale } from "./useLocale";
 
 const PRESET_LABEL: Record<BackgroundPreset, MessageKey> = {
@@ -34,6 +35,67 @@ const PRESET_LABEL: Record<BackgroundPreset, MessageKey> = {
   cloth: "themeBgCloth",
 };
 
+const HEADING_LABEL: Record<HeadingStyle, MessageKey> = {
+  simple: "themeHeadingSimple",
+  underline: "themeHeadingUnderline",
+  bar: "themeHeadingBar",
+  band: "themeHeadingBand",
+  accent: "themeHeadingAccent",
+};
+
+/** A heading style in miniature, for its swatch (mirrors webpage.css's data-heading rules). */
+function headingSample(style: HeadingStyle, accent: string): React.CSSProperties {
+  switch (style) {
+    case "underline":
+      return { borderBottom: `2px solid ${accent}`, paddingBottom: 1 };
+    case "bar":
+      return { borderLeft: `3px solid ${accent}`, paddingLeft: 4 };
+    case "band":
+      return { background: `color-mix(in srgb, ${accent} 16%, transparent)`, padding: "1px 4px", borderRadius: 2 };
+    case "accent":
+      return { color: accent };
+    case "simple":
+      return {};
+  }
+}
+
+const TITLE_LABEL: Record<TitleStyle, MessageKey> = {
+  center: "themeTitleCenter",
+  plain: "themeTitlePlain",
+  left: "themeTitleLeft",
+  large: "themeTitleLarge",
+  frame: "themeTitleFrame",
+  fill: "themeTitleFill",
+};
+
+/** A title page in miniature, for its swatch (mirrors webpage.css's data-title rules). */
+function TitleSample({ style, theme }: { style: TitleStyle; theme: PageTheme }) {
+  const fill = style === "fill";
+  const fg = fill ? theme.background.colorA : theme.textColor;
+  const rule = style === "center" || style === "left" || fill;
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex aspect-video w-full flex-col gap-1 overflow-hidden rounded-sm p-1.5 ring-1 ring-slate-200 ${
+        style === "left" ? "items-start justify-end" : "items-center justify-center"
+      }`}
+      style={{ background: fill ? theme.accentColor : theme.background.colorA }}
+    >
+      <span
+        className="font-bold leading-none"
+        style={{
+          color: fg,
+          fontSize: style === "large" ? 20 : 12,
+          ...(style === "frame" ? { border: `1px solid ${theme.accentColor}`, padding: "1px 3px" } : {}),
+        }}
+      >
+        Aa
+      </span>
+      {rule && <span className="h-px w-3.5" style={{ background: fill ? fg : theme.accentColor }} />}
+    </span>
+  );
+}
+
 const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
   none: "themeEffectNone",
   "fade-up": "themeEffectFadeUp",
@@ -45,24 +107,37 @@ const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
 const COMMIT_DELAY = 250;
 
 interface Props {
+  /** Shown. Stays mounted while closed, so it slides in and out. */
+  open: boolean;
   theme: PageTheme | undefined;
   /** Store a theme (null = back to the default). */
   onChange: (theme: PageTheme | null) => void;
   onClose: () => void;
   readOnly: boolean;
-  /** The saved note; absent for a guest note (nothing to publish). */
-  noteId?: string;
-  isPublic: boolean;
 }
 
 /**
- * Webページモードの右サイドパネル: the note's page theme (fonts, colours, the
- * WebGL background, scroll effect, author CSS) and publishing the note as a
- * web page. A plain form beside the editor — it takes the keyboard only when
- * one of its own fields is clicked, and Escape closes it.
+ * ページモードの右サイドパネル: the note's page theme (fonts, title and
+ * heading styles, colours, the WebGL background, scroll effect) — one theme for both formats,
+ * the slides and the web page. A plain form beside the editor — it takes the
+ * keyboard only when one of its own fields is clicked, and Escape closes it. It slides in from
+ * the right edge and back out; closed, it is `invisible` (out of the tab
+ * order and the accessibility tree) once the slide ends.
  */
-export default function PageThemePanel({ theme, onChange, onClose, readOnly, noteId, isPublic }: Props) {
+export default function PageThemePanel({ open, theme, onChange, onClose, readOnly }: Props) {
   useLocale();
+  // Follows `open` a frame late, so a panel mounted open still slides in.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setShown(open));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open]);
   const stored = effectiveTheme(theme);
   const [draft, setDraft] = useState(stored);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,8 +186,11 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
   return (
     <aside
       data-testid="page-theme-panel"
-      aria-label={t("webPageThemeTitle")}
-      className="fixed bottom-0 right-0 top-12 z-[60] flex w-80 max-w-full flex-col bg-white shadow-2xl ring-1 ring-slate-200"
+      aria-label={t("pageThemeTitle")}
+      data-open={shown ? "" : undefined}
+      className={`fixed bottom-0 right-0 top-12 z-[60] flex w-80 max-w-full flex-col bg-white shadow-2xl ring-1 ring-slate-200 transition-[translate,visibility] duration-200 ease-out motion-reduce:transition-none ${
+        shown ? "translate-x-0" : "invisible translate-x-[calc(100%+2rem)]"
+      }`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -121,7 +199,7 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
       }}
     >
       <header className="flex items-center border-b border-slate-100 px-4 py-3">
-        <h2 className="mr-auto text-sm font-semibold">{t("webPageThemeTitle")}</h2>
+        <h2 className="mr-auto text-sm font-semibold">{t("pageThemeTitle")}</h2>
         <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
           {t("close")}
         </button>
@@ -141,6 +219,52 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
               {PAGE_FONT.values.map((f) => <option key={f} value={f}>{fontLabel(f)}</option>)}
             </select>
           </label>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeTitleStyle")}</h3>
+          <div role="radiogroup" aria-label={t("themeTitleStyle")} className="grid grid-cols-3 gap-1.5">
+            {TITLE_STYLE.values.map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={draft.titleStyle === v}
+                data-testid={`theme-title-${v}`}
+                onClick={() => set("titleStyle", v)}
+                className={`flex flex-col items-center gap-1 rounded-md border p-1 text-[10px] text-slate-500 disabled:opacity-60 ${
+                  draft.titleStyle === v ? "border-emerald-500 bg-emerald-50/60 text-emerald-700" : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <TitleSample style={v} theme={draft} />
+                {t(TITLE_LABEL[v])}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeHeadingStyle")}</h3>
+          <div role="radiogroup" aria-label={t("themeHeadingStyle")} className="grid grid-cols-5 gap-1.5">
+            {HEADING_STYLE.values.map((h) => (
+              <button
+                key={h}
+                type="button"
+                role="radio"
+                aria-checked={draft.headingStyle === h}
+                data-testid={`theme-heading-${h}`}
+                onClick={() => set("headingStyle", h)}
+                className={`flex flex-col items-center gap-1 rounded-md border px-1 py-1.5 text-[10px] text-slate-500 disabled:opacity-60 ${
+                  draft.headingStyle === h ? "border-emerald-500 bg-emerald-50/60 text-emerald-700" : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className="text-sm font-bold leading-tight" style={{ color: draft.textColor, ...headingSample(h, draft.accentColor) }}>
+                  Aa
+                </span>
+                {t(HEADING_LABEL[h])}
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className="space-y-2">
@@ -184,22 +308,6 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
           </label>
         </section>
 
-        <section className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeCss")}</h3>
-          <textarea
-            data-testid="theme-css"
-            aria-label={t("themeCss")}
-            spellCheck={false}
-            maxLength={MAX_THEME_CSS}
-            rows={8}
-            className={`${field} font-mono text-xs`}
-            placeholder={".wp-heading {\n  letter-spacing: 0.05em;\n}"}
-            value={draft.css}
-            onChange={(e) => set("css", e.target.value)}
-          />
-          <p className="text-[11px] leading-snug text-slate-400">{t("themeCssHint")}</p>
-        </section>
-
         <button
           type="button"
           data-testid="theme-reset"
@@ -216,7 +324,6 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
           {t("themeReset")}
         </button>
       </fieldset>
-      {noteId && !readOnly && <PublishSection noteId={noteId} isPublic={isPublic} />}
     </aside>
   );
 }
@@ -227,100 +334,5 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
       <input type="color" className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5" value={value} onChange={(e) => onChange(e.target.value)} />
       {label}
     </label>
-  );
-}
-
-async function webPageApi(noteId: string, method: "GET" | "POST" | "DELETE"): Promise<WebPagePublicationStatus | null> {
-  const res = await fetch(`/api/notes/${encodeURIComponent(noteId)}/webpage`, { method, credentials: "include" });
-  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || t("webPublishFailed"));
-  const body = (await res.json()) as { publication?: WebPagePublicationStatus | null };
-  return body.publication ?? null;
-}
-
-/** Publish / unpublish the note as a web page (`/w/:id`). */
-function PublishSection({ noteId, isPublic }: { noteId: string; isPublic: boolean }) {
-  const [status, setStatus] = useState<WebPagePublicationStatus | null | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    setError(null);
-    webPageApi(noteId, "GET").then(
-      (s) => live && setStatus(s),
-      (e: Error) => live && setError(e.message)
-    );
-    return () => {
-      live = false;
-    };
-  }, [noteId, isPublic]);
-
-  const run = async (method: "POST" | "DELETE") => {
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await webPageApi(noteId, method));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const url = status ? webPageUrl(window.location.origin, status.id) : null;
-  const button = "rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50";
-
-  return (
-    <section data-testid="webpage-publish" className="space-y-2 border-t border-slate-100 px-4 py-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("webPublish")}</h3>
-      {!isPublic ? (
-        <>
-          <p className="text-xs text-slate-500">{t("webPublishPrivate")}</p>
-          {/* A page published before the note went private can still be revoked. */}
-          {status && (
-            <button type="button" disabled={busy} data-testid="webpage-unpublish" className={`${button} text-red-600 hover:bg-red-50`} onClick={() => void run("DELETE")}>
-              {t("webPublishUnpublish")}
-            </button>
-          )}
-        </>
-      ) : status === undefined && !error ? (
-        <p className="text-xs text-slate-400">{t("loading")}</p>
-      ) : status && url ? (
-        <>
-          <div className="flex items-center gap-1">
-            <input readOnly aria-label="URL" data-testid="webpage-url" value={url} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs" onFocus={(e) => e.currentTarget.select()} />
-            <button
-              type="button"
-              className={`${button} text-slate-600 hover:bg-slate-100`}
-              onClick={() => {
-                void copyText(url).then(() => setCopied(true));
-              }}
-            >
-              {copied ? t("copied") : t("copy")}
-            </button>
-            <a href={url} target="_blank" rel="noopener noreferrer" className={`${button} text-emerald-700 hover:bg-emerald-50`}>
-              {t("webPublishOpen")}
-            </a>
-          </div>
-          <p className="text-[11px] text-slate-400">{status.active ? t("webPublishLive") : t("webPublishInactive")}</p>
-          <div className="flex gap-2">
-            {!status.active && (
-              <button type="button" disabled={busy} className={`${button} bg-emerald-600 text-white hover:bg-emerald-700`} onClick={() => void run("POST")}>
-                {t("webPublishAction")}
-              </button>
-            )}
-            <button type="button" disabled={busy} data-testid="webpage-unpublish" className={`${button} text-red-600 hover:bg-red-50`} onClick={() => void run("DELETE")}>
-              {t("webPublishUnpublish")}
-            </button>
-          </div>
-        </>
-      ) : (
-        <button type="button" disabled={busy} data-testid="webpage-publish-action" className={`${button} bg-emerald-600 text-white hover:bg-emerald-700`} onClick={() => void run("POST")}>
-          {t("webPublishAction")}
-        </button>
-      )}
-      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
-    </section>
   );
 }
