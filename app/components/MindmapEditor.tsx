@@ -4,6 +4,7 @@ import {
   useRef,
   useCallback,
   useMemo,
+  useLayoutEffect,
   useSyncExternalStore,
   lazy,
   Suspense,
@@ -601,6 +602,18 @@ export function MindmapEditorView({
     nonce: number;
   } | null>(null);
   const morphNonceRef = useRef(0);
+  // World position of a node before a fold re-lays out its tree; consumed by
+  // the layout effect after `nodes`.
+  const collapseAnchorRef = useRef<{ nodeId: string; x: number; y: number } | null>(null);
+  /** Run a fold / unfold, keeping `nodeId` where it is on screen. */
+  const dispatchAnchored = useCallback((nodeId: string, run: () => EditorState) => {
+    const before = modelRef.current;
+    const laidOut = nodesRef.current.find((n) => n.id === nodeId);
+    const next = run();
+    collapseAnchorRef.current =
+      laidOut && next.document.model !== before ? { nodeId, x: laidOut.x, y: laidOut.y } : null;
+    return next;
+  }, []);
 
   // Toggle a branch's collapsed state and arm the morph. All three entry points
   // (the toggle button, the count badge — now one control — and the context
@@ -609,7 +622,7 @@ export function MindmapEditorView({
     (nodeId: string) => {
       const before = findNode(modelRef.current, nodeId);
       const wasCollapsed = !!before?.collapsed;
-      const next = dispatch({ type: "toggleCollapse", nodeId }, "collapse");
+      const next = dispatchAnchored(nodeId, () => dispatch({ type: "toggleCollapse", nodeId }, "collapse"));
       morphNonceRef.current += 1;
       setMorphSignal({
         nodeId,
@@ -618,7 +631,7 @@ export function MindmapEditorView({
       });
       return next;
     },
-    [dispatch]
+    [dispatch, dispatchAnchored]
   );
   const toggleCollapseRef = useRef(toggleCollapse);
   toggleCollapseRef.current = toggleCollapse;
@@ -711,6 +724,22 @@ export function MindmapEditorView({
   }, [model, editing, activeNodeId, activeIsCustom, editingText, imageVersion]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+
+  // Folding / unfolding re-lays out the tree, and the folded node moves with
+  // its siblings (the layout centres each parent on its children). Pan by the
+  // node's move — before the redraw, so no frame shows the jump — keeping it
+  // (and its toggle button) where it was on screen at any zoom.
+  useLayoutEffect(() => {
+    const anchor = collapseAnchorRef.current;
+    if (!anchor) return;
+    collapseAnchorRef.current = null;
+    const stage = konvaStageRef.current;
+    const node = nodes.find((n) => n.id === anchor.nodeId);
+    if (!stage || !node) return;
+    const scale = stage.scaleX();
+    applyStageTransform(stage, panBy(stageTransform(stage), (anchor.x - node.x) * scale, (anchor.y - node.y) * scale));
+    updateGridRef.current();
+  }, [nodes]);
 
   // Title = root node text (the root is the header title, not a canvas node)
   const title = model.title;
@@ -1372,13 +1401,15 @@ export function MindmapEditorView({
           const next =
             collapsePlan.nodeIds.length === 1
               ? toggleCollapse(collapsePlan.nodeIds[0])
-              : dispatch(
-                  {
-                    type: "setCollapsedMany",
-                    nodeIds: collapsePlan.nodeIds,
-                    collapsed: collapsePlan.collapsed,
-                  },
-                  "collapse"
+              : dispatchAnchored(nodeId, () =>
+                  dispatch(
+                    {
+                      type: "setCollapsedMany",
+                      nodeIds: collapsePlan.nodeIds,
+                      collapsed: collapsePlan.collapsed,
+                    },
+                    "collapse"
+                  )
                 );
           if (noteId) saveNote(next.document.model);
         },
@@ -1608,7 +1639,14 @@ export function MindmapEditorView({
   // The keymap only describes what a key wants; this carries it out.
   const keyDeps = useMemo<KeyEffectDeps>(
     () => ({
-      dispatch,
+      // Keyboard folds keep the folded node in place, like the toggle button.
+      dispatch: (action, undoType) => {
+        const anchorId =
+          action.type === "toggleCollapse" ? action.nodeId
+          : action.type === "setCollapsedMany" ? stateRef.current.view.activeNodeId
+          : null;
+        return anchorId ? dispatchAnchored(anchorId, () => dispatch(action, undoType)) : dispatch(action, undoType);
+      },
       saveNote: (m) => saveNote(m),
       openPalette: () => setCmdPaletteOpen(true),
       openHelp: () => setHelpOpen(true),
@@ -1616,7 +1654,7 @@ export function MindmapEditorView({
       undo,
       redo,
     }),
-    [dispatch, saveNote, undo, redo, onPresent]
+    [dispatch, dispatchAnchored, saveNote, undo, redo, onPresent]
   );
 
   const handleKeyDown = useCallback(
