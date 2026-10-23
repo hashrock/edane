@@ -35,7 +35,7 @@
 
 ### ページモード（スライド / Webページ）とテーマ
 
-`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドと Web ページは同じページ（`buildSlides`）の2形式で、エディタではヘッダーの「ページ」トグル1つにまとめている（右上の `PagePreview` が形式を切り替え、形式ごとの操作 — スライドは ▶ プレゼン、Webページは公開 — とテーマパネルを持つ）。スライドショー・プレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。`wp-*` クラス名はユーザー CSS が狙う契約なので改名しない。ユーザー CSS は必ず `scopeUserCss` を通す（`@scope` 化・括弧の検査・at-rule の許可リスト）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
+`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドと Web ページは同じページ（`buildSlides`）の2形式で、エディタではヘッダーの「プレゼン」トグル1つにまとめている（右上の `PagePreview` が形式を切り替え、形式ごとの操作 — スライドは ▶ 開始、Webページは公開 — とテーマパネルを持つ）。スライドショー・プレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。`wp-*` クラス名はユーザー CSS が狙う契約なので改名しない。ユーザー CSS は必ず `scopeUserCss` を通す（`@scope` 化・括弧の検査・at-rule の許可リスト）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
 
 ### アップロード画像と SVG
 

@@ -212,15 +212,15 @@ export const MESSAGES_JA = {
   layoutOutline: "アウトライン",
 
   // --- プレゼンモード（SlideShow） ---
-  presentStart: "プレゼン",
+  presentStart: "開始",
   presentStartHint: "選択中の項目からスライドショーを開始（F5）",
   presentTitle: "スライドショー",
   presentExit: "終了（Esc）",
   presentEmpty: "スライドにする項目がありません",
 
   // --- ページモード（PagePreview / PageThemePanel）: スライドとWebページは同じページの2つの形式 ---
-  pageMode: "ページ",
-  pageModeHint: "ページモード: スライド / Webページのプレビュー、テーマ、公開",
+  pageMode: "プレゼン",
+  pageModeHint: "プレゼンモード: スライド / Webページのプレビュー、テーマ、公開",
   pageFormat: "形式",
   pageFormatSlide: "スライド",
   pageFormatWeb: "Webページ",
@@ -230,7 +230,7 @@ export const MESSAGES_JA = {
   pageShowPreview: "プレビューを表示",
   pageTheme: "テーマ",
   pageThemeTitle: "ページのテーマ",
-  pageModeExit: "ページモードを終了",
+  pageModeExit: "プレゼンモードを終了",
   themeFonts: "フォント",
   themeHeadingFont: "見出し",
   themeBodyFont: "本文",
@@ -652,15 +652,15 @@ export const MESSAGES_EN = {
   layoutOutline: "Outline",
 
   // --- Presentation mode (SlideShow) ---
-  presentStart: "Present",
+  presentStart: "Start",
   presentStartHint: "Start a slideshow from the selected item (F5)",
   presentTitle: "Slideshow",
   presentExit: "Exit (Esc)",
   presentEmpty: "Nothing to show as slides",
 
   // --- Pages mode (PagePreview / PageThemePanel): slides and the web page are two formats of the same pages ---
-  pageMode: "Pages",
-  pageModeHint: "Pages: preview as slides or a web page, edit the theme, publish",
+  pageMode: "Present",
+  pageModeHint: "Present: preview as slides or a web page, edit the theme, publish",
   pageFormat: "Format",
   pageFormatSlide: "Slides",
   pageFormatWeb: "Web page",
@@ -670,7 +670,7 @@ export const MESSAGES_EN = {
   pageShowPreview: "Show preview",
   pageTheme: "Theme",
   pageThemeTitle: "Page theme",
-  pageModeExit: "Leave pages mode",
+  pageModeExit: "Leave present mode",
   themeFonts: "Fonts",
   themeHeadingFont: "Headings",
   themeBodyFont: "Body",
