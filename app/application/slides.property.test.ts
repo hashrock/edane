@@ -7,8 +7,8 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { allIds, modelAndNodeArb, modelArb } from "../domain/model.arb";
-import { findNode, locateNode, type MindMapModel } from "../domain/model";
-import { ancestry, buildSlides, slideFits, slideIndexOf } from "./slides";
+import { findNode, locateNode } from "../domain/model";
+import { ancestry, buildSlides, isBlankLeaf, slideFits, slideIndexOf } from "./slides";
 
 describe("buildSlides (property)", () => {
   it("presents each node with content on exactly one slide, in outline order", () => {
@@ -17,7 +17,6 @@ describe("buildSlides (property)", () => {
         const slides = buildSlides(doc);
         const presented = slides.flatMap((s) => s.ids);
         expect(new Set(presented).size).toBe(presented.length);
-        const isBlankLeaf = (m: MindMapModel) => (m.type ?? "text") === "text" && m.text.trim() === "" && m.children.length === 0;
         for (const id of allIds(doc)) {
           if (!isBlankLeaf(findNode(doc, id)!)) expect(presented).toContain(id);
         }

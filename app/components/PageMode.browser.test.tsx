@@ -97,7 +97,7 @@ describe("Pages mode (browser e2e)", () => {
     // A leaf has no children to split.
     await userEvent.click(row("How"));
     await waitFor(() => counter() === "Page 3 / 3");
-    expect(q('[data-testid="page-slide-split"]')).toBeNull();
+    expect(q('[data-testid="page-split"]')).toBeNull();
   });
 
   it("applies theme edits to the preview", async () => {

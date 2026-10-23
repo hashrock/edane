@@ -181,7 +181,9 @@
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 
-/* --- Slide: one 16:9 page; every size in cqw so it scales with the stage. --- */
+/* --- Slide: one 16:9 page; every size in cqw so it scales with the stage.
+   application/slides.ts mirrors these sizes to decide what fits on a slide:
+   change them together (slideFit.browser.test.tsx draws slides to check). --- */
 
 .wp-root[data-variant="slide"] {
   aspect-ratio: 16 / 9;

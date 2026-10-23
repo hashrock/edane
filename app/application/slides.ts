@@ -66,7 +66,8 @@ function label(n: MindMapModel): string {
   return n.type === "markdown" ? markdownTitle(n.text) : nodeDisplayText(n);
 }
 
-function isBlankLeaf(n: MindMapModel): boolean {
+/** A text leaf with nothing in it: left behind while typing, never presented. */
+export function isBlankLeaf(n: MindMapModel): boolean {
   return (n.type ?? "text") === "text" && n.text.trim() === "" && n.children.length === 0;
 }
 
@@ -77,15 +78,18 @@ function contentChildren(n: MindMapModel): MindMapModel[] {
 // --- Measuring a slide -------------------------------------------------------
 //
 // The slide variant of webpage.css sizes everything in cqw of a 16:9 stage
-// (100 wide, 56.25 tall). These mirror its numbers; text width is estimated
-// per character (full-width 1em, the rest ~0.55em), which is all a layout
-// decision needs — the stage clips anything that still overflows.
+// (100 wide, 56.25 tall). These mirror its numbers (keep the two in step;
+// slideFit.browser.test.tsx draws the slides to check). Text width is
+// estimated per character (full-width 1em, the rest ~0.55em), which is all a
+// layout decision needs — the stage clips anything that still overflows.
 
 const STAGE_H = 56.25;
 const INNER_W = 88; // 100 − 2 × 6 padding
 const INNER_H = STAGE_H - 4.5 - 5;
-const TRAIL_H = 1.4 * 1.25 + 1;
+const TRAIL_H = 1.4 * 1.25 + 1; // 1.4cqw at the default line height, + its margin
 const HEADING_FONT = 4;
+const HEADING_LINE_HEIGHT = 1.2;
+const HEADING_W = INNER_W / HEADING_FONT - 1; // in heading em, less a style's padding
 const HEADING_GAP = 2.5;
 const ITEM_GAP = 0.9;
 const BULLET_EM = 1; // bullet glyph + the 1cqw gap, roughly
@@ -119,16 +123,32 @@ function charWidth(ch: string): number {
   return wide ? 1 : 0.55;
 }
 
+/**
+ * The width of each line of `text`, in em. Memoized by text: a deck is
+ * rebuilt on every edit, and a node's text is measured at every level of the
+ * tree above it, but rarely changes.
+ */
+const widthCache = new Map<string, number[]>();
+function lineWidths(text: string): number[] {
+  let widths = widthCache.get(text);
+  if (!widths) {
+    widths = text.split("\n").map((line) => {
+      let w = 0;
+      for (const ch of line) w += charWidth(ch);
+      return w;
+    });
+    if (widthCache.size > 5000) widthCache.clear();
+    widthCache.set(text, widths);
+  }
+  return widths;
+}
+
 /** Lines `text` wraps to in a column `widthEm` wide (explicit newlines kept). */
 function wrappedLines(text: string, widthEm: number): number {
-  let lines = 0;
-  for (const line of text.split("\n")) {
-    let w = 0;
-    for (const ch of line) w += charWidth(ch);
-    lines += Math.max(1, Math.ceil(w / widthEm));
-  }
-  return lines;
+  return lineWidths(text).reduce((lines, w) => lines + Math.max(1, Math.ceil(w / widthEm)), 0);
 }
+
+const headingLines = (text: string) => wrappedLines(text, HEADING_W);
 
 /** Height of one bullet, in cqw, drawn at `font` (the list's size). */
 function itemHeight({ node, depth }: SlideItem, font: number): number {
@@ -152,7 +172,7 @@ function itemHeight({ node, depth }: SlideItem, font: number): number {
  * depend on how deep it sits or whether it is continued.
  */
 function itemRoom(heading: MindMapModel): number {
-  const headingH = wrappedLines(label(heading) + " (9/9)", INNER_W / HEADING_FONT - 1) * HEADING_FONT * 1.2;
+  const headingH = headingLines(label(heading) + " (9/9)") * HEADING_FONT * HEADING_LINE_HEIGHT;
   return INNER_H - TRAIL_H - headingH - HEADING_GAP;
 }
 
@@ -185,21 +205,33 @@ export function slideFits(heading: MindMapModel, items: SlideItem[]): boolean {
 // --- Building the deck -------------------------------------------------------
 
 /** All of `n`'s descendants as nested bullets, in outline order. */
-function bullets(n: MindMapModel, depth = 0): SlideItem[] {
-  return contentChildren(n).flatMap((c) => [{ node: c, depth }, ...bullets(c, depth + 1)]);
+function bullets(n: MindMapModel, depth = 0, out: SlideItem[] = []): SlideItem[] {
+  for (const c of contentChildren(n)) {
+    out.push({ node: c, depth });
+    bullets(c, depth + 1, out);
+  }
+  return out;
 }
 
 /** A child and its nested bullets: what travels together on a page. */
 function unit(c: MindMapModel): SlideItem[] {
-  return [{ node: c, depth: 0 }, ...bullets(c, 1)];
+  return bullets(c, 1, [{ node: c, depth: 0 }]);
 }
+
+const names = (children: MindMapModel[]): SlideItem[] => children.map((c) => ({ node: c, depth: 0 }));
 
 /** Whether `n` or anything under it asks to be split ({@link MindMapModel.slideSplit}). */
 const asksSplit = (n: MindMapModel): boolean =>
   (n.slideSplit === true && contentChildren(n).length > 0) || n.children.some(asksSplit);
 
 /** Whether `n` reads as a slide heading: two heading lines at most (not a paragraph). */
-const headingFits = (n: MindMapModel) => wrappedLines(label(n), INNER_W / HEADING_FONT - 1) <= 2;
+const headingFits = (n: MindMapModel) => headingLines(label(n)) <= 2;
+
+/** Whether `n` has two bullets or more under it. */
+function deep(n: MindMapModel): boolean {
+  const children = contentChildren(n);
+  return children.length >= 2 || (children.length === 1 && contentChildren(children[0]).length > 0);
+}
 
 /**
  * A child worth slides of its own when its parent is split: one with some
@@ -207,7 +239,10 @@ const headingFits = (n: MindMapModel) => wrappedLines(label(n), INNER_W / HEADIN
  * and whose text can head a slide. A leaf, an item with a one-line note or a
  * paragraph is said in full on its parent's page.
  */
-const isTopic = (n: MindMapModel) => headingFits(n) && (asksSplit(n) || bullets(n).length >= 2);
+const isTopic = (n: MindMapModel) => headingFits(n) && (asksSplit(n) || deep(n));
+
+/** Whether the "how to split into slides" choice means anything for `n`: it has children to split. */
+export const splittable = (n: MindMapModel) => contentChildren(n).length > 0;
 
 function slide(kind: "section" | "content", heading: MindMapModel, trail: string[], items: SlideItem[], ids: string[]): Slide {
   return { kind, heading, trail, items, ids, size: fitSize(heading, items, "s") ?? "s" };
@@ -254,122 +289,106 @@ function paginate(heading: MindMapModel, units: SlideItem[][]): SlideItem[][] {
  * (the heading comes back between other slides: every return is numbered).
  */
 function numbered(slides: Slide[], heading: MindMapModel, acrossKinds = false): Slide[] {
-  const kinds = new Map<Slide["kind"], Slide[]>();
-  for (const s of slides) {
-    const key = acrossKinds ? "content" : s.kind;
-    if (s.heading === heading) kinds.set(key, [...(kinds.get(key) ?? []), s]);
-  }
+  const group = (x: Slide) => acrossKinds || x.kind;
   return slides.map((s) => {
-    const own = s.heading === heading ? kinds.get(acrossKinds ? "content" : s.kind)! : [];
-    if (own.length === 0) return s;
+    if (s.heading !== heading) return s;
+    const own = slides.filter((o) => o.heading === heading && group(o) === group(s));
     // The smallest size only stays on the page that needed it (one item too big to split).
-    const sizes = own.filter((o) => o.kind === s.kind).map((o) => SIZES.indexOf(o.size));
-    const readable = sizes.filter((i) => SIZES[i] !== "s");
-    const size = s.size === "s" ? s.size : SIZES[Math.max(...(readable.length ? readable : sizes))];
+    const readable = own.filter((o) => o.kind === s.kind && o.size !== "s").map((o) => SIZES.indexOf(o.size));
+    const size = s.size === "s" ? s.size : SIZES[Math.max(...readable)];
     return { ...s, size, ...(own.length > 1 && { part: { index: own.indexOf(s) + 1, count: own.length } }) };
   });
 }
 
 /**
- * `units` under one heading over as many pages as they need. Each page
- * presents the children whose units it holds (the first, the heading too).
+ * `units` under one heading over as many pages as they need. A page presents
+ * the children whose units it holds (the heading itself is added by
+ * {@link branchSlides}, once).
  */
-function pages(heading: MindMapModel, trail: string[], units: SlideItem[][]): Slide[] {
+function pages(kind: "section" | "content", heading: MindMapModel, trail: string[], units: SlideItem[][]): Slide[] {
   const items = units.flat();
   const runs = slideFits(heading, items) ? [items] : paginate(heading, units);
-  return runs.map((run, i) =>
-    slide("content", heading, trail, run, [...(i === 0 ? [heading.id] : []), ...run.filter((it) => it.depth === 0).flatMap((it) => subtreeIds(it.node))])
-  );
+  return runs.map((run) => slide(kind, heading, trail, run, run.filter((it) => it.depth === 0).flatMap((it) => subtreeIds(it.node))));
 }
 
 /**
  * A branch whose children don't all get slides, read in outline order:
  *
- *  - what breaks out — in a NARRATIVE (half of the children or more are
- *    topics) every topic; in an ENUMERATION (topics are the minority) or a
- *    list KEPT together (`slideSplit: false`) only a child that asks for a
- *    split or is a topic too big for a page — gets its own slides in its
- *    place;
- *  - when nothing breaks out, the branch is one list continued over pages
+ *  - a child that `breaks` out gets its own slides in its place;
+ *  - when none does, the branch is one list continued over pages
  *    ("見出し (1/2)"), every child whole with its notes;
  *  - otherwise a door (the children's names, if they fit) opens the branch,
  *    and the small children between the broken-out ones go on pages under
  *    its heading, numbered "(k/n)" with the door. A run of bare leaves is
  *    already said in full by the door and gets no page; a lone item with a
- *    note heads its own slide. A kept-together list only opens with a door
+ *    note heads its own slide. A list `kept` together only opens with a door
  *    when a child's slides would otherwise come first, and keeps every small
  *    child on its pages.
  *
  * Anything too big for a page that isn't a topic (one long paragraph) stays
  * under this heading on a page of its own — never promoted to a heading.
  */
-function mixedSlides(node: MindMapModel, trail: string[], shape: "enumeration" | "narrative" | "kept"): Slide[] {
+function mixedSlides(node: MindMapModel, trail: string[], breaks: (c: MindMapModel) => boolean, kept: boolean): Slide[] {
   const inner = [...trail, label(node)];
   const children = contentChildren(node);
-  const breaks = (c: MindMapModel) => (shape === "narrative" ? isTopic(c) : asksSplit(c) || (isTopic(c) && !slideFits(node, unit(c))));
-  const broken = children.filter(breaks);
-  // Nothing breaks out: one list, every child whole.
-  if (broken.length === 0) return numbered(pages(node, trail, children.map(unit)), node);
+  const broken = new Set(children.filter(breaks));
+  if (broken.size === 0) return numbered(pages("content", node, trail, children.map(unit)), node);
 
-  // In order, the broken-out children's slides in their places. A door (the
-  // names, if they fit) leads — for a kept-together list only when a child's
-  // slides would otherwise come first.
-  const narrative = shape !== "kept";
-  const names = children.map((c) => ({ node: c, depth: 0 }));
-  const agenda = slideFits(node, names);
-  const opener = slide("section", node, trail, agenda ? names : [], [node.id]);
-  const out: Slide[] = narrative || broken.includes(children[0]) ? [opener] : [];
-  let run: MindMapModel[] = [];
-  const flush = () => {
-    if (narrative && run.length && agenda && run.every((c) => contentChildren(c).length === 0)) opener.ids.push(...run.flatMap(subtreeIds));
-    // A lone item with a note, between two topics, heads its own slide: the
-    // section it is, not a return to the parent.
-    else if (narrative && run.length === 1 && contentChildren(run[0]).length > 0 && headingFits(run[0])) out.push(...branchSlides(run[0], inner));
-    else if (run.length) {
-      const opened = out.length > 0;
-      out.push(...pages(node, trail, run.map(unit)).map((s) => (opened ? { ...s, ids: s.ids.filter((id) => id !== node.id) } : s)));
-    }
-    run = [];
-  };
+  const agenda = slideFits(node, names(children));
+  const door = !kept || broken.has(children[0]);
+  // Bare leaves between broken-out children: said in full by the door.
+  const leafRun = (run: MindMapModel[]) => door && !kept && agenda && run.every((c) => contentChildren(c).length === 0);
+  const runs: MindMapModel[][] = [[]];
   for (const c of children) {
-    if (broken.includes(c)) {
-      flush();
-      out.push(...branchSlides(c, inner));
-    } else run.push(c);
+    if (broken.has(c)) runs.push([c], []);
+    else runs[runs.length - 1].push(c);
   }
-  flush();
+  const doorIds = runs.filter((r) => r.length && !broken.has(r[0]) && leafRun(r)).flat().flatMap(subtreeIds);
+  const out: Slide[] = door ? [slide("section", node, trail, agenda ? names(children) : [], doorIds)] : [];
+  for (const run of runs) {
+    if (run.length === 0 || (!broken.has(run[0]) && leafRun(run))) continue;
+    // A broken-out child, or a lone item with a note heading its own slide
+    // (the section it is, not a return to the parent).
+    if (broken.has(run[0]) || (!kept && run.length === 1 && contentChildren(run[0]).length > 0 && headingFits(run[0]))) {
+      out.push(...branchSlides(run[0], inner));
+    } else out.push(...pages("content", node, trail, run.map(unit)));
+  }
   return numbered(out, node, true);
 }
 
+/** A branch's slides; the node itself is presented by the first of them. */
 function branchSlides(node: MindMapModel, trail: string[]): Slide[] {
   const children = contentChildren(node);
   const items = bullets(node);
-  const forced = node.slideSplit === true;
-  if (children.length === 0 || (!forced && !children.some(asksSplit) && slideFits(node, items))) {
+  if (children.length === 0 || (!asksSplit(node) && slideFits(node, items))) {
     return [slide("content", node, trail, items, subtreeIds(node))];
   }
+  const [first, ...rest] = splitBranch(node, trail, children);
+  return [{ ...first, ids: [node.id, ...first.ids] }, ...rest];
+}
 
+function splitBranch(node: MindMapModel, trail: string[], children: MindMapModel[]): Slide[] {
   const inner = [...trail, label(node)];
+  const tooBig = (c: MindMapModel) => asksSplit(c) || (isTopic(c) && !slideFits(node, unit(c)));
+  if (node.slideSplit === false) return mixedSlides(node, trail, tooBig, true);
   // One topic child: no agenda to give, so it stands in the branch's place.
-  if (children.length === 1 && isTopic(children[0]) && node.slideSplit !== false) {
-    const [first, ...rest] = branchSlides(children[0], inner);
-    return [{ ...first, ids: [node.id, ...first.ids] }, ...rest];
-  }
+  if (children.length === 1 && isTopic(children[0])) return branchSlides(children[0], inner);
   const topics = children.filter(isTopic).length;
-  if (node.slideSplit === false) return mixedSlides(node, trail, "kept");
-  if (!forced && topics * 2 < children.length) return mixedSlides(node, trail, "enumeration");
-  if (!forced && topics < children.length) return mixedSlides(node, trail, "narrative");
+  if (node.slideSplit !== true && topics < children.length) {
+    // Mostly topics: a narrative, each topic in its place. Mostly small: an enumeration, one list.
+    return mixedSlides(node, trail, topics * 2 < children.length ? tooBig : isTopic, false);
+  }
 
   // Every child gets slides: an agenda of their names, then each in turn.
   const sub = children.flatMap((c) => branchSlides(c, inner));
-  const names = children.map((c) => ({ node: c, depth: 0 }));
   const next = sub[0];
   // Never two section slides in a row: fold the first child's agenda into this one.
   if (next?.kind === "section" && !next.part && next.heading.id === children[0].id && !children[0].slideSplit) {
-    const folded = [names[0], ...next.items.map((it) => ({ ...it, depth: it.depth + 1 })), ...names.slice(1)];
-    if (slideFits(node, folded)) return [slide("section", node, trail, folded, [node.id, ...next.ids]), ...sub.slice(1)];
+    const [head, ...rest] = names(children);
+    const folded = [head, ...next.items.map((it) => ({ ...it, depth: it.depth + 1 })), ...rest];
+    if (slideFits(node, folded)) return [slide("section", node, trail, folded, next.ids), ...sub.slice(1)];
   }
-  const agenda = pages(node, trail, names.map((it) => [it])).map((s, i) => ({ ...s, kind: "section" as const, ids: i === 0 ? [node.id] : [] }));
+  const agenda = pages("section", node, trail, names(children).map((it) => [it])).map((s) => ({ ...s, ids: [] }));
   return [...numbered(agenda, node), ...sub];
 }
 
