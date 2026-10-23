@@ -69,6 +69,7 @@ export type HeadingStyle = (typeof HEADING_STYLE.values)[number];
  */
 export const TITLE_STYLE = closedStringSet({
   center: true,
+  plain: true,
   left: true,
   large: true,
   frame: true,

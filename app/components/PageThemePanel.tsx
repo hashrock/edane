@@ -61,6 +61,7 @@ function headingSample(style: HeadingStyle, accent: string): React.CSSProperties
 
 const TITLE_LABEL: Record<TitleStyle, MessageKey> = {
   center: "themeTitleCenter",
+  plain: "themeTitlePlain",
   left: "themeTitleLeft",
   large: "themeTitleLarge",
   frame: "themeTitleFrame",
@@ -75,7 +76,7 @@ function TitleSample({ style, theme }: { style: TitleStyle; theme: PageTheme }) 
   return (
     <span
       aria-hidden="true"
-      className={`flex aspect-video w-full flex-col gap-0.5 overflow-hidden rounded-sm p-1 ring-1 ring-slate-200 ${
+      className={`flex aspect-video w-full flex-col gap-1 overflow-hidden rounded-sm p-1.5 ring-1 ring-slate-200 ${
         style === "left" ? "items-start justify-end" : "items-center justify-center"
       }`}
       style={{ background: fill ? theme.accentColor : theme.background.colorA }}
@@ -84,13 +85,13 @@ function TitleSample({ style, theme }: { style: TitleStyle; theme: PageTheme }) 
         className="font-bold leading-none"
         style={{
           color: fg,
-          fontSize: style === "large" ? 15 : 10,
+          fontSize: style === "large" ? 20 : 12,
           ...(style === "frame" ? { border: `1px solid ${theme.accentColor}`, padding: "1px 3px" } : {}),
         }}
       >
         Aa
       </span>
-      {rule && <span className="h-px w-2.5" style={{ background: fill ? fg : theme.accentColor }} />}
+      {rule && <span className="h-px w-3.5" style={{ background: fill ? fg : theme.accentColor }} />}
     </span>
   );
 }
@@ -222,7 +223,7 @@ export default function PageThemePanel({ open, theme, onChange, onClose, readOnl
 
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeTitleStyle")}</h3>
-          <div role="radiogroup" aria-label={t("themeTitleStyle")} className="grid grid-cols-5 gap-1.5">
+          <div role="radiogroup" aria-label={t("themeTitleStyle")} className="grid grid-cols-3 gap-1.5">
             {TITLE_STYLE.values.map((v) => (
               <button
                 key={v}

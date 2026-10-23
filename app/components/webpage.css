@@ -306,6 +306,8 @@
   padding-bottom: 9cqw;
 }
 
+.wp-root[data-title="plain"] .wp-page-title .wp-rule { display: none; }
+
 .wp-root[data-title="large"] .wp-page-title .wp-rule { display: none; }
 .wp-root[data-variant="slide"][data-title="large"] .wp-page-title .wp-heading { font-size: 9cqw; }
 .wp-root[data-variant="web"][data-title="large"] .wp-page-title .wp-heading { font-size: clamp(3rem, 11cqw, 8.5rem); }
