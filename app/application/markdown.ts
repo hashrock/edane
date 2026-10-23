@@ -10,7 +10,7 @@
  * Depends on domain/model only (no DOM / rendering).
  */
 
-import type { MindMapModel, NodeType } from "../domain/model";
+import type { MindMapDocument, MindMapModel, NodeType } from "../domain/model";
 import { generateId, type IdSource } from "../domain/model";
 import { assertNever } from "../lib/assertNever";
 import { t } from "./i18n";
@@ -193,6 +193,17 @@ function nodeToMarkdownText(node: MindMapModel): string {
     default:
       return assertNever(type);
   }
+}
+
+/**
+ * A whole note as Markdown: `# title`, then every tree as a list
+ * ({@link modelToMarkdown}, with the same `annotate`).
+ */
+export function documentToMarkdown(
+  doc: MindMapDocument,
+  annotate?: (n: MindMapModel) => string
+): string {
+  return [`# ${doc.title}`, ...doc.roots.map((r) => modelToMarkdown(r, annotate))].join("\n");
 }
 
 /**

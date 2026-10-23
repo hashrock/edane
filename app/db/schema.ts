@@ -67,6 +67,24 @@ export const notes = sqliteTable("notes", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Automatic per-note backups (application/noteBackups.ts), written by NoteRoom
+// before a commit overwrites the note. `content` is always encrypted, bound to
+// the backup's own id (not the note's), whatever the note's publicity.
+export const noteBackups = sqliteTable("note_backups", {
+  id: text("id").primaryKey(),
+  noteId: text("note_id")
+    .notNull()
+    .references(() => notes.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  /** The note's version this snapshot was of. */
+  version: integer("version").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 // Uploaded image metadata. The binary lives in R2 (binding IMAGES); this row
 // tracks ownership, size (for the per-user quota) and the R2 object key.
 export const images = sqliteTable("images", {

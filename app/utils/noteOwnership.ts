@@ -19,3 +19,13 @@ export async function loadOwnedNote(
   const note = await db.select().from(notes).where(eq(notes.id, id)).get();
   return note && note.userId === userId ? note : null;
 }
+
+/** {@link loadOwnedNote}, and only outside the trash (a trashed note is "not found" too). */
+export async function loadOwnedLiveNote(
+  db: DrizzleD1Database,
+  id: string,
+  userId: string
+): Promise<Note | null> {
+  const note = await loadOwnedNote(db, id, userId);
+  return note && !note.deletedAt ? note : null;
+}

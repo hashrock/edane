@@ -515,6 +515,23 @@ export default function Settings({ user }: { user: User }) {
           </div>
         </section>
 
+        <section className="mb-8">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            {t("exportHeading")}
+          </h2>
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm leading-relaxed text-slate-600">{t("exportDescription")}</p>
+            {/* A plain link: the response is an attachment, so the browser downloads it in place. */}
+            <a
+              href="/api/export"
+              download
+              className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-center text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              {t("exportButton")}
+            </a>
+          </div>
+        </section>
+
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
             {t("connectedAppsHeading")}
