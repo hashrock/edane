@@ -9,7 +9,7 @@
  *
  * Access levels:
  * - `anonymous`: anyone, and the handler never reads the user, so the session
- *   isn't looked up at all (no D1 read): raw images, published data, sites.
+ *   isn't looked up at all (no D1 read): raw images, published data.
  * - `public`: anyone, guests included.
  * - `user`: signed in, by browser session or API token (Bearer). API tokens
  *   are scoped to notes (ADR 0005), so only note routes use this.
@@ -99,14 +99,11 @@ export const ROUTE_POLICY = {
   "DELETE /api/images/:id": { access: "browser-user" },
   "GET /api/images/:id/raw": { access: "anonymous" },
 
-  // Publications and sites.
+  // Publications and web pages.
   "GET /pub/:file": { access: "anonymous" },
   "POST /api/notes/:id/publications": { access: "browser-user" },
   "GET /api/publications": { access: "browser-user" },
   "DELETE /api/publications/:id": { access: "browser-user" },
-  "GET /sites/:pubId": { access: "anonymous" },
-  "PUT /api/sites/:pubId": { access: "browser-user" },
-  "POST /api/sites/:pubId/suggest": { access: "browser-user" },
   "GET /w/:id": { access: "anonymous" },
   "GET /api/notes/:id/webpage": { access: "browser-user" },
   "POST /api/notes/:id/webpage": { access: "browser-user" },
@@ -123,7 +120,6 @@ export const ROUTE_POLICY = {
   "GET /notes": { access: "user-page" },
   "GET /trash": { access: "user-page" },
   "GET /settings": { access: "user-page" },
-  "GET /sites/:pubId/edit": { access: "user-page" },
   // Public notes are viewable by anyone; the handlers decide (application/notePageAccess).
   "GET /notes/:id/edit": { access: "public" },
   "GET /notes/:id": { access: "public" },

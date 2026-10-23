@@ -3,6 +3,7 @@ import {
   conformEntering,
   fieldIssue,
   formatSchema,
+  inferSchema,
   isDateText,
   parseSchema,
   schemaRoles,
@@ -116,4 +117,28 @@ describe("conformEntering", () => {
     expect(conformEntering(base, next)).toBe(next);
   });
 
+});
+
+describe("inferSchema", () => {
+  const link = { type: "link" } as const;
+  it("names positions by majority type", () => {
+    const root = n("r", "Cafes", [
+      n("a", "Nico", [n("a1", "Jimbocho"), n("a2", "https://x/a", [], link), n("a3", "tags", [n("t1", "retro")])]),
+      n("b", "Roast", [n("b1", "Shibuya"), n("b2", "https://x/b", [], link), n("b3", "tags"), n("b4", "extra")]),
+      n("c", "Yama", [n("c1", "Kichijoji"), n("c2", "https://img/c.jpg", [], { type: "image" })]),
+    ]);
+    expect(formatSchema(inferSchema(root))).toBe("field1, url:link, field3, field4");
+  });
+  it("is empty for a branch without records", () => {
+    expect(inferSchema(n("r", "x"))).toEqual([]);
+  });
+  it("detects markdown majority", () => {
+    const md = { type: "markdown" } as const;
+    const r = n("r", "Notes", [
+      n("a", "A", [n("a1", "# hi", [], md)]),
+      n("b", "B", [n("b1", "# yo", [], md)]),
+      n("c", "C", [n("c1", "plain")]),
+    ]);
+    expect(formatSchema(inferSchema(r))).toBe("body:markdown");
+  });
 });

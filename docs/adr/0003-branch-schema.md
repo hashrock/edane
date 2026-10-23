@@ -1,8 +1,8 @@
 # ADR 0003: スキーマを公開サイトから枝（ノード）へ移す
 
-- ステータス: Accepted
+- ステータス: Accepted（公開サイト側の決定 7・8 と影響の一部は、公開サイト機能の廃止（2026-10-23）により無効。末尾の追記を参照）
 - 日付: 2026-09-30
-- 対象コード: `app/domain/branchSchema.ts`, `app/application/editorReducer.ts`, `app/application/schemaDecorations.ts`, `app/application/siteSchema.ts`, `app/server.ts`（`/sites/:pubId/edit`）
+- 対象コード: `app/domain/branchSchema.ts`, `app/application/editorReducer.ts`, `app/application/schemaDecorations.ts`, `app/components/SchemaDialog.tsx`
 
 ## コンテキスト
 
@@ -26,3 +26,12 @@
 - `NodeType` を追加すると、`FieldType` 経由で `FIELD_TYPES`（branchSchema）と `FIELD_RENDERERS`（siteSchema）がコンパイルエラーになる。
 - `SiteItem` の値は `string | number | boolean | SiteItem[]` になった（`check` → boolean、`number` → number、スキーマを持つフィールドノード → レコードの配列）。
 - 1つの枝を2つのサイトで別のスキーマで読むことはできなくなった（以前の設計では可能だった）。必要になったら、サイト側の上書きとして足し直す。
+
+## 追記（2026-10-23）: 公開サイト機能の廃止
+
+実験的な公開サイト機能（`/sites/:pubId`、`/sites/:pubId/edit`、`PUT /api/sites/:pubId`、`POST /api/sites/:pubId/suggest`。枝 + JSX テンプレートをブラウザ内でコンパイルして静的ページにし、Workers AI でテンプレートを提案する）は削除した。
+
+- `sites` テーブルは `migrations/0016_drop_sites.sql` で DROP する。サイト機能は一般公開前だったので、データの移行はしない。
+- **枝のスキーマ（決定 1〜6）はエディタの機能としてそのまま残る。** スキーマダイアログの「推定を使う」が使う `inferSchema` は `domain/branchSchema.ts` に移した。
+- 決定 7（公開側のスキーマ読み取り `effectiveSchema`）、決定 8 の前提だった `sites` テーブル、「影響」の `FIELD_RENDERERS`（siteSchema）・`SiteItem`・「1つの枝を2つのサイトで」はもう存在しない。
+- ノード公開（`/pub/:id.json`・`.md`）と Web ページモード（`/w/:id`、ADR 0007）は影響を受けない。

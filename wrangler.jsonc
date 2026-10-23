@@ -19,14 +19,11 @@
   ],
   "durable_objects": { "bindings": [{ "name": "NOTE_ROOMS", "class_name": "NoteRoom" }] },
   "migrations": [{ "tag": "note-sync-v1", "new_sqlite_classes": ["NoteRoom"] }],
-  "ai": { "binding": "AI", "remote": true },
   // POST /oauth/register (open dynamic client registration): per IP, 10 per minute.
   // GET /api/link-preview (open, fetches third-party pages): per IP, 60 per minute —
   // opening a note fetches one preview per new link node, so this leaves room for link-heavy notes.
-  // POST /api/sites/:pubId/suggest (Workers AI, billed per call): per user, 10 per minute (app/utils/aiQuota.ts).
   "ratelimits": [
     { "name": "OAUTH_REGISTER_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
-    { "name": "AI_SUGGEST_LIMITER", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
     { "name": "LINK_PREVIEW_LIMITER", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
   ],
   "r2_buckets": [

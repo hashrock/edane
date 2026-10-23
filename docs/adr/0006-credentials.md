@@ -22,13 +22,13 @@
   - `user-page`（未ログインはランディングへ）
   - `browser` / `browser-user`（`Authorization` 付きは断る）
   - `self`（セッションより前に mount し、自分で認証する `/mcp`・OAuth・stats）
-- **API トークンのスコープ**: API トークンはノート（`notes` スコープ、ADR 0005）の API にだけ届く。トークン管理・OAuth の同意・画像・公開・サイトはブラウザのセッション限定。
+- **API トークンのスコープ**: API トークンはノート（`notes` スコープ、ADR 0005）の API にだけ届く。トークン管理・OAuth の同意・画像・公開はブラウザのセッション限定。
 - **CSRF**: `Authorization` の無い unsafe メソッドと WebSocket の upgrade は、自オリジン（`Origin` か `Sec-Fetch-Site: same-origin`）からだけ受け付ける。SameSite=Lax はサイト単位なので、`*.hashrock.info` の兄弟からの送信を止められないため。
 - **本文サイズとレート制限**: 本文は既定 1 MiB。どちらもルートごとに表で決める（`maxBody`・`rateLimit`）。
 - **2 段のミドルウェア**: 方針の照合・CSRF・本文・レート制限は最初に（`/mcp` や OAuth より前）、未ログインの拒否はセッションの後（`requireRouteUser`）。ハンドラーは `signedInUser` でユーザーを受け取る。
 - **エラー**: `app.onError` は固定の文言だけを返し、詳細はログに出す。
 - **共通ヘッダー**: 全レスポンスに CSP（`frame-ancestors 'self'`、`script-src 'self' https://repos.hashrock.info`）と `nosniff` を付ける（`app/utils/securityHeaders.ts`）。
-  - 自前の CSP を持つルート（公開サイト・画像・同意画面）はそれを保つ。
+  - 自前の CSP を持つルート（画像・同意画面）はそれを保つ。
   - switcher の `v1.js` はその場で更新されるので SRI は付けられない。
 
 ### 認証情報はサーバー側の行
@@ -57,7 +57,7 @@
 
 ## 見送ったもの
 
-- **ユーザーのコンテンツを別オリジンから配信すること**: 画像・`/sites`・`/pub` を Cookie の無い別の登録ドメインから配信する案。#213 のヘッダーと sandbox で塞いではいるが、根本対策はこちら。ドメインと DNS が要るので別に判断する。
+- **ユーザーのコンテンツを別オリジンから配信すること**: 画像・`/pub` を Cookie の無い別の登録ドメインから配信する案。#213 のヘッダーと sandbox で塞いではいるが、根本対策はこちら。ドメインと DNS が要るので別に判断する。
 - **edane 自体を `hashrock.info` から独自ドメインへ移すこと**: SameSite が本来の強さで効くようになるが、URL が変わる。
 - **「全端末からログアウト」の UI**: `sessions` をユーザーで消せば実現できる。
 

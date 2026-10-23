@@ -8,13 +8,13 @@ import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
-import { users, notes, apiTokens, images, nodePublications, sites, webPages } from "./db/schema";
+import { users, notes, apiTokens, images, nodePublications, webPages } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
 import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
 import { findUserByEmail, insertUser } from "./utils/userRepository";
-import { insertNote, insertPublication, listLiveNotes, upsertSite } from "./utils/noteRepository";
+import { insertNote, insertPublication, listLiveNotes } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { decodeStoredNoteContent, noteKeys, noteStorageMode, type NoteKeys } from "./utils/crypto";
+import { decodeStoredNoteContent, noteKeys, noteStorageMode } from "./utils/crypto";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
 import { loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
@@ -28,16 +28,6 @@ import {
   publishedNodeJson,
   nodePathTexts,
 } from "./application/nodePublication";
-import { renderSiteResponse, validateSiteSave } from "./application/siteTemplate";
-import { toSiteNode } from "./application/siteNode";
-import { defaultTemplate } from "./application/siteSchema";
-import {
-  SITE_AI_MODEL,
-  buildSuggestMessages,
-  extractTemplate,
-  validateSuggestRequest,
-  effectiveSchema,
-} from "./application/siteAi";
 import { fetchLinkPreview } from "./utils/linkPreview";
 import {
   IMAGE_STORAGE_LIMIT_BYTES,
@@ -52,7 +42,6 @@ import { mcpRoutes } from "./mcp";
 import { oauthServerRoutes, oauthSessionRoutes, takeOAuthReturn } from "./oauth";
 import { noteRoom } from "./utils/noteRoom";
 import { insertImageWithinQuota } from "./utils/imageRepository";
-import { aiSuggestAllowed } from "./utils/aiQuota";
 import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
@@ -372,7 +361,7 @@ app.use("/pub/*", cors());
 /**
  * Public serve path: publication → its note → the live node. Only live public
  * notes are served — private notes stay encrypted and this never touches the
- * decryption path. Shared by /pub/:file and /sites/:pubId.
+ * decryption path. Used by /pub/:file.
  */
 async function loadServablePublication(db: DrizzleD1Database, pubId: string) {
   const pub = await db
@@ -395,28 +384,6 @@ async function loadOwnedPublication(db: DrizzleD1Database, pubId: string, userId
     .where(eq(nodePublications.id, pubId))
     .get();
   return pub && pub.userId === userId ? pub : null;
-}
-
-/**
- * Owner path: publication → owned note (decoded the owner-facing way, so a
- * private note still resolves) → node. Used by the site editor and the AI
- * suggestion, which both need the branch's content.
- */
-async function loadOwnedPublicationNode(
-  db: DrizzleD1Database,
-  pubId: string,
-  userId: string,
-  keys: NoteKeys
-) {
-  const pub = await loadOwnedPublication(db, pubId, userId);
-  if (!pub) return { error: "not-found" as const };
-  const note = await loadOwnedNote(db, pub.noteId, userId);
-  if (!note) return { error: "not-found" as const };
-  const content = await decodeStoredNoteContent(note.content, noteStorageMode(note.isPublic), keys, note.id);
-  if (content === null) return { error: "decrypt" as const };
-  const node = findNode(parseContent(content, note.title), pub.nodeId);
-  if (!node) return { error: "not-found" as const };
-  return { pub, note, node };
 }
 
 app.get("/pub/:file", async (c) => {
@@ -625,87 +592,6 @@ app.delete("/api/notes/:id/webpage", async (c) => {
   return c.json(webPageStatus(owned.note, null));
 });
 
-// --- Sites: a JSX-templated static page per node publication ---
-
-app.get("/sites/:pubId", async (c) => {
-  const db = drizzle(c.env.DB);
-  const pubId = c.req.param("pubId");
-  const [live, site] = await Promise.all([
-    loadServablePublication(db, pubId),
-    db.select({ html: sites.html, css: sites.css }).from(sites).where(eq(sites.publicationId, pubId)).get(),
-  ]);
-  if (!live || !site) return c.notFound();
-  const { body, headers } = renderSiteResponse(site, live.node.text);
-  return c.body(body, 200, headers);
-});
-
-// Save (upsert) the template + build. The build is produced in the author's
-// browser; the server only checks ownership and size — the serve path's CSP
-// is what makes arbitrary author HTML safe on this origin.
-app.put("/api/sites/:pubId", async (c) => {
-  const user = signedInUser(c);
-  const db = drizzle(c.env.DB);
-  const pubId = c.req.param("pubId");
-  if (!(await loadOwnedPublication(db, pubId, user.id))) {
-    return c.json({ error: "Not found" }, 404);
-  }
-
-  const parsed = validateSiteSave(await c.req.json().catch(() => null));
-  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-
-  const updatedAt = new Date().toISOString();
-  await upsertSite(db, {
-    publicationId: pubId,
-    userId: user.id,
-    template: parsed.template,
-    html: parsed.build.html,
-    css: parsed.build.css,
-    updatedAt,
-  });
-  return c.json({ ok: true, updatedAt });
-});
-
-// Ask Workers AI for a template tailored to the branch's data. Owner-only.
-// The result is just text — the author's browser compiles it and shows
-// errors like any hand edit.
-app.post("/api/sites/:pubId/suggest", async (c) => {
-  const user = signedInUser(c);
-  if (!(await aiSuggestAllowed(c.env, user.id))) return c.json({ error: "Too many AI requests; wait a minute" }, 429);
-  const [owned, body] = await Promise.all([
-    loadOwnedPublicationNode(drizzle(c.env.DB), c.req.param("pubId"), user.id, noteKeys(c.env)),
-    c.req.json().catch(() => null),
-  ]);
-  if ("error" in owned) {
-    return owned.error === "decrypt"
-      ? c.json({ error: "Decryption failed" }, 500)
-      : c.json({ error: "Not found" }, 404);
-  }
-  const request = validateSuggestRequest(body);
-  const messages = buildSuggestMessages({ data: toSiteNode(owned.node), ...request });
-  try {
-    // The model sometimes stops mid-file (unclosed fence / finish_reason
-    // "length"). One retry covers most of those; a second failure is reported.
-    let last: ReturnType<typeof extractTemplate> = { kind: "none" };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = (await c.env.AI.run(SITE_AI_MODEL, {
-        messages,
-        max_tokens: 4096,
-      })) as { response?: string; choices?: { finish_reason?: string }[] };
-      last = extractTemplate(result.response ?? "", {
-        truncated: result.choices?.[0]?.finish_reason === "length",
-      });
-      if (last.kind === "ok") return c.json({ template: last.template });
-    }
-    return c.json(
-      { error: last.kind === "truncated" ? "AI response was cut off" : "AI returned no template" },
-      502
-    );
-  } catch (e) {
-    console.error("AI suggest failed", e);
-    return c.json({ error: "AI request failed" }, 502);
-  }
-});
-
 // --- UI test scenarios: seed an isolated initial state and redirect to it ---
 // Public-safe (insert-only, current user's own data, no auth bypass, refused when
 // navigated to from another site); see
@@ -908,27 +794,6 @@ const routes = app
       default:
         return assertNever(access);
     }
-  })
-  .get("/sites/:pubId/edit", async (c) => {
-    const user = signedInUser(c);
-    const db = drizzle(c.env.DB);
-    const pubId = c.req.param("pubId");
-    const [owned, site] = await Promise.all([
-      loadOwnedPublicationNode(db, pubId, user.id, noteKeys(c.env)),
-      db.select({ template: sites.template }).from(sites).where(eq(sites.publicationId, pubId)).get(),
-    ]);
-    if ("error" in owned) {
-      return owned.error === "decrypt" ? c.text("Decryption failed", 500) : c.notFound();
-    }
-    const data = toSiteNode(owned.node);
-    return c.render("Sites/Edit", {
-      user,
-      publicationId: pubId,
-      noteId: owned.note.id,
-      data,
-      template: site?.template ?? defaultTemplate(effectiveSchema(data)),
-      published: !!site,
-    });
   })
   .get("/notes/:id", async (c) => {
     const db = drizzle(c.env.DB);

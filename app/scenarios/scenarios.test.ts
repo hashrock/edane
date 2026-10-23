@@ -2,17 +2,15 @@
  * シナリオ生成の契約：
  * - 全シナリオが「隔離された新規データ」の規約（タイトル接頭辞・ID 新規・FK 整合）を守る
  * - 木は永続化の往復（serialize → parseContent）で壊れず、ID が一意
- * - サイトのビルドは保存 API の検証（validateSiteSave）を通る
  * - ルートの判断（JSON 判定・アクセス・JSON 応答の形）
  */
 import { describe, it, expect } from "vitest";
 import { SCENARIO_NAMES, SCENARIOS, findScenario, listScenarios, type ScenarioName } from "./catalog";
-import { LARGE_DEPTH, LARGE_LIST_NOTES, LARGE_WIDE_CHILDREN, SITE_SCENARIO_RECORDS } from "./fixtures";
+import { LARGE_DEPTH, LARGE_LIST_NOTES, LARGE_WIDE_CHILDREN } from "./fixtures";
 import { scenarioTitle, shortTag, type ScenarioContext, type ScenarioPlan } from "./plan";
 import { describePlan, resolveScenarioAccess, throwawayUser, wantsJson } from "./response";
 import { parseContent, serializeDocument } from "../application/persistence";
 import { findNode, getNodeDepths, type MindMapDocument, type MindMapModel } from "../domain/model";
-import { validateSiteSave } from "../application/siteTemplate";
 
 function sequentialIds(): ScenarioContext["nextId"] {
   let n = 0;
@@ -60,7 +58,7 @@ describe("every scenario plan", () => {
     }
   });
 
-  it("uses fresh, unique ids across notes, nodes, publications and sites", () => {
+  it("uses fresh, unique ids across notes, nodes and publications", () => {
     for (const [name, plan] of Object.entries(plans)) {
       const ids = [
         ...plan.notes.map((n) => n.id),
@@ -71,7 +69,7 @@ describe("every scenario plan", () => {
     }
   });
 
-  it("keeps foreign keys inside the plan (publication → note/node, site → publication)", () => {
+  it("keeps foreign keys inside the plan (publication → note/node)", () => {
     for (const [name, plan] of Object.entries(plans)) {
       for (const p of plan.publications) {
         const note = plan.notes.find((n) => n.id === p.noteId);
@@ -79,9 +77,6 @@ describe("every scenario plan", () => {
         expect(findNode(note!.model, p.nodeId), `${name}: publication node`).not.toBeNull();
         expect(note!.isPublic, `${name}: only public notes can be published`).toBe(true);
         expect(note!.trashed, `${name}: trashed notes are not servable`).toBe(false);
-      }
-      for (const s of plan.sites) {
-        expect(plan.publications.some((p) => p.id === s.publicationId), `${name}: site publication`).toBe(true);
       }
     }
   });
@@ -101,11 +96,10 @@ describe("every scenario plan", () => {
     expect(buildAll("t")).toEqual(buildAll("t"));
   });
 
-  it("redirects to a note or site created by the plan", () => {
+  it("redirects to a note created by the plan", () => {
     for (const [name, plan] of Object.entries(plans)) {
       const known = [
         ...plan.notes.flatMap((n) => [`/notes/${n.id}/edit`, `/notes/${n.id}`]),
-        ...plan.publications.map((p) => `/sites/${p.id}/edit`),
         "/trash",
       ];
       expect(known, name).toContain(plan.redirect);
@@ -117,10 +111,9 @@ describe("individual scenarios", () => {
   const plans = buildAll();
 
   it("empty: one private note with a single blank root", () => {
-    const { notes, publications, sites } = plans.empty;
+    const { notes, publications } = plans.empty;
     expect(notes).toHaveLength(1);
     expect(publications).toEqual([]);
-    expect(sites).toEqual([]);
     expect(notes[0].isPublic).toBe(false);
     expect(notes[0].model.roots).toEqual([{ id: expect.any(String), text: "", children: [] }]);
   });
@@ -157,22 +150,9 @@ describe("individual scenarios", () => {
     expect(plans.trash.redirect).toBe("/trash");
   });
 
-  it("public: a publication on a branch of a public note, no site, opens the view page", () => {
+  it("public: a publication on a branch of a public note opens the view page", () => {
     expect(plans.public.publications).toHaveLength(1);
-    expect(plans.public.sites).toEqual([]);
     expect(plans.public.redirect).toBe(`/notes/${plans.public.notes[0].id}`);
-  });
-
-  it("site: a built site whose payload passes the save validation and keeps the search contract", () => {
-    const [site] = plans.site.sites;
-    expect(site.publicationId).toBe(plans.site.publications[0].id);
-    expect(validateSiteSave({ template: site.template, html: site.html, css: site.css }).ok).toBe(
-      true
-    );
-    expect(site.html).toContain("data-search");
-    expect((site.html.match(/data-card/g) ?? []).length).toBe(SITE_SCENARIO_RECORDS);
-    expect(site.template).toContain("export default function Page()");
-    expect(plans.site.redirect).toBe(`/sites/${site.publicationId}/edit`);
   });
 });
 
@@ -235,8 +215,8 @@ describe("route decisions", () => {
   });
 
   it("describePlan lists absolute URLs for everything the plan created", () => {
-    const plan = SCENARIOS.site.build({ tag: "t", nextId: sequentialIds() });
-    const out = describePlan(SCENARIOS.site, plan, "t", { kind: "current", user }, "http://localhost:5173/");
+    const plan = SCENARIOS.public.build({ tag: "t", nextId: sequentialIds() });
+    const out = describePlan(SCENARIOS.public, plan, "t", { kind: "current", user }, "http://localhost:5173/");
     expect(out.signedInAs).toBe("current");
     expect(out.redirect).toBe(`http://localhost:5173${plan.redirect}`);
     expect(out.notes[0]).toMatchObject({
@@ -245,7 +225,6 @@ describe("route decisions", () => {
       viewUrl: `http://localhost:5173/notes/${plan.notes[0].id}`,
     });
     expect(out.publications[0].jsonUrl).toBe(`http://localhost:5173/pub/${plan.publications[0].id}.json`);
-    expect(out.sites[0].url).toBe(`http://localhost:5173/sites/${plan.sites[0].publicationId}`);
     expect(out.user).toEqual({ id: "u1", email: "u@example.com", name: "U" });
     expect(JSON.stringify(out)).not.toContain("avatarUrl");
   });

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { publicationUrls } from "../application/nodePublication";
-import { siteEditPath } from "../application/siteTemplate";
 import { t } from "../application/i18n";
 import { copyText } from "../lib/clipboard";
 import { useLocale } from "./useLocale";
@@ -165,13 +164,6 @@ export default function PublishNodeDialog({
               {urlRow("JSON", "json", urls.json)}
               {urlRow("Markdown", "md", urls.md)}
             </div>
-            <a
-              href={siteEditPath(state.pubId)}
-              data-testid="pub-site-link"
-              className="mt-3 inline-block rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 transition hover:bg-emerald-100"
-            >
-              {t("siteOpenEditor")} →
-            </a>
             <p className="mt-3 text-xs leading-relaxed text-slate-500">
               {t("publishNoteBeforeLink")}
               <a href="/settings" className="text-emerald-700 underline">

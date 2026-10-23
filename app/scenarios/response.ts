@@ -86,9 +86,7 @@ export interface ScenarioResult {
     nodeId: string;
     jsonUrl: string;
     markdownUrl: string;
-    siteEditUrl: string;
   }[];
-  sites: { publicationId: string; url: string; editUrl: string }[];
 }
 
 export function describePlan(
@@ -122,12 +120,6 @@ export function describePlan(
       nodeId: p.nodeId,
       jsonUrl: abs(`/pub/${p.id}.json`),
       markdownUrl: abs(`/pub/${p.id}.md`),
-      siteEditUrl: abs(`/sites/${p.id}/edit`),
-    })),
-    sites: plan.sites.map((s) => ({
-      publicationId: s.publicationId,
-      url: abs(`/sites/${s.publicationId}`),
-      editUrl: abs(`/sites/${s.publicationId}/edit`),
     })),
   };
 }
