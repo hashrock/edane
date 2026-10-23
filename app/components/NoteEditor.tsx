@@ -1,9 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { MindmapEditorView } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
 import SlideShow from "./SlideShow";
+import WebPagePreview from "./WebPagePreview";
 import { useNoteEditor } from "./useNoteEditor";
 import type { EditorLayout } from "../application/editSurface";
+import type { PageTheme } from "../domain/pageTheme";
+
+const PageThemePanel = lazy(() => import("./PageThemePanel"));
 
 interface Props {
   noteId?: string;
@@ -88,6 +92,24 @@ export default function NoteEditor(props: Props) {
     [dispatch, stateRef]
   );
 
+  // Webページモード: the page preview in the top-right corner, and the theme panel.
+  const [webMode, setWebMode] = useState(false);
+  const [themePanel, setThemePanel] = useState(false);
+  const webPage = useMemo(
+    () => ({
+      active: webMode,
+      toggle: () => {
+        setWebMode((on) => !on);
+        setThemePanel(false);
+      },
+    }),
+    [webMode]
+  );
+  const setTheme = useCallback(
+    (theme: PageTheme | null) => dispatch({ type: "setTheme", theme }, "theme"),
+    [dispatch]
+  );
+
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
   const layout: Layout = override ?? defaultLayout;
 
@@ -103,6 +125,7 @@ export default function NoteEditor(props: Props) {
     layout,
     onLayoutChange: changeLayout,
     onPresent: present,
+    webPage,
   };
   return (
     <>
@@ -111,6 +134,29 @@ export default function NoteEditor(props: Props) {
         {engine.syncRecovery && <details><summary>適用できなかった編集（復元用）</summary><textarea readOnly aria-label="未適用の編集" value={engine.syncRecovery} className="w-full h-24" /></details>}
       </div>}
       {layout === "outline" ? <OutlineEditor {...viewProps} /> : <MindmapEditorView {...viewProps} />}
+      {webMode && (
+        // Beside the theme panel (w-80) while it is open, so the two show together.
+        <div className={`pointer-events-none fixed top-14 z-40 ${themePanel ? "right-[21rem]" : "right-3"}`}>
+          <WebPagePreview
+            doc={engine.model}
+            activeNodeId={engine.state.view.activeNodeId}
+            onOpenTheme={engine.readOnly ? undefined : () => setThemePanel(true)}
+            onExit={() => webPage.toggle()}
+          />
+        </div>
+      )}
+      {webMode && themePanel && (
+        <Suspense fallback={null}>
+          <PageThemePanel
+            theme={engine.model.theme}
+            onChange={setTheme}
+            onClose={() => setThemePanel(false)}
+            readOnly={engine.readOnly}
+            noteId={engine.noteId}
+            isPublic={engine.isPublic}
+          />
+        </Suspense>
+      )}
       {show && <SlideShow doc={engine.model} startNodeId={show.from} onExit={endPresentation} />}
     </>
   );

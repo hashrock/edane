@@ -106,6 +106,27 @@ export const nodePublications = sqliteTable("node_publications", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// A whole note published as a web page (Webページモード), served at /w/:id —
+// always rendered from the LIVE note with its page theme, like node
+// publications (see application/webPagePublication.ts). One per note;
+// unpublishing deletes the row, publishing again mints a new id.
+export const webPages = sqliteTable("web_pages", {
+  /** Public slug served at /w/:id (random UUID). */
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  noteId: text("note_id")
+    .notNull()
+    .unique("idx_web_pages_note")
+    .references(() => notes.id),
+  /** The note's public_epoch when this was (re)published; serves only while it matches. */
+  publicEpoch: integer("public_epoch").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 // A "site": one JSX template + its last build (static HTML/CSS) for a node
 // publication, served at /sites/:publicationId. The build is a SNAPSHOT —
 // JSX can only be compiled in the author's browser (Workers forbid eval and

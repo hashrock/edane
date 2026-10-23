@@ -74,6 +74,17 @@ export function GlobeIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Stacked pages (Webページモード). */
+export function PagesIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <IconSvg {...props}>
+      <rect x="4" y="3" width="16" height="8" rx="1.5" />
+      <rect x="4" y="13" width="16" height="8" rx="1.5" />
+      <path d="M7.5 7h6M7.5 17h9" />
+    </IconSvg>
+  );
+}
+
 /** Lock icon (private). */
 export function LockIcon(props: React.SVGProps<SVGSVGElement>) {
   return (

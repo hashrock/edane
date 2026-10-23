@@ -37,7 +37,7 @@ import {
   serializeBranch,
   parseBranch,
 } from "../application/branchClipboard";
-import ViewControls from "./ViewControls";
+import ViewControls, { type WebPageToggle } from "./ViewControls";
 import {
   attachStagePanZoom,
   stageTransform,
@@ -412,6 +412,8 @@ interface ViewProps {
   onLayoutChange?: (layout: EditorLayout) => void;
   /** Start the slideshow (header button, palette). Absent = no presentation mode. */
   onPresent?: () => void;
+  /** Webページモード toggle (header button). Absent = no web page mode. */
+  webPage?: WebPageToggle;
 }
 
 /**
@@ -426,6 +428,7 @@ export function MindmapEditorView({
   layout,
   onLayoutChange,
   onPresent,
+  webPage,
 }: ViewProps) {
   const {
     state,
@@ -3989,6 +3992,7 @@ export function MindmapEditorView({
             onLayoutChange={onLayoutChange}
             zoom={zoomControls}
             onPresent={onPresent}
+            webPage={webPage}
           />
           {noteId && !readOnly && (
             <>

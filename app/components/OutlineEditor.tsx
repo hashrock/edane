@@ -31,7 +31,7 @@ import { DEFAULT_PREFERENCES } from "../application/editorPreferences";
 import { DEFAULT_FONT_SIZE } from "../lib/measureText";
 import ConfirmDialog from "./ConfirmDialog";
 import PublicityDropdown from "./PublicityDropdown";
-import ViewControls from "./ViewControls";
+import ViewControls, { type WebPageToggle } from "./ViewControls";
 import SaveStatus from "./SaveStatus";
 import { TrashIcon } from "./icons";
 import { leaveDialogMessage, type NoteEditorEngine } from "./useNoteEditor";
@@ -56,6 +56,8 @@ interface Props {
   onLayoutChange?: (layout: EditorLayout) => void;
   /** Start the slideshow (header button). Absent = no presentation mode. */
   onPresent?: () => void;
+  /** Webページモード toggle (header button). Absent = no web page mode. */
+  webPage?: WebPageToggle;
 }
 
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
@@ -80,6 +82,7 @@ export default function OutlineEditor({
   layout,
   onLayoutChange,
   onPresent,
+  webPage,
 }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const {
@@ -374,6 +377,7 @@ export default function OutlineEditor({
             layout={layout ?? "outline"}
             onLayoutChange={onLayoutChange}
             onPresent={onPresent}
+            webPage={webPage}
           />
         )}
         {noteId && !readOnly && (

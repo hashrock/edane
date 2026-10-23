@@ -12,6 +12,7 @@
  *    `{ "version": 2, "roots": [node, …] }` — an honest forest. The title is
  *    NOT in the content: it is the note's own `title` column (sent alongside
  *    the content on every save), and {@link parseContent} joins the two.
+ *    An optional `theme` (domain/pageTheme.ts) rides along; absent = default.
  *
  * Reading accepts all three and always yields a `MindMapDocument`; writing
  * ({@link serializeDocument}) always emits v2. That is the whole migration:
@@ -26,6 +27,7 @@
 
 import type { IdSource, MindMapDocument, MindMapModel } from "../domain/model";
 import { ensureRoot, generateId, isStoredNodeType } from "../domain/model";
+import { normalizePageTheme } from "../domain/pageTheme";
 import { t } from "./i18n";
 
 /** Format tag written by {@link serializeDocument}. */
@@ -179,7 +181,8 @@ export function normalizeDocument(
       const normalized = normalizeTree(r, seen, nextId);
       if (normalized) roots.push(normalized);
     }
-    return { title: title ?? "", roots };
+    const theme = normalizePageTheme(v.theme);
+    return { title: title ?? "", roots, ...(theme && { theme }) };
   }
 
   const legacyRoot = normalizeTree(value, seen, nextId);
@@ -240,6 +243,7 @@ export function serializeDocument(doc: MindMapDocument): string {
   return JSON.stringify({
     version: CONTENT_FORMAT_VERSION,
     roots: doc.roots,
+    ...(doc.theme && { theme: doc.theme }),
   });
 }
 

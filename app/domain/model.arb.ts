@@ -18,6 +18,7 @@ import {
   type MindMapDocument,
   type MindMapModel,
 } from "./model";
+import { BACKGROUND_PRESET, MAX_SPEED, PAGE_FONT, SCROLL_EFFECT, type PageTheme } from "./pageTheme";
 
 /** Node text: short, ASCII, may be empty or contain spaces. */
 export const nodeTextArb = fc.string({ maxLength: 12 });
@@ -77,11 +78,33 @@ export const nodeArb: fc.Arbitrary<MindMapModel> = draftArb.map((d) =>
  * A whole document: a title (never a node) with 1–3 roots, ids `n0`… in DFS
  * order.
  */
+/** A well-formed page theme (every field within its domain, as normalizePageTheme leaves it). */
+export const pageThemeArb: fc.Arbitrary<PageTheme> = fc.record({
+  headingFont: fc.constantFrom(...PAGE_FONT.values),
+  bodyFont: fc.constantFrom(...PAGE_FONT.values),
+  textColor: fc.constantFrom("#000000", "#0f172a", "#ffffff"),
+  accentColor: fc.constantFrom("#10b981", "#ff00aa"),
+  background: fc.record({
+    preset: fc.constantFrom(...BACKGROUND_PRESET.values),
+    colorA: fc.constantFrom("#ffffff", "#123456"),
+    colorB: fc.constantFrom("#d1fae5", "#abcdef"),
+    speed: fc.double({ min: 0, max: MAX_SPEED, noNaN: true, noDefaultInfinity: true }).map((x) => (Object.is(x, -0) ? 0 : x)),
+    parallax: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }).map((x) => (Object.is(x, -0) ? 0 : x)),
+  }),
+  scrollEffect: fc.constantFrom(...SCROLL_EFFECT.values),
+  stagger: fc.boolean(),
+  css: fc.string({ maxLength: 20 }),
+});
+
 export const modelArb: fc.Arbitrary<MindMapDocument> = fc
-  .record({
-    title: nodeTextArb,
-    roots: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
-  })
+  .record(
+    {
+      title: nodeTextArb,
+      roots: fc.array(draftArb, { minLength: 1, maxLength: 3 }),
+      theme: pageThemeArb,
+    },
+    { requiredKeys: ["title", "roots"] }
+  )
   .map(({ roots, ...rest }) => {
     const next = sequentialIds("n");
     return { ...rest, roots: roots.map((c) => assignIds(c, next, true)) };

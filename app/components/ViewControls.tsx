@@ -3,7 +3,7 @@ import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 import type { EditorLayout } from "../application/editSurface";
 import { useAnchoredPopover } from "./useAnchoredPopover";
-import { MindmapIcon, OutlineIcon, PlayIcon } from "./icons";
+import { PagesIcon, MindmapIcon, OutlineIcon, PlayIcon } from "./icons";
 import type { MessageKey } from "../application/messages";
 
 /** Zoom section of the pill. Omit it entirely on layouts without zoom. */
@@ -35,6 +35,14 @@ interface Props {
   zoom?: ZoomControls;
   /** Start the slideshow. Absent = no presentation button. */
   onPresent?: () => void;
+  /** Webページモード toggle. Absent = no button. */
+  webPage?: WebPageToggle;
+}
+
+/** Webページモード: whether it is on, and the toggle (NoteEditor owns the state). */
+export interface WebPageToggle {
+  active: boolean;
+  toggle: () => void;
 }
 
 // label はカタログキー（描画時に t() で解決 — 言語切り替えに追従する）。
@@ -56,7 +64,7 @@ const LAYOUTS: {
  * Memoized because the canvas re-renders on every wheel/pan tick — with stable
  * props this skips the whole pill on gestures that don't change the zoom.
  */
-export default memo(function ViewControls({ layout, onLayoutChange, zoom, onPresent }: Props) {
+export default memo(function ViewControls({ layout, onLayoutChange, zoom, onPresent, webPage }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読; memo越しでも自前で購読する）
   const menu = useAnchoredPopover("down");
   const current = LAYOUTS.find((l) => l.value === layout) ?? LAYOUTS[0];
@@ -197,6 +205,21 @@ export default memo(function ViewControls({ layout, onLayoutChange, zoom, onPres
             <span className="hidden md:inline">{t("presentStart")}</span>
           </button>
         </>
+      )}
+      {webPage && (
+        <button
+          type="button"
+          data-testid="view-webpage"
+          title={t("webPageModeHint")}
+          aria-pressed={webPage.active}
+          onClick={webPage.toggle}
+          className={`flex h-6 items-center gap-1 whitespace-nowrap rounded-lg px-1.5 text-xs hover:bg-slate-100 ${
+            webPage.active ? "bg-emerald-50 text-emerald-700" : "text-slate-600"
+          }`}
+        >
+          <PagesIcon width="12" height="12" />
+          <span className="hidden md:inline">{t("webPageMode")}</span>
+        </button>
       )}
     </div>
   );

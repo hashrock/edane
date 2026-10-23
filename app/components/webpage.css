@@ -1,0 +1,287 @@
+/*
+ * The page view (components/PageView.tsx): the document as themed pages.
+ * Shared by the slideshow (data-variant="slide"), the editor's page preview
+ * and the published web page (data-variant="web").
+ *
+ * The `wp-*` class names are a public contract: the theme's author CSS
+ * targets them. Rename one and existing themes silently stop applying.
+ *
+ * Theme values arrive as custom properties on .wp-root (themeVars in
+ * application/pageThemeStyle.ts): --wp-heading-font, --wp-body-font,
+ * --wp-fg, --wp-accent, --wp-bg.
+ */
+
+.wp-body {
+  margin: 0;
+}
+
+.wp-root {
+  position: relative;
+  container-type: inline-size;
+  color: var(--wp-fg, #0f172a);
+  background: var(--wp-bg, #fff);
+  font-family: var(--wp-body-font, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wp-root *,
+.wp-root *::before,
+.wp-root *::after {
+  box-sizing: border-box;
+}
+
+/* The background canvas sits behind the pages, filling the view. */
+.wp-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.wp-root[data-variant="web"] > .wp-bg {
+  position: fixed;
+  height: 100vh;
+  height: 100lvh;
+}
+
+.wp-page {
+  position: relative;
+}
+
+.wp-heading {
+  margin: 0;
+  font-family: var(--wp-heading-font, system-ui, sans-serif);
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.wp-rule {
+  background: var(--wp-accent, #10b981);
+}
+
+.wp-trail {
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wp-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wp-item {
+  display: flex;
+  line-height: 1.4;
+  margin-left: calc(var(--wp-depth, 0) * 1.6em);
+}
+.wp-item[data-depth]:not([data-depth="0"]) {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+.wp-page-section .wp-item {
+  font-weight: 500;
+}
+
+.wp-bullet {
+  flex: none;
+  color: var(--wp-accent, #10b981);
+}
+
+.wp-item-body {
+  min-width: 0;
+}
+
+.wp-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wp-bold {
+  font-weight: 700;
+}
+
+.wp-check {
+  margin-right: 0.3em;
+  opacity: 0.6;
+}
+.wp-check[data-checked] {
+  color: var(--wp-accent, #10b981);
+  opacity: 1;
+}
+
+.wp-link {
+  color: var(--wp-accent, #10b981);
+  text-decoration: underline;
+}
+
+.wp-favicon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.3em;
+  vertical-align: -0.1em;
+}
+
+.wp-image {
+  display: block;
+  max-width: 100%;
+  border-radius: 0.4em;
+  object-fit: contain;
+}
+
+.wp-markdown > :first-child { margin-top: 0; }
+.wp-markdown > :last-child { margin-bottom: 0; }
+.wp-markdown a { color: var(--wp-accent, #10b981); }
+.wp-markdown code {
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.wp-markdown pre {
+  overflow: auto;
+  padding: 0.6em 0.8em;
+  border-radius: 0.4em;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.wp-markdown pre code { padding: 0; background: none; }
+.wp-markdown table { border-collapse: collapse; }
+.wp-markdown th,
+.wp-markdown td {
+  padding: 0.2em 0.6em;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* --- Slide: one 16:9 page; every size in cqw so it scales with the stage. --- */
+
+.wp-root[data-variant="slide"] {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.wp-root[data-variant="slide"] .wp-page {
+  height: 100%;
+}
+.wp-root[data-variant="slide"] .wp-page-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 4.5cqw 6cqw 5cqw;
+}
+.wp-root[data-variant="slide"] .wp-page-title .wp-page-inner {
+  align-items: center;
+  justify-content: center;
+  gap: 2cqw;
+  padding: 0 8cqw;
+  text-align: center;
+}
+.wp-root[data-variant="slide"] .wp-page-title .wp-heading { font-size: 5.5cqw; }
+.wp-root[data-variant="slide"] .wp-page-title .wp-rule { height: 0.4cqw; width: 8cqw; }
+.wp-root[data-variant="slide"] .wp-trail { margin-bottom: 1cqw; font-size: 1.4cqw; }
+.wp-root[data-variant="slide"] .wp-heading { margin-bottom: 2.5cqw; font-size: 4cqw; }
+.wp-root[data-variant="slide"] .wp-items {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9cqw;
+}
+.wp-root[data-variant="slide"] .wp-items[data-size="l"] { font-size: 3cqw; }
+.wp-root[data-variant="slide"] .wp-items[data-size="m"] { font-size: 2.5cqw; }
+.wp-root[data-variant="slide"] .wp-items[data-size="s"] { font-size: 2.1cqw; }
+.wp-root[data-variant="slide"] .wp-item { gap: 1cqw; }
+.wp-root[data-variant="slide"] .wp-image { max-height: 30cqw; }
+
+/* --- Web: pages stacked, each at least a screen tall (--wp-page-h). --- */
+
+.wp-root[data-variant="web"] {
+  min-height: 100vh;
+}
+.wp-root[data-variant="web"] .wp-page {
+  display: flex;
+  align-items: center;
+  min-height: var(--wp-page-h, 100svh);
+  padding: clamp(2.5rem, 7cqw, 6rem) clamp(1.25rem, 6cqw, 6rem);
+}
+.wp-root[data-variant="web"] .wp-page-inner {
+  width: 100%;
+  max-width: 60rem;
+  margin: 0 auto;
+}
+.wp-root[data-variant="web"] .wp-page-title .wp-page-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1rem, 2.5cqw, 2rem);
+  text-align: center;
+}
+.wp-root[data-variant="web"] .wp-page-title .wp-heading { font-size: clamp(2.25rem, 7cqw, 5.5rem); }
+.wp-root[data-variant="web"] .wp-page-title .wp-rule { height: 4px; width: clamp(3rem, 9cqw, 7rem); }
+.wp-root[data-variant="web"] .wp-trail { margin-bottom: 0.75rem; font-size: clamp(0.8rem, 1.4cqw, 1rem); }
+.wp-root[data-variant="web"] .wp-heading { margin-bottom: clamp(1.25rem, 3cqw, 2.5rem); font-size: clamp(1.75rem, 4.5cqw, 3.5rem); }
+.wp-root[data-variant="web"] .wp-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  font-size: clamp(1.05rem, 2.2cqw, 1.6rem);
+}
+.wp-root[data-variant="web"] .wp-item { gap: 0.6em; }
+.wp-root[data-variant="web"] .wp-image { max-height: 70vh; }
+
+/* --- Scroll effects (web page): only once the runtime marks the root
+   data-animate, so the page reads fine without script. --- */
+
+.wp-root[data-animate] .wp-page-inner,
+.wp-root[data-animate][data-stagger] .wp-item {
+  transition:
+    opacity 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.wp-root[data-animate][data-stagger] .wp-item {
+  transition-delay: calc(0.15s + var(--wp-i, 0) * 0.07s);
+}
+.wp-root[data-animate][data-effect="fade-up"] .wp-page:not(.wp-in) .wp-page-inner {
+  opacity: 0;
+  transform: translateY(3rem);
+}
+.wp-root[data-animate][data-effect="slide"] .wp-page:not(.wp-in) .wp-page-inner {
+  opacity: 0;
+  transform: translateX(-4rem);
+}
+.wp-root[data-animate][data-effect="slide"] .wp-page:nth-of-type(even):not(.wp-in) .wp-page-inner {
+  transform: translateX(4rem);
+}
+.wp-root[data-animate][data-effect="zoom"] .wp-page:not(.wp-in) .wp-page-inner {
+  opacity: 0;
+  transform: scale(0.88);
+}
+.wp-root[data-animate][data-stagger]:not([data-effect="none"]) .wp-page:not(.wp-in) .wp-item {
+  opacity: 0;
+  transform: translateY(1rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-root[data-animate] .wp-page-inner,
+  .wp-root[data-animate] .wp-item {
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* --- In the editor: a frame that clips and contains whatever the theme's
+   author CSS paints (fixed positioning included), so it can't cover the app. --- */
+
+.wp-frame {
+  position: relative;
+  overflow: hidden;
+  contain: layout paint style;
+}
+.wp-frame .wp-root[data-variant] > .wp-bg {
+  position: absolute;
+  height: 100%;
+}

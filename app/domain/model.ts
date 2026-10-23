@@ -13,6 +13,7 @@
  * reference when the operation is a no-op, where documented).
  */
 import { closedStringSet } from "./isKeyOf";
+import type { PageTheme } from "./pageTheme";
 
 /**
  * Node kind. `text` is the default; `image`/`link` store their URL in `text`;
@@ -119,6 +120,11 @@ export interface MindMapDocument {
   /** Note title. Edited in the header; not a node. */
   title: string;
   roots: MindMapModel[];
+  /**
+   * How the document looks as pages (slideshow and web page); absent = the
+   * default theme. Document data, so it syncs and undoes with the trees.
+   */
+  theme?: PageTheme;
 }
 
 // --- ID generation ---

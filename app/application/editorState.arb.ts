@@ -3,6 +3,7 @@
  * next to the reducer, since the domain layer can't know EditorState). The
  * companion of domain/model.arb.ts. Not imported by production code.
  */
+import { DEFAULT_PAGE_THEME } from "../domain/pageTheme";
 import { expect } from "vitest";
 import fc from "fast-check";
 import {
@@ -204,6 +205,7 @@ const KINDS = {
   deleteNodes: true,
   insertNodes: true,
   setTitle: true,
+  setTheme: true,
   replace: true,
 } satisfies Record<EditorAction["type"], true>;
 type Kind = keyof typeof KINDS;
@@ -412,6 +414,11 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       return { type: kind, targetId: vis(a), nodes: [cloneWithNewIds(step.branch, mint)], into: flag };
     case "setTitle":
       return { type: kind, text };
+    case "setTheme":
+      return {
+        type: kind,
+        theme: flag ? null : { ...DEFAULT_PAGE_THEME, css: text, stagger: b % 2 === 0, background: { ...DEFAULT_PAGE_THEME.background, speed: c % 3 } },
+      };
     case "replace": {
       // Undo/redo: the document is swapped, the view is whatever it was. Half
       // the time the view points at a node of the SAME document (possibly one
