@@ -57,6 +57,7 @@ import type { RoomRejection } from "./application/syncOperations";
 import { notFoundHtml, wantsJsonNotFound } from "./application/notFoundPage";
 import type { Env } from "./global.d";
 import { securityHeaders } from "./utils/securityHeaders";
+import { assetsHostGate, assetsOrigin, imageUrl, onAssetsHost } from "./utils/assetsHost";
 import { renderWebPage } from "./webpage-view";
 import { WEB_PAGE_CSP, type WebPagePublicationStatus } from "./application/webPagePublication";
 
@@ -64,6 +65,8 @@ const app = new Hono<Env>();
 
 // Baseline headers (CSP frame-ancestors / script-src, nosniff) on every response.
 app.use("*", securityHeaders);
+// The assets host (utils/assetsHost.ts) serves uploaded images and nothing else.
+app.use("*", assetsHostGate());
 // Each route's policy (auth/routePolicy.ts), first: CSRF, browser-only, rate limit, body size.
 app.use("*", routePolicyMiddleware());
 
@@ -262,10 +265,11 @@ app.get("/api/images", async (c) => {
     .where(eq(images.userId, user.id))
     .orderBy(desc(images.createdAt));
   const used = totalImageBytes(rows.map((r) => r.size));
+  const origin = assetsOrigin(c.env);
   return c.json({
     images: rows.map((r) => ({
       id: r.id,
-      url: `/api/images/${r.id}/raw`,
+      url: imageUrl(r.id, origin),
       filename: r.filename,
       contentType: r.contentType,
       size: r.size,
@@ -314,7 +318,7 @@ app.post("/api/images", async (c) => {
   return c.json(
     {
       id,
-      url: `/api/images/${id}/raw`,
+      url: imageUrl(id, assetsOrigin(c.env)),
       filename,
       contentType,
       size: file.size,
@@ -339,8 +343,12 @@ app.delete("/api/images/:id", async (c) => {
 
 // Serve the binary. Public (no auth) so it works inside public notes / <img>;
 // imageResponseHeaders keeps a top-level visit from running script on our origin.
+// With an assets host, the app host only redirects there (notes saved before the
+// move hold this relative URL).
 app.get("/api/images/:id/raw", async (c) => {
   const id = c.req.param("id");
+  const origin = assetsOrigin(c.env);
+  if (origin && !onAssetsHost(c.req.url, origin)) return c.redirect(imageUrl(id, origin), 302);
   const db = drizzle(c.env.DB);
   const meta = await db.select().from(images).where(eq(images.id, id)).get();
   if (!meta) return c.notFound();
