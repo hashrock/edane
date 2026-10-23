@@ -1,6 +1,6 @@
 /**
- * Write-side repository for notes / node publications: the INSERT and
- * UPSERT shapes live here once, used by both the request handlers in
+ * Write-side repository for notes / node publications: the INSERT shapes
+ * live here once, used by both the request handlers in
  * server.ts and the scenario seeder (scenarios/seed.ts). The storage policy
  * for note content (public = plaintext, private = encrypted) is applied here
  * too, so no caller can store a private note in the clear by mistake.

@@ -177,11 +177,11 @@ export function buildTrash({ tag, nextId }: ScenarioContext): ScenarioPlan {
 }
 
 /** カタログ風の枝：2 階層目 = レコード、3 階層目 = フィールド（説明・URL・画像・タグ）。 */
-function catalogBranch(nextId: IdSource, count: number): MindMapModel {
+function catalogBranch(nextId: IdSource): MindMapModel {
   return node(
     nextId,
     "おすすめの道具",
-    Array.from({ length: count }, (_, i) =>
+    Array.from({ length: 3 }, (_, i) =>
       node(nextId, `道具 ${i + 1}`, [
         node(nextId, `${i + 1} 番目の道具の説明。短い一文で特徴を述べる。`),
         node(nextId, `https://example.com/tools/${i + 1}`, [], { type: "link" }),
@@ -194,7 +194,7 @@ function catalogBranch(nextId: IdSource, count: number): MindMapModel {
 
 /** 公開ノート + 枝のノード公開（/pub/:id.json・.md）。 */
 export function buildPublic({ tag, nextId }: ScenarioContext): ScenarioPlan {
-  const branch = catalogBranch(nextId, 3);
+  const branch = catalogBranch(nextId);
   const main = plannedNote(
     "main",
     nextId,

@@ -22,7 +22,7 @@
   - `user-page`（未ログインはランディングへ）
   - `browser` / `browser-user`（`Authorization` 付きは断る）
   - `self`（セッションより前に mount し、自分で認証する `/mcp`・OAuth・stats）
-- **API トークンのスコープ**: API トークンはノート（`notes` スコープ、ADR 0005）の API にだけ届く。トークン管理・OAuth の同意・画像・公開・サイトはブラウザのセッション限定。
+- **API トークンのスコープ**: API トークンはノート（`notes` スコープ、ADR 0005）の API にだけ届く。トークン管理・OAuth の同意・画像・公開はブラウザのセッション限定。
 - **CSRF**: `Authorization` の無い unsafe メソッドと WebSocket の upgrade は、自オリジン（`Origin` か `Sec-Fetch-Site: same-origin`）からだけ受け付ける。SameSite=Lax はサイト単位なので、`*.hashrock.info` の兄弟からの送信を止められないため。
 - **本文サイズとレート制限**: 本文は既定 1 MiB。どちらもルートごとに表で決める（`maxBody`・`rateLimit`）。
 - **2 段のミドルウェア**: 方針の照合・CSRF・本文・レート制限は最初に（`/mcp` や OAuth より前）、未ログインの拒否はセッションの後（`requireRouteUser`）。ハンドラーは `signedInUser` でユーザーを受け取る。

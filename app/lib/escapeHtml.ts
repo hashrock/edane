@@ -1,8 +1,7 @@
 /**
  * HTML-escapes text for embedding inside element content or a double-quoted
- * attribute. The one place this rule lives (the 404 page and
- * `safeMarkdown.ts` both use it): a call site carrying its own copy could
- * easily miss one of the four characters below (a real XSS gap, not just a
+ * attribute. The one place this rule lives: a call site carrying its own
+ * copy could easily miss one of the four characters below (a real XSS gap, not just a
  * style nit).
  */
 const HTML_ENTITIES: Record<string, string> = {

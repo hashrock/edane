@@ -167,7 +167,7 @@ export function valueTypeOf(role: SchemaRole): FieldType | undefined {
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-export function isNumberText(text: string): boolean {
+function isNumberText(text: string): boolean {
   return text.trim() !== "" && Number.isFinite(Number(text.trim()));
 }
 
