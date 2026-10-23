@@ -32,6 +32,8 @@ export type Env = {
     AI_SUGGEST_LIMITER: RateLimit;
     /** GET /api/stats の Bearer トークン（secret）。未設定なら endpoint は 404。 */
     STATS_TOKEN?: string;
+    /** 画像を配信する別オリジン（utils/assetsHost.ts）。未設定・dev ビルドなら本体オリジンから配信。 */
+    ASSETS_ORIGIN?: string;
   };
   Variables: {
     user: SessionUser | null;

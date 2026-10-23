@@ -269,7 +269,7 @@ describe("consent page", () => {
     const res = await t.req(`/oauth/authorize?${new URLSearchParams(authorizeParams(client_id))}`);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/auth/google");
-    expect(res.headers.get("Set-Cookie")).toMatch(/^oauth_return=%2Foauth%2Fauthorize%3F/);
+    expect(res.headers.get("Set-Cookie")).toMatch(/^__Host-oauth_return=%2Foauth%2Fauthorize%3F.*; Path=\/; .*Secure/);
   });
 
   it("never redirects to an unregistered redirect_uri", async () => {

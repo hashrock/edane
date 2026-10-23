@@ -207,15 +207,21 @@ export function oauthServerRoutes(deps: OAuthDeps = defaultDeps) {
   return r;
 }
 
-/** ログイン後に同意画面へ戻るための Cookie（Google ログインの callback が読む）。 */
-const RETURN_COOKIE = "oauth_return";
+/**
+ * ログイン後に同意画面へ戻るための Cookie（Google ログインの callback が読む）。
+ * `__Host-` でサブドメイン（画像配信の assets ホストなど）からの上書きを防ぐ。
+ * ローカル dev は http なので素の名前（utils/session.ts と同じ）。
+ */
+const returnCookieName = (c: Context) =>
+  new URL(c.req.url).hostname === "localhost" ? "oauth_return" : "__Host-oauth_return";
 const AUTHORIZE_PATH = "/oauth/authorize";
 
 /** Google ログインの callback 用: 同意画面から来たならそこへ戻す URL（無ければ null）。1 回で消える。 */
 export function takeOAuthReturn(c: Context): string | null {
-  const path = getCookie(c, RETURN_COOKIE);
+  const name = returnCookieName(c);
+  const path = getCookie(c, name);
   if (!path) return null;
-  deleteCookie(c, RETURN_COOKIE, { path: "/" });
+  deleteCookie(c, name, { path: "/", secure: name !== "oauth_return" });
   return path.startsWith(`${AUTHORIZE_PATH}?`) ? path : null;
 }
 
@@ -257,7 +263,7 @@ export function oauthSessionRoutes(deps: OAuthDeps = defaultDeps) {
     const user = c.get("user");
     if (!user) {
       const url = new URL(c.req.url);
-      setCookie(c, RETURN_COOKIE, url.pathname + url.search, {
+      setCookie(c, returnCookieName(c), url.pathname + url.search, {
         path: "/",
         httpOnly: true,
         secure: url.hostname !== "localhost",

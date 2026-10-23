@@ -5,8 +5,11 @@
   "compatibility_date": "2025-08-03",
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
-    { "pattern": "edane.hashrock.info/*", "zone_name": "hashrock.info" }
+    { "pattern": "edane.hashrock.info/*", "zone_name": "hashrock.info" },
+    // Uploaded images only (app/utils/assetsHost.ts); wrangler creates the DNS record and cert.
+    { "pattern": "edane-assets.hashrock.info", "custom_domain": true }
   ],
+  "vars": { "ASSETS_ORIGIN": "https://edane-assets.hashrock.info" },
   "d1_databases": [
     {
       "binding": "DB",
