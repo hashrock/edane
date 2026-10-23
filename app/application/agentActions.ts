@@ -8,10 +8,10 @@ import { findNode } from "../domain/model";
 
 /** The JSON Schema of one action, as `apply_note` declares it. */
 export const agentActionProperties = {
-  type: { type: "string", enum: ["setTitle", "setNodeContent", "addChild", "deleteNode", "moveBranch", "addRootAt", "placeBranchAt", "setChecked", "setSchema"] },
+  type: { type: "string", enum: ["setTitle", "setNodeContent", "addChild", "deleteNode", "moveBranch", "addRootAt", "placeBranchAt", "setChecked"] },
   nodeId: { type: "string" }, text: { type: "string" },
   newParentId: { type: "string" }, index: { type: "integer", minimum: 0 },
-  x: { type: "number" }, y: { type: "number" }, checked: { type: ["boolean", "null"] }, schema: { type: ["string", "null"] },
+  x: { type: "number" }, y: { type: "number" }, checked: { type: ["boolean", "null"] },
 };
 
 export function prepareActions(state: EditorState, input: unknown): EditorState {
@@ -40,9 +40,6 @@ export function prepareActions(state: EditorState, input: unknown): EditorState 
       case "setChecked":
         node("nodeId"); if (a.checked !== null && typeof a.checked !== "boolean") throw new Error("Invalid checked");
         keys = ["nodeId", "checked"]; break;
-      case "setSchema":
-        node("nodeId"); if (a.schema !== null && typeof a.schema !== "string") throw new Error("Invalid schema");
-        keys = ["nodeId", "schema"]; break;
       default: throw new Error("Unsupported action");
     }
     if (Object.keys(a).some(k => k !== "type" && !keys.includes(k))) throw new Error("Unknown action field");

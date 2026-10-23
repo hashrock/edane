@@ -66,10 +66,8 @@ import {
   moveNodeUp,
   moveNodeDown,
   moveBranch,
-  setNodeSchema,
 } from "../domain/model";
 import type { PageTheme } from "../domain/pageTheme";
-import { conformEntering } from "../domain/branchSchema";
 import { assertNever } from "../lib/assertNever";
 
 export interface DocumentState {
@@ -152,7 +150,6 @@ export type UndoType =
   | "link-meta"
   | "check"
   | "set-type"
-  | "schema"
   | "theme";
 
 export type EditorAction =
@@ -269,8 +266,6 @@ export type EditorAction =
     }
   // Task checkbox; `null` removes it (the node stops being a task).
   | { type: "setChecked"; nodeId: string; checked: boolean | null }
-  // Branch schema text (domain/branchSchema.ts); blank / `null` removes it.
-  | { type: "setSchema"; nodeId: string; schema: string | null }
   // --- multi-select ---
   // Replace the whole multi-selection set (ctrl/cmd-click toggle, shift-click
   // range — computed by the caller; see application/selection.ts). Empty
@@ -673,13 +668,6 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
-    case "setSchema": {
-      const node = findNode(document.model, action.nodeId);
-      if (!node) return { document };
-      const newModel = setNodeSchema(document.model, action.nodeId, action.schema);
-      return { document: { ...document, model: newModel } };
-    }
-
     case "setCheckedMany": {
       if (action.nodeIds.length === 0) return { document };
       const newModel = setCheckedMany(document.model, action.nodeIds, action.checked);
@@ -1004,7 +992,6 @@ function viewReducer(
     case "setLinkMeta":
     case "setChecked":
     case "setCheckedMany":
-    case "setSchema":
     case "copyBranch":
       return view;
 
@@ -1393,72 +1380,6 @@ function findNearestSurvivor(
 }
 
 /**
- * The gestures that put a node into a record / field position on purpose:
- * creating (Enter, Tab-created children, insert/add child), pasting, and
- * moving (Tab / Shift+Tab, drag & drop). Merges (Backspace / Delete joins)
- * are left out — joining a record into its collection promotes its fields into
- * record positions, and padding those with blank fields would only add
- * clutter the user never asked for.
- */
-const CONFORMS_TO_SCHEMA = {
-  moveUp: false,
-  moveDown: false,
-  moveUpSiblingFirst: false,
-  moveDownSiblingFirst: false,
-  moveToParent: false,
-  moveToChild: false,
-  arrowLeftEdge: false,
-  arrowRightEdge: false,
-  cmdLeft: false,
-  cmdRight: false,
-  cmdShiftLeft: false,
-  cmdShiftRight: false,
-  setSelection: false,
-  activateNode: false,
-  setSelectedIds: false,
-  exitEditing: false,
-  toggleCollapse: false,
-  copyBranch: false,
-  startEditing: false,
-  selectAllInNode: false,
-  dragSelect: false,
-  typeText: false,
-  enter: true,
-  tab: true,
-  backspaceAtStart: false,
-  deleteAtEnd: false,
-  moveNodeUp: false,
-  moveNodeDown: false,
-  moveBranch: true,
-  placeBranchAt: false,
-  addRootAt: false,
-  insertSiblingAfter: true,
-  addChild: true,
-  deleteNode: false,
-  cutBranch: false,
-  pasteBranch: true,
-  setNodeType: false,
-  setNodeContent: false,
-  setNodeStyle: false,
-  setLinkMeta: false,
-  setChecked: false,
-  setSchema: false,
-  setCheckedMany: false,
-  setNodeTypeMany: false,
-  setNodeStyleMany: false,
-  setCollapsedMany: false,
-  deleteNodes: false,
-  insertNodes: true,
-  setTitle: false,
-  setTheme: false,
-  replace: false,
-} as const satisfies Record<EditorAction["type"], boolean>;
-
-function conformsToSchema(type: EditorAction["type"]): boolean {
-  return CONFORMS_TO_SCHEMA[type];
-}
-
-/**
  * A fresh session on `model`: `activeNodeId` selected, nothing being edited,
  * empty clipboard and navigation memory. Where the editor starts (see
  * useNoteEditor) and what headless callers (application/noteEdits.ts) drive
@@ -1514,16 +1435,6 @@ export function editorReducer(
     const model = ensureRoot(docResult.document.model, nextId);
     docResult.document = { ...docResult.document, model };
     docResult.focusId = firstRootId(model);
-  }
-  // Records that entered a schema'd collection get their missing fields, and
-  // a new blank field its type — once, here, for every gesture that creates
-  // or moves nodes into place (see conformEntering), so no single path can
-  // forget it. Part of the same state change, hence the same undo entry.
-  if (conformsToSchema(action.type) && docResult.document.model !== state.document.model) {
-    const model = conformEntering(state.document.model, docResult.document.model, nextId);
-    if (model !== docResult.document.model) {
-      docResult.document = { ...docResult.document, model };
-    }
   }
   let nextView = withCaretInBuffer(
     viewReducer(

@@ -176,7 +176,7 @@ edane 自身が OAuth 2.1 の認可サーバーになる（MCP の認可仕様�
 - `app/mcp/tools.ts` — ツール定義。引数の検証 → 読み込み → 変換 → 保存だけを行う。
 - `app/mcp/noteStore.ts` — ノートの読み書き。一覧は `utils/noteRepository.ts` の `listLiveNotes`（/notes と共通）。既存ノートの読み込みと書き込みはエディタと同じノートごとの `NoteRoom`（`app/sync/room.ts`、ADR 0004）を通す。編集は依頼（`NoteEditRequest`、ノード id を振る前の形）ごと `NoteRoom.applyEdit` に渡し、`NoteRoom` がその時点のノートに 1 回の順番（`ordered()`）の中で読み込み → 編集 → commit → 配信まで行う。読んでから書くまでの間に他の commit は入らないので、ツールの応答は確定した状態そのもの。開いているエディタの編集とは差分の単位で併合され、version が進み、開いているエディタへもその場で配信される。`operationId` があれば受領記録のダイジェストは依頼から取り、新しいノードの id もそこから決まる（`op-<operationId>-<n>`）。何も変えない編集は commit しない（version は進まない）。公開 = 平文、非公開 = 暗号化の保存ポリシーは `NoteRoom` が守る。所有者とゴミ箱の確認も `NoteRoom` が内容と同じ 1 行の SELECT で行い（`updatedAt` もその行のもの）、MCP 側で事前に読み直さない。
 - `NoteRoom` の想定内の拒否（ノートなし・復号失敗・競合・大きすぎる など）は例外ではなく `RoomResult` の `{ ok: false, code }` で返る（`app/application/syncOperations.ts` の `RoomRejection`。DO の RPC 越しには例外の型が残らないため）。呼び出し側（WebSocket・旧 PUT・MCP）がそれぞれの相手向けの文言にする。それ以外の例外（D1 の障害など）はエージェントには `Internal error` だけを返し、詳細はサーバーのログにだけ残す。
-- `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、スキーマのレコード補完（`conformEntering`）、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
+- `app/application/noteEdits.ts` — アウトラインの生成（`modelToMarkdown` に id を付けるだけ）と編集。編集はすべて `EditorAction` として `editorReducer` に通すので、ルートが必ず 1 つ以上あること、`nestUnder`、ルートの兄弟は子に読み替える、といった不変条件はブラウザでの編集と共通になる。
 
 ### HTTP の振る舞い
 

@@ -100,16 +100,6 @@ describe("applyNoteEdit", () => {
     expect(r.document.roots[0].children.map((c) => c.text)).toEqual(["A", "B", "x"]);
   });
 
-  it("fills a schema'd collection's new record like the editor does", () => {
-    const d: MindMapDocument = {
-      title: "Books",
-      roots: [{ id: "r", text: "Books", schema: "author, done:check", children: [] }],
-    };
-    const nodes = nodesFromMarkdown("- Dune", sequentialIds("md"));
-    const r = ok(applyNoteEdit(d, { kind: "addNodes", parentId: "r", nodes }, sequentialIds()));
-    expect(r.document.roots[0].children[0].children).toHaveLength(2);
-  });
-
   it("updates text and checkbox, and deletes whole subtrees", () => {
     const u = ok(applyNoteEdit(doc(), { kind: "updateNode", nodeId: "b", text: "B!", checked: true }));
     expect(u.document.roots[0].children[1]).toMatchObject({ text: "B!", checked: true });
