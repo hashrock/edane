@@ -57,6 +57,7 @@ import {
   setNodeType,
   setNodeStyle,
   setChecked,
+  setSlideSplit,
   setCheckedMany,
   setCollapsedMany,
   setNodeStyleMany,
@@ -266,6 +267,8 @@ export type EditorAction =
     }
   // Task checkbox; `null` removes it (the node stops being a task).
   | { type: "setChecked"; nodeId: string; checked: boolean | null }
+  // How a branch is split into slides (see application/slides.ts); `null` = automatic.
+  | { type: "setSlideSplit"; nodeId: string; split: boolean | null }
   // --- multi-select ---
   // Replace the whole multi-selection set (ctrl/cmd-click toggle, shift-click
   // range — computed by the caller; see application/selection.ts). Empty
@@ -668,6 +671,13 @@ function documentReducer(
       return { document: { ...document, model: newModel } };
     }
 
+    case "setSlideSplit": {
+      const node = findNode(document.model, action.nodeId);
+      if (!node) return { document };
+      const newModel = setSlideSplit(document.model, action.nodeId, action.split);
+      return { document: { ...document, model: newModel } };
+    }
+
     case "setCheckedMany": {
       if (action.nodeIds.length === 0) return { document };
       const newModel = setCheckedMany(document.model, action.nodeIds, action.checked);
@@ -991,6 +1001,7 @@ function viewReducer(
     case "setNodeTypeMany":
     case "setLinkMeta":
     case "setChecked":
+    case "setSlideSplit":
     case "setCheckedMany":
     case "copyBranch":
       return view;

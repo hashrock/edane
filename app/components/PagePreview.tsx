@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import type { MindMapDocument } from "../domain/model";
+import { findNode, type MindMapDocument } from "../domain/model";
 import { effectiveTheme } from "../domain/pageTheme";
-import { buildSlides, slideIndexOf } from "../application/slides";
+import { branchSlideCount, buildSlides, slideIndexOf } from "../application/slides";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 import { PlayIcon } from "./icons";
@@ -12,6 +12,12 @@ import { PageBackground, PageRoot, PageSection, PageThemeAssets, type PageVarian
 const VIRTUAL_WIDTH = 1280;
 const VIRTUAL_HEIGHT = 720;
 const SCALE = 0.25;
+
+const SPLITS: { value: boolean | null; label: "pageSplitAuto" | "pageSplitEach" | "pageSplitList"; hint: "pageSplitAutoHint" | "pageSplitEachHint" | "pageSplitListHint"; id: string }[] = [
+  { value: null, label: "pageSplitAuto", hint: "pageSplitAutoHint", id: "auto" },
+  { value: true, label: "pageSplitEach", hint: "pageSplitEachHint", id: "each" },
+  { value: false, label: "pageSplitList", hint: "pageSplitListHint", id: "list" },
+];
 
 const FORMATS: { value: PageVariant; label: "pageFormatSlide" | "pageFormatWeb" }[] = [
   { value: "slide", label: "pageFormatSlide" },
@@ -30,6 +36,8 @@ interface Props {
   /** Publishing as a web page (the web page's action). Absent = can't publish here (a guest or read-only note). */
   publish?: { noteId: string; isPublic: boolean };
   onOpenTheme?: () => void;
+  /** Mark the selected node to give each child its own slides. Absent = read-only. */
+  onSlideSplit?: (nodeId: string, split: boolean | null) => void;
   onExit: () => void;
 }
 
@@ -42,7 +50,7 @@ interface Props {
  * web page (`/w/:id`).
  * Follows the selection and every edit live. It never takes the keyboard.
  */
-export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onExit }: Props) {
+export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onSlideSplit, onExit }: Props) {
   useLocale();
   const [open, setOpen] = useState(true);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -50,6 +58,9 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
   const index = slideIndexOf(slides, doc, activeNodeId);
   const slide = slides[index];
   const theme = effectiveTheme(doc.theme);
+  // How the selected branch is paged, and the switch to page it one child per slide.
+  const active = activeNodeId ? findNode(doc, activeNodeId) : null;
+  const branch = active && active.children.length > 0 ? branchSlideCount(slides, doc, active.id) : 0;
   const button = "rounded-md px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100";
   const primary =
     "flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50";
@@ -162,6 +173,33 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
           )
         )}
       </div>
+      {active && branch > 0 && (
+        <div className="flex items-center gap-1 px-0.5 pt-1">
+          <span data-testid="page-branch-count" className="mr-auto truncate text-[11px] tabular-nums text-slate-500">
+            {t("pageBranchCount", { n: String(branch) })}
+          </span>
+          {onSlideSplit && (
+            <div role="radiogroup" aria-label={t("pageSlideSplit")} data-testid="page-slide-split" className="flex rounded-md bg-slate-100 p-0.5">
+              {SPLITS.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={(active.slideSplit ?? null) === o.value}
+                  data-testid={`page-split-${o.id}`}
+                  title={t(o.hint)}
+                  onClick={() => onSlideSplit(active.id, o.value)}
+                  className={`rounded px-1.5 py-0.5 text-[11px] ${
+                    (active.slideSplit ?? null) === o.value ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {t(o.label)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {format === "web" && publish && publishOpen && <PagePublish noteId={publish.noteId} isPublic={publish.isPublic} />}
     </div>
   );

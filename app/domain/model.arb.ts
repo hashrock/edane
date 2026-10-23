@@ -50,6 +50,7 @@ const draftArb: fc.Arbitrary<Draft> = fc.letrec<{ draft: Draft }>((tie) => ({
       linkTitle: fc.string({ maxLength: 8 }),
       favicon: fc.string({ maxLength: 8 }),
       checked: fc.boolean(),
+      slideSplit: fc.boolean(),
       position: positionArb,
     },
     { requiredKeys: ["text", "children"] }

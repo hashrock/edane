@@ -195,7 +195,7 @@ export function parseCommit(value: unknown): Commit {
       const normalized = normalizeDocument({ roots: [{ ...n.fields, id, children: [] }] }, "");
       const fields = normalized?.roots[0];
       if (!fields) throw new InvalidCommit("Invalid fields");
-      const allowed = new Set(["text", "collapsed", "type", "fontSize", "bold", "linkTitle", "favicon", "checked", "position"]);
+      const allowed = new Set(["text", "collapsed", "type", "fontSize", "bold", "linkTitle", "favicon", "checked", "slideSplit", "position"]);
       for (const [key, val] of Object.entries(n.fields)) {
         if (!allowed.has(key)) throw new InvalidCommit(`Unknown field: ${key}`);
         // false booleans are valid reducer output.

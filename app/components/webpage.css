@@ -60,6 +60,11 @@
   background: var(--wp-accent, #10b981);
 }
 
+.wp-part {
+  font-weight: 400;
+  opacity: 0.5;
+}
+
 .wp-trail {
   opacity: 0.55;
   white-space: nowrap;

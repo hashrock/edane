@@ -38,9 +38,9 @@ const previewText = () => q('[data-testid="page-preview-page"]')?.textContent ??
 const row = (text: string) =>
   Array.from(document.querySelectorAll<HTMLElement>(".cursor-text")).find((el) => el.textContent === text)!;
 
-async function openPageMode() {
+async function openPageMode(roots: MindMapModel[] = ROOTS) {
   await page.viewport(600, 800);
-  render(<NoteEditor initialContent={JSON.stringify({ version: 2, roots: ROOTS })} initialTitle="Deck" />);
+  render(<NoteEditor initialContent={JSON.stringify({ version: 2, roots })} initialTitle="Deck" />);
   await waitFor(() => q('[data-testid="outline-view"]') !== null);
   q<HTMLButtonElement>('[data-testid="view-pages"]')!.click();
   await waitFor(() => q('[data-testid="page-preview"]') !== null);
@@ -77,6 +77,27 @@ describe("Pages mode (browser e2e)", () => {
     // The toggle hides it again.
     q<HTMLButtonElement>('[data-testid="view-pages"]')!.click();
     await waitFor(() => q('[data-testid="page-preview"]') === null);
+  });
+
+  it("shows how many pages the selected branch takes and can give each child its own", async () => {
+    const leaf = (id: string) => ({ id, text: id, children: [] });
+    await openPageMode([
+      { id: "talk", text: "Talk", children: [{ id: "why", text: "Why", children: [leaf("fast"), leaf("simple")] }, leaf("How")] },
+    ]);
+    await userEvent.click(row("Why"));
+    await waitFor(() => counter() === "Page 2 / 3");
+    const count = () => q('[data-testid="page-branch-count"]')?.textContent;
+    expect(count()).toBe("Pages in this branch: 1");
+    q<HTMLButtonElement>('[data-testid="page-split-each"]')!.click();
+    await waitFor(() => counter() === "Page 2 / 5");
+    expect(count()).toBe("Pages in this branch: 3");
+    expect(q('[data-testid="page-split-each"]')!.getAttribute("aria-checked")).toBe("true");
+    q<HTMLButtonElement>('[data-testid="page-split-auto"]')!.click();
+    await waitFor(() => counter() === "Page 2 / 3");
+    // A leaf has no children to split.
+    await userEvent.click(row("How"));
+    await waitFor(() => counter() === "Page 3 / 3");
+    expect(q('[data-testid="page-slide-split"]')).toBeNull();
   });
 
   it("applies theme edits to the preview", async () => {
