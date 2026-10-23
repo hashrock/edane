@@ -10,6 +10,7 @@ const doc: MindMapDocument = {
     headingFont: "zen-maru-gothic",
     background: { ...DEFAULT_PAGE_THEME.background, preset: "waves" },
     headingStyle: "bar",
+    titleStyle: "fill",
   },
   roots: [
     {
@@ -34,9 +35,10 @@ describe("renderWebPage", () => {
     expect(html).toContain('<canvas class="wp-bg"');
   });
 
-  it("loads the theme's fonts and picks its heading style", () => {
+  it("loads the theme's fonts and picks its title and heading styles", () => {
     expect(html).toContain("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic");
     expect(html).toContain('data-heading="bar"');
+    expect(html).toContain('data-title="fill"');
   });
 
   it("draws no author CSS, even from a theme stored with one", () => {

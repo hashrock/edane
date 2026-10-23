@@ -99,6 +99,13 @@ describe("Pages mode (browser e2e)", () => {
     await waitFor(() => counter() === "Page 3 / 3");
     expect(parseFloat(getComputedStyle(root().querySelector(".wp-heading")!).borderLeftWidth)).toBeGreaterThan(0);
 
+    // So is the title page's: filled with the accent.
+    await userEvent.click(page.getByTestId("theme-title-fill"));
+    await waitFor(() => root().getAttribute("data-title") === "fill");
+    await userEvent.click(row("Talk"));
+    await waitFor(() => counter() === "Page 1 / 3");
+    expect(getComputedStyle(root().querySelector(".wp-page-title")!).backgroundColor).toBe("rgb(16, 185, 129)");
+
     // Escape closes the panel; the theme stays.
     page.getByTestId("theme-heading-bar").element().focus();
     await userEvent.keyboard("{Escape}");

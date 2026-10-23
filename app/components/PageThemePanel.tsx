@@ -4,12 +4,14 @@ import {
   DEFAULT_PAGE_THEME,
   HEADING_STYLE,
   MAX_SPEED,
+  TITLE_STYLE,
   PAGE_FONT,
   SCROLL_EFFECT,
   effectiveTheme,
   rebaseTheme,
   type BackgroundPreset,
   type HeadingStyle,
+  type TitleStyle,
   type PageFont,
   type PageTheme,
   type ScrollEffect,
@@ -57,6 +59,42 @@ function headingSample(style: HeadingStyle, accent: string): React.CSSProperties
   }
 }
 
+const TITLE_LABEL: Record<TitleStyle, MessageKey> = {
+  center: "themeTitleCenter",
+  left: "themeTitleLeft",
+  large: "themeTitleLarge",
+  frame: "themeTitleFrame",
+  fill: "themeTitleFill",
+};
+
+/** A title page in miniature, for its swatch (mirrors webpage.css's data-title rules). */
+function TitleSample({ style, theme }: { style: TitleStyle; theme: PageTheme }) {
+  const fill = style === "fill";
+  const fg = fill ? theme.background.colorA : theme.textColor;
+  const rule = style === "center" || style === "left" || fill;
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex aspect-video w-full flex-col gap-0.5 overflow-hidden rounded-sm p-1 ring-1 ring-slate-200 ${
+        style === "left" ? "items-start justify-end" : "items-center justify-center"
+      }`}
+      style={{ background: fill ? theme.accentColor : theme.background.colorA }}
+    >
+      <span
+        className="font-bold leading-none"
+        style={{
+          color: fg,
+          fontSize: style === "large" ? 15 : 10,
+          ...(style === "frame" ? { border: `1px solid ${theme.accentColor}`, padding: "1px 3px" } : {}),
+        }}
+      >
+        Aa
+      </span>
+      {rule && <span className="h-px w-2.5" style={{ background: fill ? fg : theme.accentColor }} />}
+    </span>
+  );
+}
+
 const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
   none: "themeEffectNone",
   "fade-up": "themeEffectFadeUp",
@@ -78,8 +116,8 @@ interface Props {
 }
 
 /**
- * ページモードの右サイドパネル: the note's page theme (fonts, heading style,
- * colours, the WebGL background, scroll effect) — one theme for both formats,
+ * ページモードの右サイドパネル: the note's page theme (fonts, title and
+ * heading styles, colours, the WebGL background, scroll effect) — one theme for both formats,
  * the slides and the web page. A plain form beside the editor — it takes the
  * keyboard only when one of its own fields is clicked, and Escape closes it. It slides in from
  * the right edge and back out; closed, it is `invisible` (out of the tab
@@ -180,6 +218,28 @@ export default function PageThemePanel({ open, theme, onChange, onClose, readOnl
               {PAGE_FONT.values.map((f) => <option key={f} value={f}>{fontLabel(f)}</option>)}
             </select>
           </label>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeTitleStyle")}</h3>
+          <div role="radiogroup" aria-label={t("themeTitleStyle")} className="grid grid-cols-5 gap-1.5">
+            {TITLE_STYLE.values.map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={draft.titleStyle === v}
+                data-testid={`theme-title-${v}`}
+                onClick={() => set("titleStyle", v)}
+                className={`flex flex-col items-center gap-1 rounded-md border p-1 text-[10px] text-slate-500 disabled:opacity-60 ${
+                  draft.titleStyle === v ? "border-emerald-500 bg-emerald-50/60 text-emerald-700" : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <TitleSample style={v} theme={draft} />
+                {t(TITLE_LABEL[v])}
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className="space-y-2">

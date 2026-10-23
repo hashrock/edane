@@ -35,7 +35,7 @@
 
 ### ページモード（スライド / Webページ）とテーマ
 
-`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドと Web ページは同じページ（`buildSlides`）の2形式で、エディタではヘッダーの「プレゼン」トグル1つにまとめている（右上の `PagePreview` が形式を切り替え、形式ごとの操作 — スライドは ▶ 開始、Webページは公開 — とテーマパネルを持つ）。スライドショー・プレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。テーマは閉じた選択肢と範囲付きの値だけで作る（見出しスタイルなど。ユーザー CSS は廃止した — 自由記述の見た目を足さないこと）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
+`MindMapDocument.theme`（`app/domain/pageTheme.ts`）は v2 の content JSON に任意で入る、ノートのページテーマ。スライドと Web ページは同じページ（`buildSlides`）の2形式で、エディタではヘッダーの「プレゼン」トグル1つにまとめている（右上の `PagePreview` が形式を切り替え、形式ごとの操作 — スライドは ▶ 開始、Webページは公開 — とテーマパネルを持つ）。スライドショー・プレビュー・公開ページ（`/w/:id`）が同じ `PageView.tsx` と `webpage.css` で描く。テーマは閉じた選択肢と範囲付きの値だけで作る（タイトル・見出しのスタイルなど。ユーザー CSS は廃止した — 自由記述の見た目を足さないこと）。サーバーで描く Markdown は `renderSafeMarkdown`（DOMPurify は DOM が要るため使えない）。詳細は `docs/adr/0007-web-page-mode.md`。
 
 ### アップロード画像と SVG
 

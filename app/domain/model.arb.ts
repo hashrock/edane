@@ -18,7 +18,7 @@ import {
   type MindMapDocument,
   type MindMapModel,
 } from "./model";
-import { BACKGROUND_PRESET, HEADING_STYLE, MAX_SPEED, PAGE_FONT, SCROLL_EFFECT, type PageTheme } from "./pageTheme";
+import { BACKGROUND_PRESET, HEADING_STYLE, MAX_SPEED, PAGE_FONT, SCROLL_EFFECT, TITLE_STYLE, type PageTheme } from "./pageTheme";
 
 /** Node text: short, ASCII, may be empty or contain spaces. */
 export const nodeTextArb = fc.string({ maxLength: 12 });
@@ -94,6 +94,7 @@ export const pageThemeArb: fc.Arbitrary<PageTheme> = fc.record({
   scrollEffect: fc.constantFrom(...SCROLL_EFFECT.values),
   stagger: fc.boolean(),
   headingStyle: fc.constantFrom(...HEADING_STYLE.values),
+  titleStyle: fc.constantFrom(...TITLE_STYLE.values),
 });
 
 export const modelArb: fc.Arbitrary<MindMapDocument> = fc

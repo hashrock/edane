@@ -6,7 +6,8 @@
  * Theme values arrive as custom properties on .wp-root (themeVars in
  * application/pageThemeStyle.ts): --wp-heading-font, --wp-body-font,
  * --wp-fg, --wp-accent, --wp-bg. Its closed choices arrive as data
- * attributes on .wp-root: data-variant, data-heading, data-effect, data-stagger.
+ * attributes on .wp-root: data-variant, data-title, data-heading, data-effect,
+ * data-stagger.
  */
 
 .wp-body {
@@ -291,6 +292,39 @@
     transform: none !important;
   }
 }
+
+/* --- Title page styles (data-title). After both variants, so they override
+   the title page's layout there. `center` adds nothing: centred with a short
+   rule, the look title pages always had. --- */
+
+.wp-root[data-title="left"] .wp-page-title .wp-page-inner {
+  align-items: flex-start;
+  text-align: left;
+}
+.wp-root[data-variant="slide"][data-title="left"] .wp-page-title .wp-page-inner {
+  justify-content: flex-end;
+  padding-bottom: 9cqw;
+}
+
+.wp-root[data-title="large"] .wp-page-title .wp-rule { display: none; }
+.wp-root[data-variant="slide"][data-title="large"] .wp-page-title .wp-heading { font-size: 9cqw; }
+.wp-root[data-variant="web"][data-title="large"] .wp-page-title .wp-heading { font-size: clamp(3rem, 11cqw, 8.5rem); }
+
+.wp-root[data-title="frame"] .wp-page-title .wp-rule { display: none; }
+.wp-root[data-title="frame"] .wp-page-title .wp-heading {
+  margin-bottom: 0;
+  padding: 0.35em 0.8em;
+  border: 0.05em solid var(--wp-accent, #10b981);
+}
+
+/* Filled with the accent, the title in the page's background colour (also
+   over the accent-coloured heading style). */
+.wp-root[data-title="fill"] .wp-page-title {
+  color: var(--wp-bg, #fff);
+  background: var(--wp-accent, #10b981);
+}
+.wp-root[data-title="fill"] .wp-page-title .wp-heading { color: inherit; }
+.wp-root[data-title="fill"] .wp-page-title .wp-rule { background: currentColor; }
 
 /* --- In the editor: a frame that clips and contains the page (the web
    variant's fixed background included), so it can't cover the app. --- */

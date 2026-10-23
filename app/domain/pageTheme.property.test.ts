@@ -5,6 +5,7 @@ import {
   DEFAULT_PAGE_THEME,
   MAX_SPEED,
   HEADING_STYLE,
+  TITLE_STYLE,
   PAGE_FONT,
   SCROLL_EFFECT,
   normalizePageTheme,
@@ -30,6 +31,7 @@ function expectWellFormed(theme: PageTheme) {
   expect(SCROLL_EFFECT.is(theme.scrollEffect)).toBe(true);
   expect(typeof theme.stagger).toBe("boolean");
   expect(HEADING_STYLE.is(theme.headingStyle)).toBe(true);
+  expect(TITLE_STYLE.is(theme.titleStyle)).toBe(true);
 }
 
 /** A theme-shaped object whose fields may be anything. */
@@ -55,6 +57,7 @@ const looseThemeArb = fc.record(
     scrollEffect: fc.anything(),
     stagger: fc.anything(),
     headingStyle: fc.oneof(fc.constantFrom(...HEADING_STYLE.values, "toString"), fc.anything()),
+    titleStyle: fc.oneof(fc.constantFrom(...TITLE_STYLE.values, "__proto__"), fc.anything()),
   },
   { requiredKeys: [] }
 );

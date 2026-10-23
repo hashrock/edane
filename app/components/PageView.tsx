@@ -51,7 +51,7 @@ interface RootProps {
   testId?: string;
 }
 
-/** The themed page container: custom properties, variant, heading style, scroll-effect settings. */
+/** The themed page container: custom properties, variant, title and heading styles, scroll-effect settings. */
 export function PageRoot({ theme, variant, children, className, style, rootRef, onClick, testId }: RootProps) {
   return (
     <div
@@ -60,6 +60,7 @@ export function PageRoot({ theme, variant, children, className, style, rootRef, 
       className={`wp-root${className ? ` ${className}` : ""}`}
       data-variant={variant}
       data-heading={theme.headingStyle}
+      data-title={theme.titleStyle}
       data-effect={theme.scrollEffect}
       data-stagger={theme.stagger ? "" : undefined}
       style={{ ...(themeVars(theme) as CSSProperties), ...style }}

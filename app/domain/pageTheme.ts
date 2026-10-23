@@ -63,6 +63,19 @@ export const HEADING_STYLE = closedStringSet({
 } as const);
 export type HeadingStyle = (typeof HEADING_STYLE.values)[number];
 
+/**
+ * How a tree's title page is laid out. `center` is the look title pages always
+ * had (centred, a short rule beneath), so it is the default.
+ */
+export const TITLE_STYLE = closedStringSet({
+  center: true,
+  left: true,
+  large: true,
+  frame: true,
+  fill: true,
+} as const);
+export type TitleStyle = (typeof TITLE_STYLE.values)[number];
+
 /** The animated background behind the pages. */
 export interface PageBackground {
   preset: BackgroundPreset;
@@ -89,6 +102,7 @@ export interface PageTheme {
   /** Items of a page appear one after another. */
   stagger: boolean;
   headingStyle: HeadingStyle;
+  titleStyle: TitleStyle;
 }
 
 export const MAX_SPEED = 3;
@@ -102,6 +116,7 @@ export const DEFAULT_PAGE_THEME: PageTheme = {
   scrollEffect: "fade-up",
   stagger: true,
   headingStyle: "simple",
+  titleStyle: "center",
 };
 
 const HEX = /^#[0-9a-f]{6}$/;
@@ -141,6 +156,7 @@ export function normalizePageTheme(value: unknown): PageTheme | null {
     scrollEffect: SCROLL_EFFECT.is(v.scrollEffect) ? v.scrollEffect : d.scrollEffect,
     stagger: typeof v.stagger === "boolean" ? v.stagger : d.stagger,
     headingStyle: HEADING_STYLE.is(v.headingStyle) ? v.headingStyle : d.headingStyle,
+    titleStyle: TITLE_STYLE.is(v.titleStyle) ? v.titleStyle : d.titleStyle,
   };
 }
 
