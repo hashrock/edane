@@ -419,6 +419,29 @@ export const MESSAGES_JA = {
   sampleRealtime: "リアルタイムプレビュー",
   sampleJson: "JSONベース",
   sampleSimple: "シンプル",
+
+  // --- バックアップ履歴（/notes/:id/history、application/noteBackups.ts） ---
+  menuHistory: "バックアップ履歴",
+  cmdHistory: "バックアップ履歴を開く",
+  historyHeading: "バックアップ履歴",
+  historyNote:
+    "編集すると、1時間に1回まで、変更前の内容を自動でバックアップします（ノートごとに最新{max}件）。復元しても、復元前の内容がバックアップに残ります。",
+  historyEmpty: "まだバックアップはありません。ノートを編集すると自動で作られます。",
+  historyBackToNote: "ノートに戻る",
+  historyVersion: "版 {version}",
+  historySelectHint: "一覧からバックアップを選ぶと、ここに内容を表示します。",
+  historyPreviewFailed: "バックアップを読み込めませんでした",
+  historyRestore: "この版に復元",
+  historyRestoreConfirmTitle: "この版に復元しますか？",
+  historyRestoreConfirmMessage:
+    "ノートの内容を {date} の版に置き換えます。今の内容はバックアップに残るので、あとで戻せます。",
+  historyRestoreFailed: "復元できませんでした",
+
+  // --- データのエクスポート（設定画面、application/dataExport.ts） ---
+  exportHeading: "データのエクスポート",
+  exportDescription:
+    "すべてのノート（ゴミ箱を含む）を ZIP でダウンロードします。中身は、ノートごとの Markdown と、すべてのデータを含む notes.json です。アップロード画像は含まれません（本文中の画像の URL はそのまま残ります）。",
+  exportButton: "ZIPをダウンロード",
 } as const;
 
 /** カタログのキー。日本語カタログが正。 */
@@ -835,4 +858,27 @@ export const MESSAGES_EN = {
   sampleRealtime: "Real-time preview",
   sampleJson: "JSON-based",
   sampleSimple: "Simple",
+
+  // --- Backup history (/notes/:id/history, application/noteBackups.ts) ---
+  menuHistory: "Backup history",
+  cmdHistory: "Open backup history",
+  historyHeading: "Backup history",
+  historyNote:
+    "While you edit, the content from before your changes is backed up automatically, at most once an hour (the latest {max} per note). Restoring keeps what you had before in the history too.",
+  historyEmpty: "No backups yet. They are made automatically as you edit the note.",
+  historyBackToNote: "Back to the note",
+  historyVersion: "Version {version}",
+  historySelectHint: "Pick a backup from the list to see its content here.",
+  historyPreviewFailed: "Couldn't load the backup",
+  historyRestore: "Restore this version",
+  historyRestoreConfirmTitle: "Restore this version?",
+  historyRestoreConfirmMessage:
+    "The note's content will be replaced with the version from {date}. What you have now stays in the history, so you can go back.",
+  historyRestoreFailed: "Couldn't restore",
+
+  // --- Data export (settings, application/dataExport.ts) ---
+  exportHeading: "Export data",
+  exportDescription:
+    "Download all your notes (trash included) as a ZIP: each note as Markdown, plus notes.json with all the data. Uploaded images aren't included (their URLs stay in the notes).",
+  exportButton: "Download ZIP",
 } as const satisfies Record<MessageKey, string>;

@@ -1249,11 +1249,14 @@ export function MindmapEditorView({
             },
           ]),
       { id: "chatgpt", label: t("cmdSendToChatGPT"), action: sendToChatGPT },
+      ...(noteId && !readOnly
+        ? [{ id: "history", label: t("cmdHistory"), action: () => window.location.assign(`/notes/${noteId}/history`) }]
+        : []),
       { id: "shortcuts", label: t("cmdShortcuts"), action: () => setHelpOpen(true) },
       { id: "settings", label: t("cmdEditorSettings"), action: () => setSettingsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pasteTextAsNodes, readOnly, locale, onPresent]);
+  }, [pasteTextAsNodes, readOnly, locale, onPresent, noteId]);
 
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {

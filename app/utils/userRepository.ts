@@ -4,6 +4,7 @@ import {
   apiTokens,
   images,
   nodePublications,
+  noteBackups,
   notes,
   oauthCodes,
   oauthGrants,
@@ -44,7 +45,8 @@ export async function insertUser(
 
 /**
  * Delete a user and everything they own, in one D1 batch (all or nothing):
- * notes (their note_commits cascade), publications / web pages (their URLs die
+ * notes (their note_commits and note_backups cascade; backups are deleted
+ * by user too, so the rule reads the same as every other table), publications / web pages (their URLs die
  * with the rows), image metadata, and every credential — sessions, API tokens,
  * OAuth codes and grants — so nothing signed in as them keeps working.
  * OAuth clients are shared registrations and stay. A table with a user_id
@@ -54,9 +56,10 @@ export async function insertUser(
  * the caller deletes them after the rows are gone.
  */
 export async function deleteUserAccount(db: DrizzleD1Database, userId: string): Promise<string[]> {
-  const [, , , deletedImages] = await db.batch([
+  const [, , , , deletedImages] = await db.batch([
     db.delete(nodePublications).where(eq(nodePublications.userId, userId)),
     db.delete(webPages).where(eq(webPages.userId, userId)),
+    db.delete(noteBackups).where(eq(noteBackups.userId, userId)),
     db.delete(notes).where(eq(notes.userId, userId)),
     db.delete(images).where(eq(images.userId, userId)).returning({ r2Key: images.r2Key }),
     db.delete(sessions).where(eq(sessions.userId, userId)),

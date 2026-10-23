@@ -32,6 +32,7 @@ async function setup() {
     await insertPublication(db, { id: `${id}-pub`, userId: id, noteId: note, nodeId: "n", createdAt: NOW });
     await run("INSERT INTO web_pages (id, user_id, note_id, created_at) VALUES (?, ?, ?, ?)", `${id}-web`, id, note, NOW);
     await run("INSERT INTO note_commits (note_id, operation_id, digest, version) VALUES (?, 'op', 'd', 1)", note);
+    await run("INSERT INTO note_backups (id, note_id, user_id, title, content, version, created_at) VALUES (?, ?, ?, 'T', 'x', 0, ?)", `${id}-backup`, note, id, NOW);
     await run("INSERT INTO images (id, user_id, r2_key, filename, content_type, size, created_at) VALUES (?, ?, ?, 'f.png', 'image/png', 1, ?)", `${id}-img`, id, `${id}/img`, NOW);
     await run("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", `${id}-sess`, id, NOW, FAR);
     await run("INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, expires_at) VALUES (?, ?, 'default', ?, ?, ?)", `${id}-tok`, id, `${id}-hash`, NOW, FAR);

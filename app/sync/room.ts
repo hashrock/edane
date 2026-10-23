@@ -3,7 +3,7 @@ import type { Env } from "../global.d";
 import type { Credential } from "../user";
 import { parseContent, serializeDocument } from "../application/persistence";
 import { credentialLiveClause } from "../utils/credential";
-import { decodeStoredNoteContent, encodeNoteContentForStorage, noteKeys, noteStorageMode } from "../utils/crypto";
+import { BACKUP_STORAGE_MODE, decodeStoredNoteContent, encodeNoteContentForStorage, noteKeys, noteStorageMode } from "../utils/crypto";
 import {
   applyPatch,
   buildCommit,
@@ -11,6 +11,7 @@ import {
   InvalidCommit,
   parseCommit,
   type Commit,
+  type Change,
   type CommitReceipt,
   type EditReceipt,
   type RoomRejection,
@@ -19,6 +20,7 @@ import {
 } from "../application/syncOperations";
 import { applyNoteEditRequest, requestedNodeIds, type NoteEditRequest } from "../application/noteEdits";
 import { generateId, type IdSource } from "../domain/model";
+import { isBackupDue, MAX_BACKUPS_PER_NOTE, type BackupCause } from "../application/noteBackups";
 import { CLOSE_RATE_LIMITED, acceptsSocket, fullBucket, readableMessage, receiptPruneBelow, takeToken, type Bucket } from "./limits";
 
 /**
@@ -154,7 +156,8 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return { ok: true, value: { ...snapshot, ack: operationId, committedVersion: receipt.version } };
   }
   /** Merge, encrypt and store the commit with its receipt, then tell every open editor. */
-  private async persist({ row, snapshot }: Loaded, commit: Commit, digest: string): Promise<RoomResult<CommitReceipt>> {
+  private async persist(loaded: Loaded, commit: Commit, digest: string, cause: BackupCause = "edit"): Promise<RoomResult<CommitReceipt>> {
+    const { row, snapshot } = loaded;
     let model;
     try {
       model = applyPatch(snapshot.model, commit.patch);
@@ -173,18 +176,24 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     // The receipt and content change commit atomically. The predicate also
     // handles trash/delete racing an already authenticated open socket.
     const pruneBelow = receiptPruneBelow(version);
-    const result = await this.env.DB.batch([
+    const now = Date.now();
+    const backup = await this.backupStatements(loaded, cause, now);
+    // Going private advances public_epoch via the notes_public_epoch trigger (migration 0014).
+    const update = this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
+      .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version);
+    const statements = [
+      ...backup,
       this.env.DB.prepare("INSERT INTO note_commits (note_id, operation_id, digest, version) SELECT id, ?, ?, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(commit.id, digest, version, row.id, row.version),
-      // Going private advances public_epoch via the notes_public_epoch trigger (migration 0014).
-      this.env.DB.prepare("UPDATE notes SET title = ?, content = ?, is_public = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND deleted_at IS NULL")
-        .bind(model.title, content, isPublic ? 1 : 0, version, updatedAt, row.id, row.version),
+      update,
       // Receipts only dedupe resends, which come within a few versions (limits.ts).
       ...(pruneBelow === null ? [] : [this.env.DB.prepare("DELETE FROM note_commits WHERE note_id = ? AND version <= ?").bind(row.id, pruneBelow)]),
-    ]);
-    if (result[1].meta.changes !== 1) {
+    ];
+    const result = await this.env.DB.batch(statements);
+    if (result[statements.indexOf(update)].meta.changes !== 1) {
       return reject({ code: "conflict", detail: "The note changed or was deleted during the commit. Read the latest note and retry." });
     }
+    if (backup.length) this.lastBackupAt = now;
     const next: CommitReceipt = { model, version, isPublic, updatedAt, ack: commit.id, committedVersion: version };
     this.broadcast({ type: "state", ...next });
     return { ok: true, value: next };
@@ -197,15 +206,60 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
       const { snapshot } = loaded.value;
       if (body.version !== snapshot.version) return reject({ code: "version-conflict" });
       const model = body.content === undefined ? { ...snapshot.model, title: body.title ?? snapshot.model.title } : parseContent(body.content, body.title ?? snapshot.model.title);
-      const id = crypto.randomUUID();
-      const commit = buildCommit(id, snapshot.model, model, body.isPublic === undefined ? undefined : { before: snapshot.isPublic, after: body.isPublic });
-      // Nothing to change: answer with the current state, version untouched.
-      if (!commit) return { ok: true, value: { ...snapshot, ack: id, committedVersion: snapshot.version } };
-      // Same wire validation as a socket commit, without reading the row again.
-      const parsed = validated(commit);
-      if (!parsed.ok) return parsed;
-      return this.persist(loaded.value, parsed.value, await sha256(parsed.value));
+      return this.commitDocument(loaded.value, model, body.isPublic === undefined ? undefined : { before: snapshot.isPublic, after: body.isPublic });
     });
+  }
+  /** Commit the note as `model` (the whole document, as a diff against the loaded one). */
+  private async commitDocument(loaded: Loaded, model: RoomSnapshot["model"], publicity?: Change<boolean>, cause?: BackupCause): Promise<RoomResult<CommitReceipt>> {
+    const { snapshot } = loaded;
+    const id = crypto.randomUUID();
+    const commit = buildCommit(id, snapshot.model, model, publicity);
+    // Nothing to change: answer with the current state, version untouched.
+    if (!commit) return { ok: true, value: { ...snapshot, ack: id, committedVersion: snapshot.version } };
+    // Same wire validation as a socket commit, without reading the row again.
+    const parsed = validated(commit);
+    if (!parsed.ok) return parsed;
+    return this.persist(loaded, parsed.value, await sha256(parsed.value), cause);
+  }
+  /**
+   * Bring the note back to one of its backups, as an ordinary commit (open editors
+   * get it like any other edit). The state it replaces is backed up first, whatever
+   * the interval, so a restore can itself be undone from the history.
+   */
+  restore(identity: Identity, backupId: string): Promise<RoomResult<CommitReceipt>> {
+    return this.ordered(async () => {
+      const loaded = await this.load(identity);
+      if (!loaded.ok) return loaded;
+      const { row } = loaded.value;
+      const backup = await this.env.DB.prepare("SELECT id, title, content FROM note_backups WHERE id = ? AND note_id = ?")
+        .bind(backupId, row.id).first<{ id: string; title: string; content: string }>();
+      if (!backup) return reject({ code: "not-found" });
+      const content = await decodeStoredNoteContent(backup.content, BACKUP_STORAGE_MODE, noteKeys(this.env), backup.id);
+      if (content === null) return reject({ code: "decrypt-failed" });
+      return this.commitDocument(loaded.value, parseContent(content, backup.title), undefined, "restore");
+    });
+  }
+  /** The newest backup's time (epoch ms, null = none) of this object's note; undefined until first read. */
+  private lastBackupAt: number | null | undefined;
+  /**
+   * The statements that back up the note as loaded (before the commit), if one is
+   * due (application/noteBackups.ts), plus pruning beyond the cap. They are
+   * conditional on the loaded version, so they land only with the commit.
+   */
+  private async backupStatements({ row, snapshot }: Loaded, cause: BackupCause, now: number): Promise<D1PreparedStatement[]> {
+    if (this.lastBackupAt === undefined) {
+      const newest = await this.env.DB.prepare("SELECT MAX(created_at) AS at FROM note_backups WHERE note_id = ?").bind(row.id).first<string | null>("at");
+      this.lastBackupAt = newest ? Date.parse(newest) : null;
+    }
+    if (!isBackupDue(this.lastBackupAt, now, cause)) return [];
+    const id = crypto.randomUUID();
+    const content = await encodeNoteContentForStorage(serializeDocument(snapshot.model), BACKUP_STORAGE_MODE, noteKeys(this.env), id);
+    return [
+      this.env.DB.prepare("INSERT INTO note_backups (id, note_id, user_id, title, content, version, created_at) SELECT ?, id, user_id, ?, ?, version, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
+        .bind(id, snapshot.model.title, content, new Date(now).toISOString(), row.id, row.version),
+      this.env.DB.prepare("DELETE FROM note_backups WHERE note_id = ? AND id NOT IN (SELECT id FROM note_backups WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT ?)")
+        .bind(row.id, row.id, MAX_BACKUPS_PER_NOTE),
+    ];
   }
   async fetch(request: Request) {
     const identity: Identity = JSON.parse(request.headers.get("X-Note-Identity")!);

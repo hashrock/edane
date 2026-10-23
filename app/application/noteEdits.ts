@@ -17,7 +17,7 @@ import type { IdSource, MindMapDocument, MindMapModel } from "../domain/model";
 import { findNode, firstRootId, generateId } from "../domain/model";
 import { assertNever } from "../lib/assertNever";
 import { editorReducer, freshEditorState, type EditorAction } from "./editorReducer";
-import { markdownToModel, modelToMarkdown } from "./markdown";
+import { documentToMarkdown, markdownToModel } from "./markdown";
 
 /** Top-level nodes of a Markdown / indented-list snippet (fresh ids). */
 export function nodesFromMarkdown(md: string, nextId: IdSource = generateId): MindMapModel[] {
@@ -47,7 +47,7 @@ export function documentFromMarkdown(
 export function documentToOutline(doc: MindMapDocument): string {
   const annotate = (n: MindMapModel) =>
     ` {id=${n.id}}${n.collapsed && n.children.length > 0 ? " (collapsed)" : ""}`;
-  return [`# ${doc.title}`, ...doc.roots.map((r) => modelToMarkdown(r, annotate))].join("\n");
+  return documentToMarkdown(doc, annotate);
 }
 
 export type NoteEdit =
