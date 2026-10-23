@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react
 import { MindmapEditorView } from "./MindmapEditor";
 import OutlineEditor from "./OutlineEditor";
 import SlideShow from "./SlideShow";
-import WebPagePreview from "./WebPagePreview";
+import PagePreview from "./PagePreview";
 import { useNoteEditor } from "./useNoteEditor";
 import type { EditorLayout } from "../application/editSurface";
 import type { PageTheme } from "../domain/pageTheme";
+import type { PageVariant } from "./PageView";
 
-const PageThemePanel = lazy(() => import("./PageThemePanel"));
+const loadPageThemePanel = () => import("./PageThemePanel");
+const PageThemePanel = lazy(loadPageThemePanel);
 
 interface Props {
   noteId?: string;
@@ -92,18 +94,28 @@ export default function NoteEditor(props: Props) {
     [dispatch, stateRef]
   );
 
-  // Webページモード: the page preview in the top-right corner, and the theme panel.
-  const [webMode, setWebMode] = useState(false);
+  // ページモード: the page preview in the top-right corner (as slides or as
+  // the web page — the same pages and theme), and the theme panel.
+  const [pageMode, setPageMode] = useState(false);
+  const [pageFormat, setPageFormat] = useState<PageVariant>("slide");
   const [themePanel, setThemePanel] = useState(false);
-  const webPage = useMemo(
+  // Mounted from the first open on, so closing can slide it out.
+  const [themeMounted, setThemeMounted] = useState(false);
+  const openTheme = useCallback(() => {
+    setThemeMounted(true);
+    setThemePanel(true);
+  }, []);
+  const pageModeToggle = useMemo(
     () => ({
-      active: webMode,
+      active: pageMode,
       toggle: () => {
-        setWebMode((on) => !on);
+        // Fetched ahead, so the panel's first slide-in starts with the preview's move.
+        if (!pageMode) void loadPageThemePanel();
+        setPageMode((on) => !on);
         setThemePanel(false);
       },
     }),
-    [webMode]
+    [pageMode]
   );
   const setTheme = useCallback(
     (theme: PageTheme | null) => dispatch({ type: "setTheme", theme }, "theme"),
@@ -125,7 +137,7 @@ export default function NoteEditor(props: Props) {
     layout,
     onLayoutChange: changeLayout,
     onPresent: present,
-    webPage,
+    pageMode: pageModeToggle,
   };
   return (
     <>
@@ -134,26 +146,33 @@ export default function NoteEditor(props: Props) {
         {engine.syncRecovery && <details><summary>適用できなかった編集（復元用）</summary><textarea readOnly aria-label="未適用の編集" value={engine.syncRecovery} className="w-full h-24" /></details>}
       </div>}
       {layout === "outline" ? <OutlineEditor {...viewProps} /> : <MindmapEditorView {...viewProps} />}
-      {webMode && (
+      {pageMode && (
         // Beside the theme panel (w-80) while it is open, so the two show together.
-        <div className={`pointer-events-none fixed top-14 z-40 ${themePanel ? "right-[21rem]" : "right-3"}`}>
-          <WebPagePreview
+        <div
+          className={`pointer-events-none fixed top-14 z-40 transition-[right] duration-200 ease-out motion-reduce:transition-none ${
+            themePanel ? "right-[21rem]" : "right-3"
+          }`}
+        >
+          <PagePreview
             doc={engine.model}
             activeNodeId={engine.state.view.activeNodeId}
-            onOpenTheme={engine.readOnly ? undefined : () => setThemePanel(true)}
-            onExit={() => webPage.toggle()}
+            format={pageFormat}
+            onFormatChange={setPageFormat}
+            onPresent={present}
+            publish={engine.noteId && !engine.readOnly ? { noteId: engine.noteId, isPublic: engine.isPublic } : undefined}
+            onOpenTheme={engine.readOnly ? undefined : openTheme}
+            onExit={pageModeToggle.toggle}
           />
         </div>
       )}
-      {webMode && themePanel && (
+      {themeMounted && (
         <Suspense fallback={null}>
           <PageThemePanel
+            open={pageMode && themePanel}
             theme={engine.model.theme}
             onChange={setTheme}
             onClose={() => setThemePanel(false)}
             readOnly={engine.readOnly}
-            noteId={engine.noteId}
-            isPublic={engine.isPublic}
           />
         </Suspense>
       )}

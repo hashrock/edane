@@ -64,7 +64,10 @@ describe("SlideShow (browser e2e)", () => {
       (el) => el.textContent === "How"
     )!;
     await userEvent.click(howRow);
-    document.querySelector<HTMLButtonElement>('[data-testid="view-present"]')!.click();
+    // Started from the pages mode's preview.
+    document.querySelector<HTMLButtonElement>('[data-testid="view-pages"]')!.click();
+    await waitFor(() => document.querySelector('[data-testid="page-present"]') !== null);
+    document.querySelector<HTMLButtonElement>('[data-testid="page-present"]')!.click();
     await waitFor(() => show() !== null);
     expect(counter()).toBe("3 / 3");
     expect(slideText()).toContain("How");

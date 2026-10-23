@@ -7,10 +7,10 @@ import type { MindMapModel } from "../domain/model";
 import "./webpage.css";
 
 /**
- * Webページモード: the header toggle shows the page the selected item is on in
- * the top-right corner, following the selection; the theme panel edits the
- * note's theme, which the preview picks up — author CSS included, confined to
- * the page.
+ * ページモード: the header toggle shows the page the selected item is on in
+ * the top-right corner, following the selection, as a slide or as the web
+ * page; the theme panel edits the note's theme, which the preview (in either
+ * format) and the slideshow pick up — author CSS included, confined to the page.
  */
 
 const ROOTS: MindMapModel[] = [
@@ -33,8 +33,8 @@ async function waitFor(fn: () => boolean, timeout = 5000) {
 }
 
 const q = <T extends Element = HTMLElement>(sel: string) => document.querySelector<T>(sel);
-const counter = () => q('[data-testid="webpage-preview-counter"]')?.textContent;
-const previewText = () => q('[data-testid="webpage-preview-page"]')?.textContent ?? "";
+const counter = () => q('[data-testid="page-preview-counter"]')?.textContent;
+const previewText = () => q('[data-testid="page-preview-page"]')?.textContent ?? "";
 const row = (text: string) =>
   Array.from(document.querySelectorAll<HTMLElement>(".cursor-text")).find((el) => el.textContent === text)!;
 
@@ -42,17 +42,17 @@ afterEach(() => {
   document.querySelectorAll('[data-testid="page-theme-css"]').forEach((el) => el.remove());
 });
 
-async function openWebMode() {
+async function openPageMode() {
   await page.viewport(600, 800);
   render(<NoteEditor initialContent={JSON.stringify({ version: 2, roots: ROOTS })} initialTitle="Deck" />);
   await waitFor(() => q('[data-testid="outline-view"]') !== null);
-  q<HTMLButtonElement>('[data-testid="view-webpage"]')!.click();
-  await waitFor(() => q('[data-testid="webpage-preview"]') !== null);
+  q<HTMLButtonElement>('[data-testid="view-pages"]')!.click();
+  await waitFor(() => q('[data-testid="page-preview"]') !== null);
 }
 
-describe("Web page mode (browser e2e)", () => {
+describe("Pages mode (browser e2e)", () => {
   it("previews the page of the selected item and follows the selection", async () => {
-    await openWebMode();
+    await openPageMode();
     expect(counter()).toBe("Page 1 / 3");
     expect(previewText()).toContain("Talk");
 
@@ -64,18 +64,34 @@ describe("Web page mode (browser e2e)", () => {
     await waitFor(() => counter() === "Page 2 / 3");
     expect(previewText()).toMatch(/Why.*fast/);
 
+    // The same page, drawn as a slide or as a screen of the web page.
+    const variant = () => q('[data-testid="page-preview-page"]')?.getAttribute("data-variant");
+    expect(variant()).toBe("slide");
+    q<HTMLButtonElement>('[data-testid="page-format-web"]')!.click();
+    await waitFor(() => variant() === "web");
+    expect(counter()).toBe("Page 2 / 3");
+    expect(previewText()).toMatch(/Why.*fast/);
+    // Each format offers its own action: ▶ for the slides, publishing for the
+    // web page (absent here — a guest note has nothing to publish).
+    expect(q('[data-testid="page-present"]')).toBeNull();
+    expect(q('[data-testid="page-publish-open"]')).toBeNull();
+    q<HTMLButtonElement>('[data-testid="page-format-slide"]')!.click();
+    await waitFor(() => q('[data-testid="page-present"]') !== null);
+
     // The toggle hides it again.
-    q<HTMLButtonElement>('[data-testid="view-webpage"]')!.click();
-    await waitFor(() => q('[data-testid="webpage-preview"]') === null);
+    q<HTMLButtonElement>('[data-testid="view-pages"]')!.click();
+    await waitFor(() => q('[data-testid="page-preview"]') === null);
   });
 
   it("applies theme edits to the preview, with author CSS confined to the page", async () => {
-    await openWebMode();
-    q<HTMLButtonElement>('[data-testid="webpage-theme-open"]')!.click();
-    await waitFor(() => q('[data-testid="page-theme-panel"]') !== null);
+    await openPageMode();
+    q<HTMLButtonElement>('[data-testid="page-theme-open"]')!.click();
+    await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') !== null);
 
     await userEvent.selectOptions(page.getByTestId("theme-bg-preset"), "waves");
-    await waitFor(() => q('[data-testid="webpage-preview-page"] > canvas.wp-bg') !== null);
+    await waitFor(() => q('[data-testid="page-preview-page"] > canvas.wp-bg') !== null);
+    q<HTMLButtonElement>('[data-testid="page-format-web"]')!.click();
+    await waitFor(() => q('[data-testid="page-preview-page"][data-variant="web"] > canvas.wp-bg') !== null);
 
     // A stray } would close the scope: the whole CSS is refused.
     await userEvent.fill(page.getByTestId("theme-css"), ".wp-heading { color: red; } } body { display: none; }");
@@ -89,7 +105,7 @@ describe("Web page mode (browser e2e)", () => {
       ".wp-heading { color: rgb(255, 0, 0); position: fixed; inset: 0; } body, .cursor-text { display: none; }"
     );
     await waitFor(() => q('[data-testid="page-theme-css"]') !== null);
-    const heading = q('[data-testid="webpage-preview-page"] .wp-heading')!;
+    const heading = q('[data-testid="page-preview-page"] .wp-heading')!;
     expect(getComputedStyle(heading).color).toBe("rgb(255, 0, 0)");
     expect(getComputedStyle(document.body).display).not.toBe("none");
     expect(getComputedStyle(row("Talk")).display).not.toBe("none");
@@ -102,17 +118,17 @@ describe("Web page mode (browser e2e)", () => {
     // Escape closes the panel; the theme stays.
     page.getByTestId("theme-css").element().focus();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => q('[data-testid="page-theme-panel"]') === null);
+    await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') === null);
     expect(q('[data-testid="page-theme-css"]')).not.toBeNull();
   });
 
   it("uses the same theme in the slideshow", async () => {
-    await openWebMode();
-    q<HTMLButtonElement>('[data-testid="webpage-theme-open"]')!.click();
-    await waitFor(() => q('[data-testid="page-theme-panel"]') !== null);
+    await openPageMode();
+    q<HTMLButtonElement>('[data-testid="page-theme-open"]')!.click();
+    await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') !== null);
     await userEvent.fill(page.getByTestId("theme-css"), ".wp-heading { color: rgb(0, 0, 255); }");
     await waitFor(() => q('[data-testid="page-theme-css"]') !== null);
-    q<HTMLButtonElement>('[data-testid="view-present"]')!.click();
+    q<HTMLButtonElement>('[data-testid="page-present"]')!.click();
     await waitFor(() => q('[data-testid="slideshow"]') !== null);
     expect(getComputedStyle(q('[data-testid="slide"] .wp-heading')!).color).toBe("rgb(0, 0, 255)");
   });

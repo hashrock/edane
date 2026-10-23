@@ -14,10 +14,8 @@ import {
   type ScrollEffect,
 } from "../domain/pageTheme";
 import { fontFamilyName } from "../application/pageThemeStyle";
-import { webPageUrl, type WebPagePublicationStatus } from "../application/webPagePublication";
 import type { MessageKey } from "../application/messages";
 import { t } from "../application/i18n";
-import { copyText } from "../lib/clipboard";
 import { useLocale } from "./useLocale";
 
 const PRESET_LABEL: Record<BackgroundPreset, MessageKey> = {
@@ -45,24 +43,37 @@ const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
 const COMMIT_DELAY = 250;
 
 interface Props {
+  /** Shown. Stays mounted while closed, so it slides in and out. */
+  open: boolean;
   theme: PageTheme | undefined;
   /** Store a theme (null = back to the default). */
   onChange: (theme: PageTheme | null) => void;
   onClose: () => void;
   readOnly: boolean;
-  /** The saved note; absent for a guest note (nothing to publish). */
-  noteId?: string;
-  isPublic: boolean;
 }
 
 /**
- * Webページモードの右サイドパネル: the note's page theme (fonts, colours, the
- * WebGL background, scroll effect, author CSS) and publishing the note as a
- * web page. A plain form beside the editor — it takes the keyboard only when
- * one of its own fields is clicked, and Escape closes it.
+ * ページモードの右サイドパネル: the note's page theme (fonts, colours, the
+ * WebGL background, scroll effect, author CSS) — one theme for both formats,
+ * the slides and the web page. A plain form beside the editor — it takes the keyboard only when
+ * one of its own fields is clicked, and Escape closes it. It slides in from
+ * the right edge and back out; closed, it is `invisible` (out of the tab
+ * order and the accessibility tree) once the slide ends.
  */
-export default function PageThemePanel({ theme, onChange, onClose, readOnly, noteId, isPublic }: Props) {
+export default function PageThemePanel({ open, theme, onChange, onClose, readOnly }: Props) {
   useLocale();
+  // Follows `open` a frame late, so a panel mounted open still slides in.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setShown(open));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open]);
   const stored = effectiveTheme(theme);
   const [draft, setDraft] = useState(stored);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,8 +122,11 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
   return (
     <aside
       data-testid="page-theme-panel"
-      aria-label={t("webPageThemeTitle")}
-      className="fixed bottom-0 right-0 top-12 z-[60] flex w-80 max-w-full flex-col bg-white shadow-2xl ring-1 ring-slate-200"
+      aria-label={t("pageThemeTitle")}
+      data-open={shown ? "" : undefined}
+      className={`fixed bottom-0 right-0 top-12 z-[60] flex w-80 max-w-full flex-col bg-white shadow-2xl ring-1 ring-slate-200 transition-[translate,visibility] duration-200 ease-out motion-reduce:transition-none ${
+        shown ? "translate-x-0" : "invisible translate-x-[calc(100%+2rem)]"
+      }`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -121,7 +135,7 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
       }}
     >
       <header className="flex items-center border-b border-slate-100 px-4 py-3">
-        <h2 className="mr-auto text-sm font-semibold">{t("webPageThemeTitle")}</h2>
+        <h2 className="mr-auto text-sm font-semibold">{t("pageThemeTitle")}</h2>
         <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
           {t("close")}
         </button>
@@ -216,7 +230,6 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
           {t("themeReset")}
         </button>
       </fieldset>
-      {noteId && !readOnly && <PublishSection noteId={noteId} isPublic={isPublic} />}
     </aside>
   );
 }
@@ -227,100 +240,5 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
       <input type="color" className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5" value={value} onChange={(e) => onChange(e.target.value)} />
       {label}
     </label>
-  );
-}
-
-async function webPageApi(noteId: string, method: "GET" | "POST" | "DELETE"): Promise<WebPagePublicationStatus | null> {
-  const res = await fetch(`/api/notes/${encodeURIComponent(noteId)}/webpage`, { method, credentials: "include" });
-  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || t("webPublishFailed"));
-  const body = (await res.json()) as { publication?: WebPagePublicationStatus | null };
-  return body.publication ?? null;
-}
-
-/** Publish / unpublish the note as a web page (`/w/:id`). */
-function PublishSection({ noteId, isPublic }: { noteId: string; isPublic: boolean }) {
-  const [status, setStatus] = useState<WebPagePublicationStatus | null | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    setError(null);
-    webPageApi(noteId, "GET").then(
-      (s) => live && setStatus(s),
-      (e: Error) => live && setError(e.message)
-    );
-    return () => {
-      live = false;
-    };
-  }, [noteId, isPublic]);
-
-  const run = async (method: "POST" | "DELETE") => {
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await webPageApi(noteId, method));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const url = status ? webPageUrl(window.location.origin, status.id) : null;
-  const button = "rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50";
-
-  return (
-    <section data-testid="webpage-publish" className="space-y-2 border-t border-slate-100 px-4 py-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("webPublish")}</h3>
-      {!isPublic ? (
-        <>
-          <p className="text-xs text-slate-500">{t("webPublishPrivate")}</p>
-          {/* A page published before the note went private can still be revoked. */}
-          {status && (
-            <button type="button" disabled={busy} data-testid="webpage-unpublish" className={`${button} text-red-600 hover:bg-red-50`} onClick={() => void run("DELETE")}>
-              {t("webPublishUnpublish")}
-            </button>
-          )}
-        </>
-      ) : status === undefined && !error ? (
-        <p className="text-xs text-slate-400">{t("loading")}</p>
-      ) : status && url ? (
-        <>
-          <div className="flex items-center gap-1">
-            <input readOnly aria-label="URL" data-testid="webpage-url" value={url} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs" onFocus={(e) => e.currentTarget.select()} />
-            <button
-              type="button"
-              className={`${button} text-slate-600 hover:bg-slate-100`}
-              onClick={() => {
-                void copyText(url).then(() => setCopied(true));
-              }}
-            >
-              {copied ? t("copied") : t("copy")}
-            </button>
-            <a href={url} target="_blank" rel="noopener noreferrer" className={`${button} text-emerald-700 hover:bg-emerald-50`}>
-              {t("webPublishOpen")}
-            </a>
-          </div>
-          <p className="text-[11px] text-slate-400">{status.active ? t("webPublishLive") : t("webPublishInactive")}</p>
-          <div className="flex gap-2">
-            {!status.active && (
-              <button type="button" disabled={busy} className={`${button} bg-emerald-600 text-white hover:bg-emerald-700`} onClick={() => void run("POST")}>
-                {t("webPublishAction")}
-              </button>
-            )}
-            <button type="button" disabled={busy} data-testid="webpage-unpublish" className={`${button} text-red-600 hover:bg-red-50`} onClick={() => void run("DELETE")}>
-              {t("webPublishUnpublish")}
-            </button>
-          </div>
-        </>
-      ) : (
-        <button type="button" disabled={busy} data-testid="webpage-publish-action" className={`${button} bg-emerald-600 text-white hover:bg-emerald-700`} onClick={() => void run("POST")}>
-          {t("webPublishAction")}
-        </button>
-      )}
-      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
-    </section>
   );
 }
