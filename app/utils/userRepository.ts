@@ -1,6 +1,17 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { and, eq, notLike, sql } from "drizzle-orm";
-import { users } from "../db/schema";
+import {
+  apiTokens,
+  images,
+  nodePublications,
+  noteBackups,
+  notes,
+  oauthCodes,
+  oauthGrants,
+  sessions,
+  users,
+  webPages,
+} from "../db/schema";
 import type { SessionUser } from "../user";
 
 type UserRow = typeof users.$inferSelect;
@@ -30,6 +41,34 @@ export async function insertUser(
     avatarUrl: user.avatarUrl || null,
     createdAt,
   });
+}
+
+/**
+ * Delete a user and everything they own, in one D1 batch (all or nothing):
+ * notes (their note_commits and note_backups cascade; backups are deleted
+ * by user too, so the rule reads the same as every other table), publications / web pages (their URLs die
+ * with the rows), image metadata, and every credential — sessions, API tokens,
+ * OAuth codes and grants — so nothing signed in as them keeps working.
+ * OAuth clients are shared registrations and stay. A table with a user_id
+ * column that is missing here fails app/account.routes.test.ts.
+ *
+ * Returns the R2 keys of the deleted images: the binaries live outside D1, so
+ * the caller deletes them after the rows are gone.
+ */
+export async function deleteUserAccount(db: DrizzleD1Database, userId: string): Promise<string[]> {
+  const [, , , , deletedImages] = await db.batch([
+    db.delete(nodePublications).where(eq(nodePublications.userId, userId)),
+    db.delete(webPages).where(eq(webPages.userId, userId)),
+    db.delete(noteBackups).where(eq(noteBackups.userId, userId)),
+    db.delete(notes).where(eq(notes.userId, userId)),
+    db.delete(images).where(eq(images.userId, userId)).returning({ r2Key: images.r2Key }),
+    db.delete(sessions).where(eq(sessions.userId, userId)),
+    db.delete(apiTokens).where(eq(apiTokens.userId, userId)),
+    db.delete(oauthCodes).where(eq(oauthCodes.userId, userId)),
+    db.delete(oauthGrants).where(eq(oauthGrants.userId, userId)),
+    db.delete(users).where(eq(users.id, userId)),
+  ]);
+  return deletedImages.map((i) => i.r2Key);
 }
 
 /** GET /api/stats が返す件数（キー名はレスポンスの JSON にそのまま載る）。 */

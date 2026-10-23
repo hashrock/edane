@@ -8,15 +8,15 @@ import { googleAuth } from "@hono/oauth-providers/google";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { rootView } from "./root-view";
-import { users, notes, apiTokens, images, nodePublications, webPages } from "./db/schema";
+import { users, notes, apiTokens, images, nodePublications, webPages, noteBackups } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
 import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
-import { findUserByEmail, insertUser } from "./utils/userRepository";
+import { deleteUserAccount, findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
-import { decodeStoredNoteContent, noteKeys, noteStorageMode } from "./utils/crypto";
+import { BACKUP_STORAGE_MODE, decodeStoredNoteContent, noteKeys, noteStorageMode } from "./utils/crypto";
 import { resolveEditPageAccess, resolveViewPageAccess } from "./utils/noteAccess";
-import { loadOwnedNote } from "./utils/noteOwnership";
+import { loadOwnedLiveNote, loadOwnedNote } from "./utils/noteOwnership";
 import { assertNever } from "./lib/assertNever";
 import { findNode } from "./domain/model";
 import { parseContent } from "./application/persistence";
@@ -49,6 +49,9 @@ import { securityHeaders } from "./utils/securityHeaders";
 import { assetsHostGate, assetsOrigin, imageUrl, onAssetsHost } from "./utils/assetsHost";
 import { renderWebPage } from "./webpage-view";
 import { WEB_PAGE_CSP, type WebPagePublicationStatus } from "./application/webPagePublication";
+import type { NoteBackupSummary } from "./application/noteBackups";
+import { buildExportEntries, exportArchiveName, type ExportNote } from "./application/dataExport";
+import { createZip } from "./lib/zip";
 
 const app = new Hono<Env>();
 
@@ -135,6 +138,27 @@ app.post("/auth/logout", async (c) => {
   return c.redirect("/");
 });
 
+/** R2 deletes at most this many keys per call. */
+const R2_DELETE_BATCH = 1000;
+// Delete the account and everything in it. Irreversible, so the body must
+// repeat the account's email. Open editor sockets need no closing: their
+// session row is gone and so is every note, so their next commit is refused.
+app.delete("/api/account", async (c) => {
+  const user = signedInUser(c);
+  const body = await c.req.json<{ email?: unknown }>().catch(() => ({}) as { email?: unknown });
+  if (body.email !== user.email) {
+    return c.json({ error: "Email does not match" }, 400);
+  }
+  const imageKeys = await deleteUserAccount(drizzle(c.env.DB), user.id);
+  // The rows are gone, so a failure here only leaves unreachable binaries.
+  const chunks = [];
+  for (let i = 0; i < imageKeys.length; i += R2_DELETE_BATCH) chunks.push(imageKeys.slice(i, i + R2_DELETE_BATCH));
+  for (const r of await Promise.allSettled(chunks.map((keys) => c.env.IMAGES.delete(keys)))) {
+    if (r.status === "rejected") console.error("R2 delete failed", r.reason);
+  }
+  await c.get("auth").signOut(c);
+  return c.json({ ok: true });
+});
 // All editor writes go through the note coordinator, including legacy PUT.
 app.get("/api/notes/:id/sync", async (c) => {
   const user = signedInUser(c);
@@ -409,8 +433,8 @@ app.post("/api/notes/:id/publications", async (c) => {
   const user = signedInUser(c);
 
   const db = drizzle(c.env.DB);
-  const note = await loadOwnedNote(db, c.req.param("id"), user.id);
-  if (!note || note.deletedAt) return c.json({ error: "Not found" }, 404);
+  const note = await loadOwnedLiveNote(db, c.req.param("id"), user.id);
+  if (!note) return c.json({ error: "Not found" }, 404);
   if (!note.isPublic) {
     return c.json({ error: PRIVATE_NOTE_PUBLISH_REASON }, 400);
   }
@@ -544,8 +568,8 @@ app.get("/w/:id", async (c) => {
 
 /** The owned, live note and its web page row (if published), or null (= not found). */
 async function loadOwnedWebPage(db: DrizzleD1Database, noteId: string, userId: string) {
-  const note = await loadOwnedNote(db, noteId, userId);
-  if (!note || note.deletedAt) return null;
+  const note = await loadOwnedLiveNote(db, noteId, userId);
+  if (!note) return null;
   const page = await db.select().from(webPages).where(eq(webPages.noteId, note.id)).get();
   return { note, page: page ?? null };
 }
@@ -590,6 +614,84 @@ app.delete("/api/notes/:id/webpage", async (c) => {
   if (!owned) return c.json({ error: "Not found" }, 404);
   await db.delete(webPages).where(eq(webPages.noteId, owned.note.id));
   return c.json(webPageStatus(owned.note, null));
+});
+
+// --- Backups: automatic per-note snapshots (application/noteBackups.ts) ---
+// NoteRoom writes them before a commit; these list, show and restore them.
+// The note must be the user's and out of the trash (restore goes through
+// NoteRoom, which refuses trashed notes anyway).
+
+/** The owned, live note's backups, newest first, or null (= not found). */
+async function listOwnedBackups(db: DrizzleD1Database, noteId: string, userId: string) {
+  const note = await loadOwnedLiveNote(db, noteId, userId);
+  if (!note) return null;
+  const backups: NoteBackupSummary[] = await db
+    .select({ id: noteBackups.id, title: noteBackups.title, version: noteBackups.version, createdAt: noteBackups.createdAt })
+    .from(noteBackups)
+    .where(eq(noteBackups.noteId, note.id))
+    .orderBy(desc(noteBackups.createdAt), desc(noteBackups.id));
+  return { note, backups };
+}
+
+app.get("/api/notes/:id/backups", async (c) => {
+  const owned = await listOwnedBackups(drizzle(c.env.DB), c.req.param("id"), signedInUser(c).id);
+  if (!owned) return c.json({ error: "Not found" }, 404);
+  return c.json({ backups: owned.backups });
+});
+
+// One backup's content (decrypted), for the history page's preview.
+app.get("/api/notes/:id/backups/:backupId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const note = await loadOwnedLiveNote(db, c.req.param("id"), signedInUser(c).id);
+  if (!note) return c.json({ error: "Not found" }, 404);
+  const backup = await db
+    .select()
+    .from(noteBackups)
+    .where(and(eq(noteBackups.id, c.req.param("backupId")), eq(noteBackups.noteId, note.id)))
+    .get();
+  if (!backup) return c.json({ error: "Not found" }, 404);
+  const content = await decodeStoredNoteContent(backup.content, BACKUP_STORAGE_MODE, noteKeys(c.env), backup.id);
+  if (content === null) return c.json({ error: "Decryption failed" }, 500);
+  return c.json({ id: backup.id, title: backup.title, content });
+});
+
+app.post("/api/notes/:id/backups/:backupId/restore", async (c) => {
+  const user = signedInUser(c);
+  const id = c.req.param("id");
+  const result = await noteRoom(c.env, id).restore({ noteId: id, userId: user.id }, c.req.param("backupId"));
+  return result.ok ? c.json({ version: result.value.version }) : roomRejectionResponse(c, result);
+});
+
+// --- Data export: every note of the user as a ZIP (application/dataExport.ts) ---
+app.get("/api/export", async (c) => {
+  const user = signedInUser(c);
+  const rows = await drizzle(c.env.DB)
+    .select()
+    .from(notes)
+    .where(eq(notes.userId, user.id))
+    .orderBy(desc(notes.pinned), desc(notes.updatedAt));
+  const keys = noteKeys(c.env);
+  const exported: ExportNote[] = await Promise.all(
+    rows.map(async (r) => {
+      const content = await decodeStoredNoteContent(r.content, noteStorageMode(r.isPublic), keys, r.id);
+      return {
+        id: r.id,
+        title: r.title,
+        isPublic: r.isPublic,
+        pinned: r.pinned,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        deletedAt: r.deletedAt,
+        document: content === null ? null : parseContent(content, r.title),
+      };
+    })
+  );
+  const now = new Date();
+  return c.body(createZip(buildExportEntries(exported, now), now), 200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${exportArchiveName(now)}"`,
+    "Cache-Control": "no-store",
+  });
 });
 
 // --- UI test scenarios: seed an isolated initial state and redirect to it ---
@@ -744,6 +846,8 @@ const routes = app
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
+      // Deleting a whole account tears notes down in bulk (deleteUserAccount):
+      // a new note-owned table needs deleting there too.
       // Publications reference the note; drop them first so their URLs die
       // with the note instead of dangling (and the FK stays satisfied).
       await db
@@ -767,6 +871,16 @@ const routes = app
       await db.update(notes).set({ pinned }).where(eq(notes.id, note.id));
     }
     return c.redirect("/notes", 303);
+  })
+  .get("/notes/:id/history", async (c) => {
+    const user = signedInUser(c);
+    const owned = await listOwnedBackups(drizzle(c.env.DB), c.req.param("id"), user.id);
+    if (!owned) return c.notFound();
+    return c.render("Notes/History", {
+      user,
+      note: { id: owned.note.id, title: owned.note.title },
+      backups: owned.backups,
+    });
   })
   .get("/notes/:id/edit", async (c) => {
     const user = c.get("user");

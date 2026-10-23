@@ -1,18 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { findNode, type MindMapDocument } from "../domain/model";
 import { effectiveTheme } from "../domain/pageTheme";
 import { branchSlideCount, buildSlides, slideIndexOf, splittable } from "../application/slides";
+import {
+  DEFAULT_PREVIEW_SCALE,
+  PREVIEW_VIRTUAL_HEIGHT as VIRTUAL_HEIGHT,
+  PREVIEW_VIRTUAL_WIDTH as VIRTUAL_WIDTH,
+  loadPreviewScale,
+  resizedPreviewScale,
+  savePreviewScale,
+  type PreviewResizeEdge,
+} from "../application/pagePreviewSize";
 import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
 import { useLocale } from "./useLocale";
 import { PlayIcon } from "./icons";
 import PagePublish from "./PagePublish";
 import { PageBackground, PageRoot, PageSection, PageThemeAssets, type PageVariant } from "./PageView";
-
-/** The page is laid out at this size and scaled down, so it looks like the real page. */
-const VIRTUAL_WIDTH = 1280;
-const VIRTUAL_HEIGHT = 720;
-const SCALE = 0.25;
 
 interface Choice<T> {
   value: T;
@@ -91,14 +95,66 @@ interface Props {
  * Each format has its own action: ▶ starts the slideshow, 公開 publishes the
  * web page (`/w/:id`).
  * Follows the selection and every edit live. It never takes the keyboard.
+ * Its left and bottom edges drag to resize it, keeping the page's 16:9.
  */
 export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onSlideSplit, onExit }: Props) {
   useLocale();
   const [open, setOpen] = useState(true);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [scale, setScale] = useState(DEFAULT_PREVIEW_SCALE);
+  // The size the background's drawing buffer is made for: it is rebuilt only when a drag ends, not on every move.
+  const [settledScale, setSettledScale] = useState(DEFAULT_PREVIEW_SCALE);
+  const drag = useRef<{ edge: PreviewResizeEdge; x: number; y: number; scale: number; latest: number } | null>(null);
+  const settle = (next: number) => {
+    setScale(next);
+    setSettledScale(next);
+  };
+  // After mount, so the server render and hydration agree on the default size.
+  useEffect(() => settle(loadPreviewScale(window.innerWidth)), []);
+
+  const startResize = (edge: PreviewResizeEdge) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { edge, x: e.clientX, y: e.clientY, scale, latest: scale };
+  };
+  const moveResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    d.latest = resizedPreviewScale(d.edge, d.scale, e.clientX - d.x, e.clientY - d.y, window.innerWidth);
+    setScale(d.latest);
+  };
+  const endResize = () => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    settle(d.latest);
+    savePreviewScale(d.latest);
+  };
+  const resetSize = () => {
+    settle(DEFAULT_PREVIEW_SCALE);
+    savePreviewScale(DEFAULT_PREVIEW_SCALE);
+  };
+  const handle = (edge: PreviewResizeEdge, className: string) => (
+    <div
+      aria-hidden
+      data-testid={`page-preview-resize-${edge}`}
+      title={t("pagePreviewResize")}
+      className={`absolute z-10 touch-none ${className}`}
+      onPointerDown={startResize(edge)}
+      onPointerMove={moveResize}
+      onPointerUp={endResize}
+      onPointerCancel={endResize}
+      onDoubleClick={resetSize}
+    />
+  );
   const slides = useMemo(() => buildSlides(doc), [doc]);
-  const index = slideIndexOf(slides, doc, activeNodeId);
+  const index = useMemo(() => slideIndexOf(slides, doc, activeNodeId), [slides, doc, activeNodeId]);
   const slide = slides[index];
+  // Resizing restyles the frame only; the page inside need not re-render on every move.
+  const section = useMemo(() => slide && <PageSection slide={slide} index={index} />, [slide, index]);
+  const width = VIRTUAL_WIDTH * scale;
+  const height = VIRTUAL_HEIGHT * scale;
   const theme = effectiveTheme(doc.theme);
   // How many pages the selected branch takes, and the choice of how to split it.
   const active = activeNodeId ? findNode(doc, activeNodeId) : null;
@@ -110,9 +166,16 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
   return (
     <div
       data-testid="page-preview"
-      className="pointer-events-auto rounded-xl bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur"
-      style={{ width: VIRTUAL_WIDTH * SCALE + 12 }}
+      className="pointer-events-auto relative rounded-xl bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur"
+      style={{ width: width + 12 }}
     >
+      {open && (
+        <>
+          {handle("left", "-left-1 top-0 bottom-2 w-2 cursor-ew-resize")}
+          {handle("bottom", "-bottom-1 left-2 right-0 h-2 cursor-ns-resize")}
+          {handle("corner", "-bottom-1 -left-1 h-3 w-3 cursor-nesw-resize")}
+        </>
+      )}
       <div className="flex items-center gap-1 px-0.5 pb-1">
         <Segmented
           label={t("pageFormat")}
@@ -143,7 +206,7 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
           role="img"
           aria-label={t("pagePreview")}
           className="wp-frame rounded-md ring-1 ring-slate-200"
-          style={{ width: VIRTUAL_WIDTH * SCALE, height: VIRTUAL_HEIGHT * SCALE }}
+          style={{ width, height }}
         >
           <PageThemeAssets theme={theme} />
           <PageRoot
@@ -155,19 +218,21 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
               height: VIRTUAL_HEIGHT,
               minHeight: 0,
               overflow: "hidden",
-              transform: `scale(${SCALE})`,
+              transform: `scale(${scale})`,
               transformOrigin: "0 0",
               ["--wp-page-h" as string]: `${VIRTUAL_HEIGHT}px`,
             }}
           >
-            {/* On the web page, the background is where it would be with this page on screen. */}
+            {/* On the web page, the background is where it would be with this page on screen.
+                It reads `resolution` once, so a settled resize restarts it at the new size. */}
             <PageBackground
+              key={settledScale}
               background={theme.background}
               scrollY={format === "web" ? () => index * VIRTUAL_HEIGHT : undefined}
               scrollKey={format === "web" ? index : undefined}
-              resolution={SCALE * 2}
+              resolution={settledScale * 2}
             />
-            {slide && <PageSection slide={slide} index={index} />}
+            {section}
           </PageRoot>
         </div>
       )}

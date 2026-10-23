@@ -100,6 +100,41 @@ describe("Pages mode (browser e2e)", () => {
     expect(q('[data-testid="page-split"]')).toBeNull();
   });
 
+  it("resizes from its left / bottom edges, keeping 16:9", async () => {
+    localStorage.removeItem("edane:page-preview-scale");
+    await openPageMode();
+    const frame = () => q('[role="img"]')!.getBoundingClientRect();
+    expect(frame().width).toBe(320);
+    expect(frame().height).toBe(180);
+
+    const drag = (edge: string, dx: number, dy: number) => {
+      const el = q(`[data-testid="page-preview-resize-${edge}"]`)!;
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const opts = { bubbles: true, pointerId: 1, button: 0, isPrimary: true };
+      el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, clientX: x, clientY: y }));
+      el.dispatchEvent(new PointerEvent("pointermove", { ...opts, clientX: x + dx, clientY: y + dy }));
+      el.dispatchEvent(new PointerEvent("pointerup", { ...opts, clientX: x + dx, clientY: y + dy }));
+    };
+
+    // Dragging the left edge left widens it; the height follows.
+    drag("left", -64, 0);
+    await waitFor(() => frame().width === 384);
+    expect(frame().height).toBe(216);
+    // Dragging the bottom edge up shrinks it; the width follows.
+    drag("bottom", 0, -36);
+    await waitFor(() => frame().height === 180);
+    expect(frame().width).toBe(320);
+    // Never smaller than the minimum.
+    drag("corner", 1000, -1000);
+    await waitFor(() => frame().width === 192);
+    expect(frame().height).toBe(108);
+    // The size is remembered on this device.
+    expect(localStorage.getItem("edane:page-preview-scale")).toBe("0.15");
+    localStorage.removeItem("edane:page-preview-scale");
+  });
+
   it("applies theme edits to the preview", async () => {
     await openPageMode();
     q<HTMLButtonElement>('[data-testid="page-theme-open"]')!.click();

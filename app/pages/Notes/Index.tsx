@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ContextMenu from "../../components/ContextMenu";
 import {
   GlobeIcon,
+  HistoryIcon,
   LinkIcon,
   MoreVerticalIcon,
   PencilIcon,
@@ -326,6 +327,11 @@ export default function NotesIndex({
                   "_blank",
                   "noopener"
                 ),
+            },
+            {
+              label: t("menuHistory"),
+              icon: <HistoryIcon />,
+              onSelect: () => router.visit(`/notes/${menu.note.id}/history`),
             },
             {
               label: menu.note.pinned ? t("menuUnpin") : t("menuPin"),

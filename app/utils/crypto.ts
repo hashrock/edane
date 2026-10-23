@@ -96,6 +96,13 @@ export function noteStorageMode(isPublic: boolean): NoteStorageMode {
 }
 
 /**
+ * Backups (note_backups) are always encrypted, whatever the note's publicity:
+ * a public note's history must not stay readable in the clear after the note
+ * goes private. They are bound to the backup's own id, not the note's.
+ */
+export const BACKUP_STORAGE_MODE: NoteStorageMode = "encrypted";
+
+/**
  * The secrets note content is encrypted with: `current` for writing, and
  * `previous` (optional) still accepted for reading while a rotation is under way.
  */

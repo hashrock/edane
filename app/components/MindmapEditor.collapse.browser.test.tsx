@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "vitest-browser-react";
+import { userEvent } from "vitest/browser";
 import MindmapEditor, { type MindmapTestApi } from "./MindmapEditor";
 import { findNode, type MindMapModel } from "../domain/model";
 
@@ -107,5 +108,44 @@ describe("MindmapEditor unified collapse/expand toggle button", () => {
   it("a leaf node (no children) has no toggle button", async () => {
     await setup();
     expect(api().getToggleButtonPoint("b")).toBeNull();
+  });
+
+  it("keeps the clicked button where it was on screen while the tree re-lays out, zoomed in", async () => {
+    // Folding "b" shrinks its subtree, so the layout re-centres the branches
+    // and "b" moves in world coordinates; the view follows it.
+    const leaves = (p: string) => Array.from({ length: 3 }, (_, i) => ({ id: `${p}${i}`, text: `${p} ${i}`, children: [] }));
+    const big: MindMapModel = {
+      id: "root",
+      text: "Root",
+      children: [
+        { id: "a", text: "Alpha", children: leaves("a") },
+        { id: "b", text: "Bravo", children: leaves("b") },
+      ],
+    };
+    const { click } = await setup(big);
+    const unzoomed = await waitFor(() => api().getToggleButtonPoint("b"));
+    document.querySelector<HTMLButtonElement>('button[aria-label="Zoom in"]')!.click();
+    await waitFor(() => api().getToggleButtonPoint("b")?.y !== unzoomed.y);
+
+    for (const collapsed of [true, false]) {
+      const before = await waitFor(() => api().getToggleButtonPoint("b"));
+      expect(before.y).toBeLessThan(560); // on the canvas, so the click lands
+      click(before.x, before.y);
+      await waitFor(() => !!findNode(api().getModel(), "b")!.collapsed === collapsed);
+      const after = await waitFor(() => api().getToggleButtonPoint("b"));
+      expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+      expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+    }
+
+    // The keyboard fold (⌘/Ctrl + .) keeps the node in place too.
+    const at = await waitFor(() => api().getNodeClickPoint("b"));
+    click(at.x, at.y);
+    await waitFor(() => api().getActiveNodeId() === "b");
+    const before = await waitFor(() => api().getToggleButtonPoint("b"));
+    await userEvent.keyboard("{Control>}.{/Control}");
+    await waitFor(() => !!findNode(api().getModel(), "b")!.collapsed);
+    const after = await waitFor(() => api().getToggleButtonPoint("b"));
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
   });
 });

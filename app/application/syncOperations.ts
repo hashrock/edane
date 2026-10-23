@@ -4,7 +4,7 @@ import { normalizePageTheme, type PageTheme } from "../domain/pageTheme";
 
 export type Fields = Omit<MindMapModel, "children" | "id">;
 type FlatNode = { fields: Fields; children: string[] };
-type Change<T> = { before: T; after: T };
+export type Change<T> = { before: T; after: T };
 export interface Patch {
   title?: Change<string>;
   nodes: Record<string, Change<FlatNode | null>>;

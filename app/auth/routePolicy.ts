@@ -76,6 +76,7 @@ export const ROUTE_POLICY = {
   // Sign-in.
   "GET /auth/google": { access: "public" },
   "POST /auth/logout": { access: "public" },
+  "DELETE /api/account": { access: "browser-user" },
 
   // Notes (the API token scope).
   "GET /api/notes/:id/sync": { access: "user" },
@@ -109,6 +110,12 @@ export const ROUTE_POLICY = {
   "POST /api/notes/:id/webpage": { access: "browser-user" },
   "DELETE /api/notes/:id/webpage": { access: "browser-user" },
 
+  // Backups and the data export (web app only, like publications).
+  "GET /api/notes/:id/backups": { access: "browser-user" },
+  "GET /api/notes/:id/backups/:backupId": { access: "browser-user" },
+  "POST /api/notes/:id/backups/:backupId/restore": { access: "browser-user" },
+  "GET /api/export": { access: "browser-user" },
+
   // Open helpers. Link previews fetch third-party pages: 60 per minute per IP.
   "GET /api/link-preview": { access: "anonymous", rateLimit: "LINK_PREVIEW_LIMITER" },
   "GET /__scenarios": { access: "public" },
@@ -120,6 +127,7 @@ export const ROUTE_POLICY = {
   "GET /notes": { access: "user-page" },
   "GET /trash": { access: "user-page" },
   "GET /settings": { access: "user-page" },
+  "GET /notes/:id/history": { access: "user-page" },
   // Public notes are viewable by anyone; the handlers decide (application/notePageAccess).
   "GET /notes/:id/edit": { access: "public" },
   "GET /notes/:id": { access: "public" },
