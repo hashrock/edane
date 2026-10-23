@@ -98,3 +98,32 @@
 
 - [ ] 複数ツリー対応（「Mapごとにツリーは1つずつ？」「ルートでClickDown→ドラッグしてしまう」はどちらもこの前提のずれ。後者は単独で直さない）
 - [ ] 公開をノード単位にし、個別URLを発行する（現状の `isPublic` は表示可否・一覧バッジ・保存時の暗号化を兼ねている。noindexの要否もあわせて決める）※データ配信（JSON/Markdown）は`/pub/:id`として実装済み。残りは閲覧ページ（HTML）のノード単位化＝`isPublic`の分解
+
+# SVGアップロード対応（ユーザーコンテンツを別ドメインから配信する）
+
+方針: 画像の配信を `edane-assets.hashrock.info`（別オリジン）に移し、そのうえで SVG のアップロードを解禁する。
+
+## 背景・決めたこと
+
+- 現状は SVG のアップロードを拒否している。`app/domain/imageStorage.ts` の `sniffImageType` がマジックナンバーで PNG / JPEG / GIF / WebP / AVIF だけを通し、`app/server.ts` の `POST /api/images` がそれ以外を 400 にする。理由は、本体オリジン（`edane.hashrock.info`）から SVG を配信すると、URL を直接開いたときに中のスクリプトが本体オリジンで動く stored XSS になるため。
+- 配信は `GET /api/images/:id/raw`（認証なし）で、`imageResponseHeaders` が `nosniff` / CSP `sandbox` / 許可外の型には `attachment` を付ける。過去にアップロードされた SVG（`image/svg+xml` の行）は、今はこのヘッダーだけで守られている。
+- 「sandbox ヘッダーがあるなら許可してよいのでは」も検討した。ヘッダーが付かない経路が1本でもあれば破れる、アプリ側で SVG をインライン化したくなったら即 XSS、などの理由で、ヘッダー1枚に頼るのはやめた。**別オリジン + ヘッダーの二重構え**にする。
+- 別の登録ドメイン（`*.usercontent.net` 的なもの）ではなく、サブドメインで十分と判断した。サブドメインは same-site なので CSRF と Cookie の注入が本来の脅威だが、edane はどちらも対策済み:
+  - CSRF: `app/auth/routePolicy.ts` の `sameOriginRequest` が `Origin` の完全一致を見ている（SameSite に頼っていない）。
+  - セッション Cookie: `app/utils/session.ts` が `__Host-session` を使うので、サブドメインからは上書きできない。
+
+## やること
+
+- [ ] Cloudflare で `edane-assets.hashrock.info` を Worker（または R2 のカスタムドメイン）にルーティングする（`wrangler.jsonc` の `routes`）。
+  - 同じ Worker で Host を見て分岐するなら、**assets ホストでは画像配信以外の全ルートを 404 にする**（assets 側でアプリやセッション付き API が動いたら意味がない）。逆に、本体ホストの `/api/images/:id/raw` は移行用の互換経路以外では配信しない。
+- [ ] 画像配信を assets ホストに移す。`imageResponseHeaders` の `sandbox` / `nosniff` / CSP はそのまま付ける（別オリジンとの二重構え）。
+- [ ] アップロード API が返す URL を assets ホストの絶対 URL にする（`app/server.ts` の `GET /api/images` が組み立てている `url` と、`POST /api/images` の応答）。
+- [ ] 既存ノートに保存済みの相対 URL `/api/images/:id/raw` の互換: 本体ホストの旧ルートは assets ホストへの 301/302 リダイレクトにする（`<img>` はリダイレクトを追える）。content は暗号化されている行もあるので、SQL で書き換えない。
+- [ ] 本体ページの CSP（`app/utils/securityHeaders.ts` など）に `img-src` の制限があれば assets ホストを許可する。公開ページ（`/w/:id`、`PageView.tsx`）、スライドショー、公開サイトの描画も確認する。
+- [ ] SVG を許可する: `ALLOWED_IMAGE_TYPES` に `image/svg+xml` を追加し、`sniffImageType` に SVG 判定を足す（テキストなので、先頭の空白・BOM・`<?xml …?>`・コメント・DOCTYPE を飛ばして最初の要素が `<svg` か、くらいの判定）。`imageResponseHeaders` の `legacySvg` 特例を整理する。
+  - `app/domain/imageStorage.test.ts` は今「SVG を拒否する」ことをテストしているので書き換える。
+  - アップロード時の拒否メッセージ（`app/server.ts`）、エディタのファイル選択の `accept`（`app/components/MindmapEditor.tsx` の `ALLOWED_IMAGE_TYPES.join(",")`）も追従する。
+- [ ] **SVG はどこでも `<img>` でだけ描く**ことを守る（`fetch` して DOM にインライン化しない）。必要ならこのルールを CLAUDE.md か ADR に書く。
+- [ ] ついでに `app/oauth/index.ts` の `oauth_return` Cookie を `__Host-` 付きにする（今はサブドメインから上書きできる。中身はログイン後の戻り先パスなので影響は小さいが、assets サブドメインを作るなら塞いでおく）。
+- [ ] `hashrock.info` 配下に他のサービスがあるなら、SameSite だけの CSRF 対策や `Domain=hashrock.info` の Cookie に頼っていないか確認する（assets サブドメインの SVG から狙えるため）。
+- [ ] 決定を ADR（`docs/adr/0008-...`）に残す。
