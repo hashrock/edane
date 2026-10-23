@@ -18,14 +18,14 @@
  *
  * エディタは新しく入ってきたレコードに足りないフィールドを型付きで補い
  * （{@link conformEntering}）、各ノードの役割（{@link schemaRoles}）から
- * フィールド名のラベルと不一致の印を出す。公開サイトは同じスキーマで
- * レコードを読む（application/siteSchema.ts）。
+ * フィールド名のラベルと不一致の印を出す。
  */
 import { closedStringSet } from "./isKeyOf";
 import {
   cloneDocument,
   generateId,
   isStoredNodeType,
+  STORED_NODE_TYPES,
   type IdSource,
   type MindMapDocument,
   type MindMapModel,
@@ -99,6 +99,30 @@ export function ownSchema(node: { schema?: string }): BranchSchema | null {
   if (!node.schema) return null;
   const parsed = parseSchema(node.schema);
   return parsed.ok && parsed.schema.length > 0 ? parsed.schema : null;
+}
+
+/**
+ * 実データからスキーマの下書きを推定する（スキーマ編集ダイアログの「推定を
+ * 使う」）。各位置について、レコードの過半で現れる type を注釈にし、キー名は
+ * type から（image / url / body / field1…）。
+ */
+export function inferSchema(root: MindMapModel): BranchSchema {
+  const records = root.children;
+  const width = Math.max(0, ...records.map((r) => r.children.length));
+  const schema: BranchSchema = [];
+  const used = new Set<string>();
+  for (let i = 0; i < width; i++) {
+    const at = records.map((r) => r.children[i]).filter((n): n is MindMapModel => !!n);
+    const count = (pred: (n: MindMapModel) => boolean) => at.filter(pred).length;
+    const majority = (n: number) => n * 2 > at.length;
+    const type = STORED_NODE_TYPES.find((t) => majority(count((n) => n.type === t)));
+    const base = type === "image" ? "image" : type === "link" ? "url" : type === "markdown" ? "body" : "field";
+    let key = base === "field" ? `field${i + 1}` : base;
+    for (let n = 2; used.has(key); n++) key = `${base}${n}`;
+    used.add(key);
+    schema.push({ key, type });
+  }
+  return schema;
 }
 
 // --- Roles ---

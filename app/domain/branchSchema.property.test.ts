@@ -10,6 +10,7 @@ import {
   conformEntering,
   FIELD_TYPES,
   formatSchema,
+  inferSchema,
   parseSchema,
   RESERVED_KEYS,
   schemaRoles,
@@ -55,6 +56,20 @@ describe("branch schema text", () => {
     fc.assert(
       fc.property(fc.string({ unit: fc.constantFrom(..."ab:{}, \n\timage"), maxLength: 30 }), (text) => {
         parseSchema(text);
+      })
+    );
+  });
+});
+
+describe("inferSchema", () => {
+  it("is well-formed, as wide as the widest record, and round-trips through the text format", () => {
+    fc.assert(
+      fc.property(nodeArb, (root) => {
+        const schema = inferSchema(root);
+        expect(schema.length).toBe(Math.max(0, ...root.children.map((r) => r.children.length)));
+        const keys = schema.map((f) => f.key);
+        expect(new Set(keys).size).toBe(keys.length);
+        expect(parseSchema(formatSchema(schema))).toEqual({ ok: true, schema: normalize(schema) });
       })
     );
   });

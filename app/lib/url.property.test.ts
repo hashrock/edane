@@ -1,7 +1,7 @@
 /**
  * Property-based tests for absoluteUrl: the one rule shared by every module
  * that builds an absolute URL from an origin and a path (public note links,
- * node publication URLs, site URLs, scenario fixtures).
+ * node publication URLs, web page URLs, scenario fixtures).
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";

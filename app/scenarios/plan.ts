@@ -28,17 +28,9 @@ export interface PlannedPublication {
   nodeId: string;
 }
 
-export interface PlannedSite {
-  publicationId: string;
-  template: string;
-  html: string;
-  css: string;
-}
-
 export interface ScenarioPlan {
   notes: PlannedNote[];
   publications: PlannedPublication[];
-  sites: PlannedSite[];
   /** 状態を作ったあとブラウザを送る先（オリジンなしのパス）。 */
   redirect: string;
 }

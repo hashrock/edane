@@ -127,26 +127,6 @@ export const webPages = sqliteTable("web_pages", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
-// A "site": one JSX template + its last build (static HTML/CSS) for a node
-// publication, served at /sites/:publicationId. The build is a SNAPSHOT —
-// JSX can only be compiled in the author's browser (Workers forbid eval and
-// TypeScript is far too heavy), so re-publishing is how the page refreshes.
-// Keyed by the publication so revoking it (row delete) orphans the site; the
-// serve path re-checks the publication + note anyway.
-export const sites = sqliteTable("sites", {
-  /** = node_publications.id (one site per publication). */
-  publicationId: text("publication_id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  template: text("template").notNull(),
-  html: text("html").notNull(),
-  css: text("css").notNull(),
-  updatedAt: text("updated_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
-
 // OAuth 2.1 for the remote MCP endpoint (docs/adr/0005-mcp-oauth.md). Rows are
 // created by dynamic client registration (open — anyone may register, a client
 // only gets access once a signed-in user approves it on the consent page).

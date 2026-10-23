@@ -5,10 +5,7 @@
  * 「ルートを 1 つ以上」の不変条件を守る（CLAUDE.md）。
  */
 import { ensureRoot, type IdSource, type MindMapDocument, type MindMapModel } from "../domain/model";
-import { toSiteNode } from "../application/siteNode";
-import { inferSchema, defaultTemplate } from "../application/siteSchema";
 import { scenarioTitle, type PlannedNote, type ScenarioContext, type ScenarioPlan } from "./plan";
-import { SITE_GOLDEN } from "./siteGolden";
 
 // --- 木の組み立て ---
 
@@ -63,7 +60,7 @@ const answer = 42;
 /** まっさら：空のルート 1 つだけの新規ノート。 */
 export function buildEmpty({ tag, nextId }: ScenarioContext): ScenarioPlan {
   const main = plannedNote("main", nextId, scenarioTitle("empty", tag), []);
-  return { notes: [main], publications: [], sites: [], redirect: `/notes/${main.id}/edit` };
+  return { notes: [main], publications: [], redirect: `/notes/${main.id}/edit` };
 }
 
 /** ふつうの利用状態：全ノード種別・チェックボックス・折りたたみ・複数の木 + 一覧に並ぶ数件のノート。 */
@@ -108,7 +105,6 @@ export function buildTypical({ tag, nextId }: ScenarioContext): ScenarioPlan {
   return {
     notes: [main, pinned, publicNote],
     publications: [],
-    sites: [],
     redirect: `/notes/${main.id}/edit`,
   };
 }
@@ -157,7 +153,6 @@ export function buildLarge({ tag, nextId }: ScenarioContext): ScenarioPlan {
   return {
     notes: [main, ...filler],
     publications: [],
-    sites: [],
     redirect: `/notes/${main.id}/edit`,
   };
 }
@@ -178,10 +173,10 @@ export function buildTrash({ tag, nextId }: ScenarioContext): ScenarioPlan {
     [node(nextId, "ゴミ箱の公開ノート", [node(nextId, "ゴミ箱に入ると公開 URL も 404")])],
     { trashed: true, isPublic: true }
   );
-  return { notes: [privateNote, publicNote], publications: [], sites: [], redirect: "/trash" };
+  return { notes: [privateNote, publicNote], publications: [], redirect: "/trash" };
 }
 
-/** 公開サイト向けの枝：2 階層目 = レコード、3 階層目 = フィールド（説明・URL・画像・タグ）。 */
+/** カタログ風の枝：2 階層目 = レコード、3 階層目 = フィールド（説明・URL・画像・タグ）。 */
 function catalogBranch(nextId: IdSource, count: number): MindMapModel {
   return node(
     nextId,
@@ -197,7 +192,7 @@ function catalogBranch(nextId: IdSource, count: number): MindMapModel {
   );
 }
 
-/** 公開ノート + 枝のノード公開（/pub/:id.json・.md）。サイトはまだ無い。 */
+/** 公開ノート + 枝のノード公開（/pub/:id.json・.md）。 */
 export function buildPublic({ tag, nextId }: ScenarioContext): ScenarioPlan {
   const branch = catalogBranch(nextId, 3);
   const main = plannedNote(
@@ -208,38 +203,5 @@ export function buildPublic({ tag, nextId }: ScenarioContext): ScenarioPlan {
     { isPublic: true }
   );
   const publication = { id: nextId(), noteId: main.id, nodeId: branch.id };
-  return { notes: [main], publications: [publication], sites: [], redirect: `/notes/${main.id}` };
-}
-
-/** `site` シナリオが公開する枝。golden fixture（siteGolden.ts）はこの枝から作られる。 */
-export const SITE_SCENARIO_RECORDS = 6;
-export function siteScenarioBranch(nextId: IdSource): MindMapModel {
-  return catalogBranch(nextId, SITE_SCENARIO_RECORDS);
-}
-
-/**
- * 公開済みサイト：公開ノート + ノード公開 + ビルド済みサイト（/sites/:pubId で配信される）。
- *
- * HTML/CSS は本物のコンパイラ（ono + UnoCSS。ブラウザの Worker と同じ
- * `compileProject`）で既定テンプレートから作った golden fixture。
- * siteGolden.test.ts が毎回コンパイルし直して一致を確かめるので、テンプレートや
- * コンパイラが変わればテストが落ちて `UPDATE_GOLDEN=1` で更新することになる。
- * 既定テンプレートは item.id を描かないので、ID が毎回違っても出力は同じ。
- */
-export function buildSite({ tag, nextId }: ScenarioContext): ScenarioPlan {
-  const branch = siteScenarioBranch(nextId);
-  const main = plannedNote("main", nextId, scenarioTitle("site", tag), [branch], { isPublic: true });
-  const publication = { id: nextId(), noteId: main.id, nodeId: branch.id };
-  const site = {
-    publicationId: publication.id,
-    template: defaultTemplate(inferSchema(toSiteNode(branch))),
-    html: SITE_GOLDEN.html,
-    css: SITE_GOLDEN.css,
-  };
-  return {
-    notes: [main],
-    publications: [publication],
-    sites: [site],
-    redirect: `/sites/${publication.id}/edit`,
-  };
+  return { notes: [main], publications: [publication], redirect: `/notes/${main.id}` };
 }

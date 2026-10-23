@@ -5,10 +5,10 @@
  * 名前を足したら定義（と docs/ui-test-scenarios.md）を書くまでコンパイルが通らない。
  */
 import { isKeyOf } from "../domain/isKeyOf";
-import { buildEmpty, buildLarge, buildPublic, buildSite, buildTrash, buildTypical } from "./fixtures";
+import { buildEmpty, buildLarge, buildPublic, buildTrash, buildTypical } from "./fixtures";
 import type { ScenarioContext, ScenarioPlan } from "./plan";
 
-export const SCENARIO_NAMES = ["empty", "typical", "large", "trash", "public", "site"] as const;
+export const SCENARIO_NAMES = ["empty", "typical", "large", "trash", "public"] as const;
 export type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
 export interface ScenarioDefinition {
@@ -48,15 +48,9 @@ export const SCENARIOS = {
   },
   public: {
     name: "public",
-    description: "公開ノート + 枝のノード公開（/pub/:id.json・.md が生きている）。サイトは未作成。閲覧ページを開く。",
+    description: "公開ノート + 枝のノード公開（/pub/:id.json・.md が生きている）。閲覧ページを開く。",
     target: "/notes/:id",
     build: buildPublic,
-  },
-  site: {
-    name: "site",
-    description: "公開済みサイト。公開ノート + ノード公開 + ビルド済みサイト（/sites/:pubId で配信）。サイトエディタを開く。",
-    target: "/sites/:pubId/edit",
-    build: buildSite,
   },
 } as const satisfies Record<ScenarioName, ScenarioDefinition>;
 

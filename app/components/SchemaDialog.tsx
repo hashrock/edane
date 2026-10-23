@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatSchema, parseSchema } from "../domain/branchSchema";
-import { inferSchema } from "../application/siteSchema";
-import { toSiteNode } from "../application/siteNode";
+import { formatSchema, inferSchema, parseSchema } from "../domain/branchSchema";
 import {
   addField,
   blankField,
@@ -40,7 +38,7 @@ export default function SchemaDialog({ node, onSave, onClose }: Props) {
   useLocale();
   const rid = useRef(ridSource()).current;
   const initial = useMemo(() => parseSchema(node.schema ?? ""), [node.schema]);
-  const inferred = useMemo(() => inferSchema(toSiteNode(node)), [node]);
+  const inferred = useMemo(() => inferSchema(node), [node]);
   // 保存済みのスキーマが読めない（手で壊した）ときはテキストタブで開く。
   const [tab, setTab] = useState<Tab>(initial.ok ? "fields" : "text");
   const [draft, setDraft] = useState<DraftField[]>(() => (initial.ok ? toDraft(initial.schema, rid) : []));

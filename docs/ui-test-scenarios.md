@@ -29,7 +29,7 @@ Chrome MCP などのブラウザ自動操作で UI を試すとき、毎回手�
 
 ## 安全性（本番でも公開してよい）
 
-- **INSERT / UPSERT しかしない。** 既存のノート・公開・サイトを更新・削除する経路が無い（`app/scenarios/seed.ts` → `app/utils/noteRepository.ts`。server.ts のハンドラと同じ書き込み関数）。
+- **INSERT しかしない。** 既存のノート・公開を更新・削除する経路が無い（`app/scenarios/seed.ts` → `app/utils/noteRepository.ts`。server.ts のハンドラと同じ書き込み関数）。
 - **自分のデータだけ。** 本番ではログイン中ユーザーの新規データとして作られる。ノートのタイトルはすべて `scenario-<name>-<6桁ランダム>` で始まるので、あとから一覧で見分けて捨てられる。
 - **認証を迂回しない。** 使い捨てユーザーでの `signIn` は `bypassAuth` のときだけ（`resolveScenarioAccess` が `auth.kind` で分岐）。
 - **他のサイトからは開けない。** GET で書き込むので、本番では `Sec-Fetch-Site` が `cross-site` / `same-site`（別サイトや別サブドメインのリンク・リダイレクト）なら `403`。URL を直接開く・一覧から辿る・ブラウザ以外（ヘッダーなし）は通る。他サイトに置いたリンクでログイン中ユーザーに公開ノートを作らせることはできない。
@@ -42,14 +42,7 @@ Chrome MCP などのブラウザ自動操作で UI を試すとき、毎回手�
 | `typical` | text / link / image / markdown の各ノード、チェックボックス（済・未）、折りたたみ、太字・大きい文字、複数の木を持つノート。加えてピン留めノート 1 件・公開ノート 1 件 | `/notes/:id/edit` |
 | `large` | 子 40 個の広い木、深さ 15 の木、長文（日本語・空白なしの長い単語・長い Markdown）、`position` で位置固定した木。加えて一覧を埋める 20 件（一部公開・長いタイトル） | `/notes/:id/edit` |
 | `trash` | ゴミ箱に非公開 1 件・公開 1 件 | `/trash` |
-| `public` | 公開ノート + 枝のノード公開。`/pub/:id.json` `/pub/:id.md` が生きていて、サイトはまだ無い（サイトエディタは下書き状態） | `/notes/:id`（閲覧ページ） |
-| `site` | 公開ノート + ノード公開 + ビルド済みサイト。`/sites/:pubId` で配信され、サイトエディタは「公開済み」になる | `/sites/:pubId/edit` |
-
-`site` の HTML/CSS は **golden fixture**（`app/scenarios/siteGolden.ts`）。ブラウザの Worker と同じコンパイラ（ono + UnoCSS）で既定テンプレートから作った本物の成果物で、`siteGolden.test.ts` が毎回コンパイルし直して一致を検証する。テンプレートやコンパイラを変えたら次のコマンドで更新する：
-
-```bash
-UPDATE_GOLDEN=1 pnpm vitest run --project node app/scenarios/siteGolden.test.ts
-```
+| `public` | 公開ノート + 枝のノード公開。`/pub/:id.json` `/pub/:id.md` が生きている | `/notes/:id`（閲覧ページ） |
 
 ## Chrome MCP からの使い方
 
@@ -57,19 +50,18 @@ UPDATE_GOLDEN=1 pnpm vitest run --project node app/scenarios/siteGolden.test.ts
 2. JSON で状態を作り、ID と URL を受け取る：
 
    ```bash
-   curl -s 'http://localhost:5173/__scenarios/site?format=json' | jq .
+   curl -s 'http://localhost:5173/__scenarios/public?format=json' | jq .
    ```
 
    ```json
    {
-     "scenario": "site",
+     "scenario": "public",
      "tag": "3f9a1c",
-     "user": { "id": "<uuid>", "email": "<uuid>@scenario.invalid", "name": "scenario-site-3f9a1c" },
+     "user": { "id": "<uuid>", "email": "<uuid>@scenario.invalid", "name": "scenario-public-3f9a1c" },
      "signedInAs": "throwaway",
-     "redirect": "http://localhost:5173/sites/<pubId>/edit",
-     "notes": [{ "key": "main", "id": "…", "title": "scenario-site-3f9a1c", "isPublic": true, "editUrl": "…", "viewUrl": "…" }],
-     "publications": [{ "id": "<pubId>", "jsonUrl": "…/pub/<pubId>.json", "markdownUrl": "…/pub/<pubId>.md", "siteEditUrl": "…" }],
-     "sites": [{ "publicationId": "<pubId>", "url": "http://localhost:5173/sites/<pubId>", "editUrl": "…" }]
+     "redirect": "http://localhost:5173/notes/<noteId>",
+     "notes": [{ "key": "main", "id": "<noteId>", "title": "scenario-public-3f9a1c", "isPublic": true, "editUrl": "…", "viewUrl": "…" }],
+     "publications": [{ "id": "<pubId>", "jsonUrl": "…/pub/<pubId>.json", "markdownUrl": "…/pub/<pubId>.md" }]
    }
    ```
 

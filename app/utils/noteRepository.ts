@@ -1,5 +1,5 @@
 /**
- * Write-side repository for notes / node publications / sites: the INSERT and
+ * Write-side repository for notes / node publications: the INSERT and
  * UPSERT shapes live here once, used by both the request handlers in
  * server.ts and the scenario seeder (scenarios/seed.ts). The storage policy
  * for note content (public = plaintext, private = encrypted) is applied here
@@ -7,7 +7,7 @@
  */
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { notes, nodePublications, sites } from "../db/schema";
+import { notes, nodePublications } from "../db/schema";
 import { encodeNoteContentForStorage, noteStorageMode, type NoteKeys } from "./crypto";
 
 export interface NewNote {
@@ -70,22 +70,4 @@ export interface NewPublication {
 
 export async function insertPublication(db: DrizzleD1Database, pub: NewPublication): Promise<void> {
   await db.insert(nodePublications).values(pub);
-}
-
-export interface SiteUpsert {
-  publicationId: string;
-  userId: string;
-  template: string;
-  html: string;
-  css: string;
-  updatedAt: string;
-}
-
-/** Insert or replace the site for a publication (one site per publication). */
-export async function upsertSite(db: DrizzleD1Database, site: SiteUpsert): Promise<void> {
-  const { publicationId, userId, ...row } = site;
-  await db
-    .insert(sites)
-    .values({ publicationId, userId, ...row })
-    .onConflictDoUpdate({ target: sites.publicationId, set: row });
 }

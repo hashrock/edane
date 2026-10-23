@@ -31,7 +31,7 @@ describe("scenario routes with a mock AuthProvider", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("Alice");
-    for (const name of ["empty", "typical", "large", "trash", "public", "site"]) {
+    for (const name of ["empty", "typical", "large", "trash", "public"]) {
       expect(body).toContain(`/__scenarios/${name}?format=json`);
     }
   });

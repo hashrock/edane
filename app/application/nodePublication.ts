@@ -74,9 +74,8 @@ export function canServePublication(
  *
  * フィールドを明示列挙する allowlist にしてあるのは、`MindMapModel` に
  * 編集専用の内部フィールドが増えたとき、ここに明示的に足さない限り公開
- * JSONへ自動で漏れないようにするため（siteNode.ts の `SiteNode` と
- * 同じ考え方 — spread してから除外する blocklist だと逆に、除外し忘れた
- * 新フィールドがデフォルトで公開されてしまう）。
+ * JSONへ自動で漏れないようにするため（spread してから除外する blocklist
+ * だと逆に、除外し忘れた新フィールドがデフォルトで公開されてしまう）。
  */
 export interface PublishedNode {
   id: string;

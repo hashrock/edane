@@ -1,8 +1,7 @@
 /**
  * Baseline security headers on every response (#217). A route that needs a
  * stricter policy sets its own Content-Security-Policy and keeps it: the
- * published sites (sandboxed), the raw images (sandboxed), the OAuth consent
- * page (no framing at all).
+ * raw images (sandboxed), the OAuth consent page (no framing at all).
  *
  * - `frame-ancestors 'self'`: no other site can frame the app to trick a click
  *   (the landing page embeds /guest, which is same-origin).

@@ -1,6 +1,6 @@
 /**
  * `escapeHtml` is a security boundary (used to build the 404 page and the
- * public site's `<title>`), so its contract is checked against arbitrary
+ * server-rendered Markdown), so its contract is checked against arbitrary
  * strings rather than a handful of hand-picked examples.
  */
 import { describe, it, expect } from "vitest";
