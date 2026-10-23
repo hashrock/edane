@@ -54,8 +54,8 @@ function canonical(value: unknown): unknown {
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 /**
- * Fields as storage keeps them. Persistence drops `collapsed: false`, `bold: false` and a
- * blank `schema`, and NoteRoom reloads every commit's base from storage, so the reducer's
+ * Fields as storage keeps them. Persistence drops `collapsed: false` and `bold: false`,
+ * and NoteRoom reloads every commit's base from storage, so the reducer's
  * explicit default and the reloaded absence must count as the same value when checking
  * a patch's `before` — or collapsing a branch this session expanded conflicts with itself.
  */
@@ -195,11 +195,11 @@ export function parseCommit(value: unknown): Commit {
       const normalized = normalizeDocument({ roots: [{ ...n.fields, id, children: [] }] }, "");
       const fields = normalized?.roots[0];
       if (!fields) throw new InvalidCommit("Invalid fields");
-      const allowed = new Set(["text", "collapsed", "type", "fontSize", "bold", "linkTitle", "favicon", "checked", "schema", "position"]);
+      const allowed = new Set(["text", "collapsed", "type", "fontSize", "bold", "linkTitle", "favicon", "checked", "position"]);
       for (const [key, val] of Object.entries(n.fields)) {
         if (!allowed.has(key)) throw new InvalidCommit(`Unknown field: ${key}`);
-        // false booleans and empty schema are valid reducer output.
-        if ((key === "collapsed" || key === "bold") && val === false || key === "schema" && val === "") continue;
+        // false booleans are valid reducer output.
+        if ((key === "collapsed" || key === "bold") && val === false) continue;
         if (!same(val, (fields as unknown as Record<string, unknown>)[key])) throw new InvalidCommit(`Invalid field: ${key}`);
       }
     }

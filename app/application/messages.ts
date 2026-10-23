@@ -131,25 +131,6 @@ export const MESSAGES_JA = {
   menuUploadImage: "画像をアップロード",
   menuCopyBranchText: "枝をテキストコピー",
   menuPublishNode: "Web公開（JSON / Markdown）…",
-  menuSetSchema: "スキーマを設定…",
-  schemaDialogTitle: "枝のスキーマ",
-  schemaDialogHint:
-    "子 = レコード、レコードの子の順番 = フィールドです。行の順番がフィールドの位置になります。入れ子にしたいときは、フィールドのノードにもスキーマを付けてください。",
-  schemaDialogTypes:
-    "例: author, cover:image, done:check, price:number, on:date（型: text / image / link / markdown / check / number / date）",
-  schemaDialogPlaceholder: "推定: {schema}",
-  schemaDialogAdopt: "推定を採用",
-  schemaDialogSave: "保存",
-  schemaDialogRemove: "スキーマを外す",
-  schemaMismatch: "{key} は {type} のはず",
-  schemaTabFields: "フィールド",
-  schemaTabText: "テキスト",
-  schemaAddField: "＋ フィールド",
-  schemaKeyPlaceholder: "キー",
-  schemaMoveUp: "上へ",
-  schemaMoveDown: "下へ",
-  schemaRemoveField: "フィールドを削除",
-  schemaNoFields: "フィールドがありません。追加するか、推定を採用してください。",
   menuDeleteNode: "ノードを削除",
 
   // --- コマンドパレット ---
@@ -555,25 +536,6 @@ export const MESSAGES_EN = {
   menuUploadImage: "Upload image",
   menuCopyBranchText: "Copy branch as text",
   menuPublishNode: "Publish to web (JSON / Markdown)…",
-  menuSetSchema: "Set schema…",
-  schemaDialogTitle: "Branch schema",
-  schemaDialogHint:
-    "Children = records, a record's children in order = fields. The row order is the field position. To nest, give the field's node a schema of its own.",
-  schemaDialogTypes:
-    "e.g. author, cover:image, done:check, price:number, on:date (types: text / image / link / markdown / check / number / date)",
-  schemaDialogPlaceholder: "Inferred: {schema}",
-  schemaDialogAdopt: "Use inferred",
-  schemaDialogSave: "Save",
-  schemaDialogRemove: "Remove schema",
-  schemaMismatch: "{key} should be {type}",
-  schemaTabFields: "Fields",
-  schemaTabText: "Text",
-  schemaAddField: "+ Field",
-  schemaKeyPlaceholder: "key",
-  schemaMoveUp: "Move up",
-  schemaMoveDown: "Move down",
-  schemaRemoveField: "Remove field",
-  schemaNoFields: "No fields yet. Add one or use the inferred schema.",
   menuDeleteNode: "Delete node",
 
   // --- Command palette ---

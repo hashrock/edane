@@ -172,6 +172,16 @@ describe("parseContent", () => {
     expect(back).toEqual(doc);
   });
 
+  it("drops the retired branch schema, keeping the nodes it padded", () => {
+    const content = JSON.stringify({
+      version: 2,
+      roots: [{ id: "r", text: "Books", schema: "author, done:check", children: [{ id: "b", text: "Dune", children: [{ id: "f", text: "", children: [] }] }] }],
+    });
+    expect(parseContent(content, "T").roots).toEqual([
+      { id: "r", text: "Books", children: [{ id: "b", text: "Dune", children: [{ id: "f", text: "", children: [] }] }] },
+    ]);
+  });
+
   it("migrates v1 JSON as a SINGLE root: the old root node keeps its id and subtree", () => {
     const v1 = {
       id: "old-root",

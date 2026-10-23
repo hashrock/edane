@@ -6,8 +6,7 @@
  * Every edit is expressed as {@link EditorAction}s run through
  * {@link editorReducer}, so a remote edit keeps exactly the invariants an edit
  * in the browser does (a root always exists, nesting goes through
- * `nestUnder`, records entering a schema'd collection get their fields from
- * `conformEntering`, a root never grows a sibling). Nothing here re-implements
+ * `nestUnder`, a root never grows a sibling). Nothing here re-implements
  * a tree operation.
  *
  * The outline is the read format handed to the agent: the note as the same
