@@ -32,6 +32,12 @@ export const BACKGROUND_PRESET = closedStringSet({
   waves: true,
   particles: true,
   aurora: true,
+  silk: true,
+  haze: true,
+  contour: true,
+  dust: true,
+  shore: true,
+  cloth: true,
 } as const);
 export type BackgroundPreset = (typeof BACKGROUND_PRESET.values)[number];
 

@@ -26,6 +26,12 @@ const PRESET_LABEL: Record<BackgroundPreset, MessageKey> = {
   waves: "themeBgWaves",
   particles: "themeBgParticles",
   aurora: "themeBgAurora",
+  silk: "themeBgSilk",
+  haze: "themeBgHaze",
+  contour: "themeBgContour",
+  dust: "themeBgDust",
+  shore: "themeBgShore",
+  cloth: "themeBgCloth",
 };
 
 const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
