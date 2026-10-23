@@ -2,27 +2,23 @@
  * The document drawn as pages with its theme — one markup for every place a
  * page appears: the slideshow (variant `slide`, one 16:9 page at a time), the
  * editor's page preview and the published web page (variant `web`, pages
- * stacked). The look lives in webpage.css under stable `wp-*` class names,
- * which are also what the theme's author CSS styles.
+ * stacked). The look lives in webpage.css under `wp-*` class names; the
+ * theme picks among its variants through custom properties and data attributes.
  *
  * Server-safe: no effects or browser APIs outside {@link PageBackground}'s
  * effect, so the published page is this same markup rendered to a string.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { MindMapModel } from "../domain/model";
 import type { PageBackground as PageBackgroundOptions, PageTheme } from "../domain/pageTheme";
 import type { Slide } from "../application/slides";
 import { nodeDisplayText, supportsCheckbox } from "../application/nodeUtils";
 import { googleFontsHref, themeVars } from "../application/pageThemeStyle";
-import { scopeUserCss } from "../application/scopedCss";
 import { renderSafeMarkdown, safePageUrl } from "../lib/safeMarkdown";
 import { safeExternalUrl } from "../lib/url";
 import { startBackground, type BackgroundHandle } from "../lib/parallaxBackground";
 
 export type PageVariant = "slide" | "web";
-
-/** The selector the theme's author CSS is scoped to. */
-export const PAGE_SCOPE = ".wp-root";
 
 /**
  * How page content renders markdown and image URLs. The default is safe
@@ -38,17 +34,10 @@ export interface PageContentPolicy {
 
 export const PageContentContext = createContext<PageContentPolicy>({ markdownHtml: renderSafeMarkdown, imageSrc: safePageUrl });
 
-/** The theme's font stylesheet and scoped author CSS (render once per document). */
+/** The theme's font stylesheet (render once per document). */
 export function PageThemeAssets({ theme }: { theme: PageTheme }) {
   const fonts = googleFontsHref(theme);
-  // The preview re-renders on every keystroke; the CSS only when it changes.
-  const css = useMemo(() => scopeUserCss(theme.css, PAGE_SCOPE), [theme.css]);
-  return (
-    <>
-      {fonts && <link rel="stylesheet" href={fonts} />}
-      {css && <style data-testid="page-theme-css" dangerouslySetInnerHTML={{ __html: css }} />}
-    </>
-  );
+  return fonts ? <link rel="stylesheet" href={fonts} /> : null;
 }
 
 interface RootProps {
@@ -62,7 +51,7 @@ interface RootProps {
   testId?: string;
 }
 
-/** The themed page container: custom properties, variant, scroll-effect settings. */
+/** The themed page container: custom properties, variant, heading style, scroll-effect settings. */
 export function PageRoot({ theme, variant, children, className, style, rootRef, onClick, testId }: RootProps) {
   return (
     <div
@@ -70,6 +59,7 @@ export function PageRoot({ theme, variant, children, className, style, rootRef, 
       data-testid={testId}
       className={`wp-root${className ? ` ${className}` : ""}`}
       data-variant={variant}
+      data-heading={theme.headingStyle}
       data-effect={theme.scrollEffect}
       data-stagger={theme.stagger ? "" : undefined}
       style={{ ...(themeVars(theme) as CSSProperties), ...style }}

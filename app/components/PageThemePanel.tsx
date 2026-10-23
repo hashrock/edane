@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BACKGROUND_PRESET,
   DEFAULT_PAGE_THEME,
+  HEADING_STYLE,
   MAX_SPEED,
-  MAX_THEME_CSS,
   PAGE_FONT,
   SCROLL_EFFECT,
   effectiveTheme,
   rebaseTheme,
   type BackgroundPreset,
+  type HeadingStyle,
   type PageFont,
   type PageTheme,
   type ScrollEffect,
@@ -32,6 +33,30 @@ const PRESET_LABEL: Record<BackgroundPreset, MessageKey> = {
   cloth: "themeBgCloth",
 };
 
+const HEADING_LABEL: Record<HeadingStyle, MessageKey> = {
+  simple: "themeHeadingSimple",
+  underline: "themeHeadingUnderline",
+  bar: "themeHeadingBar",
+  band: "themeHeadingBand",
+  accent: "themeHeadingAccent",
+};
+
+/** A heading style in miniature, for its swatch (mirrors webpage.css's data-heading rules). */
+function headingSample(style: HeadingStyle, accent: string): React.CSSProperties {
+  switch (style) {
+    case "underline":
+      return { borderBottom: `2px solid ${accent}`, paddingBottom: 1 };
+    case "bar":
+      return { borderLeft: `3px solid ${accent}`, paddingLeft: 4 };
+    case "band":
+      return { background: `color-mix(in srgb, ${accent} 16%, transparent)`, padding: "1px 4px", borderRadius: 2 };
+    case "accent":
+      return { color: accent };
+    case "simple":
+      return {};
+  }
+}
+
 const EFFECT_LABEL: Record<ScrollEffect, MessageKey> = {
   none: "themeEffectNone",
   "fade-up": "themeEffectFadeUp",
@@ -53,10 +78,10 @@ interface Props {
 }
 
 /**
- * ページモードの右サイドパネル: the note's page theme (fonts, colours, the
- * WebGL background, scroll effect, author CSS) — one theme for both formats,
- * the slides and the web page. A plain form beside the editor — it takes the keyboard only when
- * one of its own fields is clicked, and Escape closes it. It slides in from
+ * ページモードの右サイドパネル: the note's page theme (fonts, heading style,
+ * colours, the WebGL background, scroll effect) — one theme for both formats,
+ * the slides and the web page. A plain form beside the editor — it takes the
+ * keyboard only when one of its own fields is clicked, and Escape closes it. It slides in from
  * the right edge and back out; closed, it is `invisible` (out of the tab
  * order and the accessibility tree) once the slide ends.
  */
@@ -158,6 +183,30 @@ export default function PageThemePanel({ open, theme, onChange, onClose, readOnl
         </section>
 
         <section className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeHeadingStyle")}</h3>
+          <div role="radiogroup" aria-label={t("themeHeadingStyle")} className="grid grid-cols-5 gap-1.5">
+            {HEADING_STYLE.values.map((h) => (
+              <button
+                key={h}
+                type="button"
+                role="radio"
+                aria-checked={draft.headingStyle === h}
+                data-testid={`theme-heading-${h}`}
+                onClick={() => set("headingStyle", h)}
+                className={`flex flex-col items-center gap-1 rounded-md border px-1 py-1.5 text-[10px] text-slate-500 disabled:opacity-60 ${
+                  draft.headingStyle === h ? "border-emerald-500 bg-emerald-50/60 text-emerald-700" : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className="text-sm font-bold leading-tight" style={{ color: draft.textColor, ...headingSample(h, draft.accentColor) }}>
+                  Aa
+                </span>
+                {t(HEADING_LABEL[h])}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeColors")}</h3>
           <div className="flex gap-3">
             <ColorField label={t("themeTextColor")} value={draft.textColor} onChange={(v) => set("textColor", v)} />
@@ -196,22 +245,6 @@ export default function PageThemePanel({ open, theme, onChange, onClose, readOnl
             <input type="checkbox" checked={draft.stagger} onChange={(e) => set("stagger", e.target.checked)} />
             {t("themeStagger")}
           </label>
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("themeCss")}</h3>
-          <textarea
-            data-testid="theme-css"
-            aria-label={t("themeCss")}
-            spellCheck={false}
-            maxLength={MAX_THEME_CSS}
-            rows={8}
-            className={`${field} font-mono text-xs`}
-            placeholder={".wp-heading {\n  letter-spacing: 0.05em;\n}"}
-            value={draft.css}
-            onChange={(e) => set("css", e.target.value)}
-          />
-          <p className="text-[11px] leading-snug text-slate-400">{t("themeCssHint")}</p>
         </section>
 
         <button

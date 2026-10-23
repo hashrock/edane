@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MindMapDocument } from "./domain/model";
-import { DEFAULT_PAGE_THEME } from "./domain/pageTheme";
+import { DEFAULT_PAGE_THEME, normalizePageTheme } from "./domain/pageTheme";
 import { renderWebPage } from "./webpage-view";
 
 const doc: MindMapDocument = {
@@ -9,7 +9,7 @@ const doc: MindMapDocument = {
     ...DEFAULT_PAGE_THEME,
     headingFont: "zen-maru-gothic",
     background: { ...DEFAULT_PAGE_THEME.background, preset: "waves" },
-    css: '.wp-heading { color: red; } .x::after { content: "</style><script>alert(2)</script>"; }',
+    headingStyle: "bar",
   },
   roots: [
     {
@@ -34,12 +34,19 @@ describe("renderWebPage", () => {
     expect(html).toContain('<canvas class="wp-bg"');
   });
 
-  it("loads the theme's fonts and scoped CSS", () => {
+  it("loads the theme's fonts and picks its heading style", () => {
     expect(html).toContain("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic");
-    expect(html).toContain("@scope (.wp-root) {\n.wp-heading { color: red; }");
+    expect(html).toContain('data-heading="bar"');
   });
 
-  it("lets no script in from the title, node text, markdown, links or CSS", () => {
+  it("draws no author CSS, even from a theme stored with one", () => {
+    const old = normalizePageTheme({ ...doc.theme, css: "body { display: none; }" })!;
+    const page = renderWebPage({ ...doc, theme: old });
+    expect(page).not.toContain("<style");
+    expect(page).not.toContain("display: none");
+  });
+
+  it("lets no script in from the title, node text, markdown or links", () => {
     const scripts = html.match(/<script[^>]*>/g) ?? [];
     // Only the runtime module and the JSON data block.
     expect(scripts).toHaveLength(2);

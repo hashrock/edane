@@ -4,7 +4,7 @@ import {
   BACKGROUND_PRESET,
   DEFAULT_PAGE_THEME,
   MAX_SPEED,
-  MAX_THEME_CSS,
+  HEADING_STYLE,
   PAGE_FONT,
   SCROLL_EFFECT,
   normalizePageTheme,
@@ -29,7 +29,7 @@ function expectWellFormed(theme: PageTheme) {
   expect(theme.background.parallax).toBeLessThanOrEqual(1);
   expect(SCROLL_EFFECT.is(theme.scrollEffect)).toBe(true);
   expect(typeof theme.stagger).toBe("boolean");
-  expect(theme.css.length).toBeLessThanOrEqual(MAX_THEME_CSS);
+  expect(HEADING_STYLE.is(theme.headingStyle)).toBe(true);
 }
 
 /** A theme-shaped object whose fields may be anything. */
@@ -54,7 +54,7 @@ const looseThemeArb = fc.record(
     ),
     scrollEffect: fc.anything(),
     stagger: fc.anything(),
-    css: fc.oneof(fc.string(), fc.anything()),
+    headingStyle: fc.oneof(fc.constantFrom(...HEADING_STYLE.values, "toString"), fc.anything()),
   },
   { requiredKeys: [] }
 );
@@ -96,7 +96,7 @@ describe("rebaseTheme", () => {
   it("keeps what changed meanwhile and replays only the edited fields", () => {
     const base = DEFAULT_PAGE_THEME;
     const edit: PageTheme = { ...base, accentColor: "#ff0000", background: { ...base.background, speed: 0 } };
-    const current: PageTheme = { ...base, css: ".wp-heading { color: red; }", background: { ...base.background, colorA: "#000000" } };
+    const current: PageTheme = { ...base, headingStyle: "band", background: { ...base.background, colorA: "#000000" } };
     expect(rebaseTheme(edit, base, current)).toEqual({
       ...current,
       accentColor: "#ff0000",
@@ -105,7 +105,7 @@ describe("rebaseTheme", () => {
   });
 
   it("is the edit when nothing changed meanwhile", () => {
-    const edit: PageTheme = { ...DEFAULT_PAGE_THEME, stagger: !DEFAULT_PAGE_THEME.stagger, css: "x" };
+    const edit: PageTheme = { ...DEFAULT_PAGE_THEME, stagger: !DEFAULT_PAGE_THEME.stagger, headingStyle: "bar" };
     expect(rebaseTheme(edit, DEFAULT_PAGE_THEME, DEFAULT_PAGE_THEME)).toEqual(edit);
   });
 });

@@ -7,7 +7,8 @@
  * published page. Absent = {@link DEFAULT_PAGE_THEME}, which draws exactly
  * the plain white slide the presentation mode always had.
  *
- * Every field is a closed choice or a bounded value: the theme is untrusted
+ * Every field is a closed choice or a bounded value (there is no author CSS:
+ * the look is picked, not written): the theme is untrusted
  * input (the DB, the sync wire) and {@link normalizePageTheme} is the one
  * gate that turns any JSON into a well-formed theme.
  */
@@ -49,6 +50,19 @@ export const SCROLL_EFFECT = closedStringSet({
 } as const);
 export type ScrollEffect = (typeof SCROLL_EFFECT.values)[number];
 
+/**
+ * How a page's heading is decorated. `simple` is the look pages always had
+ * (the title page's short rule, plain headings elsewhere), so it is the default.
+ */
+export const HEADING_STYLE = closedStringSet({
+  simple: true,
+  underline: true,
+  bar: true,
+  band: true,
+  accent: true,
+} as const);
+export type HeadingStyle = (typeof HEADING_STYLE.values)[number];
+
 /** The animated background behind the pages. */
 export interface PageBackground {
   preset: BackgroundPreset;
@@ -74,12 +88,10 @@ export interface PageTheme {
   scrollEffect: ScrollEffect;
   /** Items of a page appear one after another. */
   stagger: boolean;
-  /** Author CSS, scoped to the page (see application/scopedCss.ts). */
-  css: string;
+  headingStyle: HeadingStyle;
 }
 
 export const MAX_SPEED = 3;
-export const MAX_THEME_CSS = 20_000;
 
 export const DEFAULT_PAGE_THEME: PageTheme = {
   headingFont: "system",
@@ -89,7 +101,7 @@ export const DEFAULT_PAGE_THEME: PageTheme = {
   background: { preset: "none", colorA: "#ffffff", colorB: "#d1fae5", speed: 1, parallax: 0.3 },
   scrollEffect: "fade-up",
   stagger: true,
-  css: "",
+  headingStyle: "simple",
 };
 
 const HEX = /^#[0-9a-f]{6}$/;
@@ -128,7 +140,7 @@ export function normalizePageTheme(value: unknown): PageTheme | null {
     },
     scrollEffect: SCROLL_EFFECT.is(v.scrollEffect) ? v.scrollEffect : d.scrollEffect,
     stagger: typeof v.stagger === "boolean" ? v.stagger : d.stagger,
-    css: typeof v.css === "string" ? v.css.slice(0, MAX_THEME_CSS) : d.css,
+    headingStyle: HEADING_STYLE.is(v.headingStyle) ? v.headingStyle : d.headingStyle,
   };
 }
 

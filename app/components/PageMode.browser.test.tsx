@@ -1,16 +1,16 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "vitest-browser-react";
 import { page, userEvent } from "vitest/browser";
 import NoteEditor from "./NoteEditor";
 import type { MindMapModel } from "../domain/model";
-// The real page-view stylesheet: the frame's containment is under test.
+// The real page-view stylesheet: the heading styles are under test.
 import "./webpage.css";
 
 /**
  * ページモード: the header toggle shows the page the selected item is on in
  * the top-right corner, following the selection, as a slide or as the web
  * page; the theme panel edits the note's theme, which the preview (in either
- * format) and the slideshow pick up — author CSS included, confined to the page.
+ * format) and the slideshow pick up.
  */
 
 const ROOTS: MindMapModel[] = [
@@ -37,10 +37,6 @@ const counter = () => q('[data-testid="page-preview-counter"]')?.textContent;
 const previewText = () => q('[data-testid="page-preview-page"]')?.textContent ?? "";
 const row = (text: string) =>
   Array.from(document.querySelectorAll<HTMLElement>(".cursor-text")).find((el) => el.textContent === text)!;
-
-afterEach(() => {
-  document.querySelectorAll('[data-testid="page-theme-css"]').forEach((el) => el.remove());
-});
 
 async function openPageMode() {
   await page.viewport(600, 800);
@@ -83,7 +79,7 @@ describe("Pages mode (browser e2e)", () => {
     await waitFor(() => q('[data-testid="page-preview"]') === null);
   });
 
-  it("applies theme edits to the preview, with author CSS confined to the page", async () => {
+  it("applies theme edits to the preview", async () => {
     await openPageMode();
     q<HTMLButtonElement>('[data-testid="page-theme-open"]')!.click();
     await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') !== null);
@@ -93,43 +89,32 @@ describe("Pages mode (browser e2e)", () => {
     q<HTMLButtonElement>('[data-testid="page-format-web"]')!.click();
     await waitFor(() => q('[data-testid="page-preview-page"][data-variant="web"] > canvas.wp-bg') !== null);
 
-    // A stray } would close the scope: the whole CSS is refused.
-    await userEvent.fill(page.getByTestId("theme-css"), ".wp-heading { color: red; } } body { display: none; }");
-    await new Promise((r) => setTimeout(r, 400));
-    expect(q('[data-testid="page-theme-css"]')).toBeNull();
-    expect(getComputedStyle(document.body).display).not.toBe("none");
-
-    // Balanced CSS styles the page — and only the page, even when it tries to cover the screen.
-    await userEvent.fill(
-      page.getByTestId("theme-css"),
-      ".wp-heading { color: rgb(255, 0, 0); position: fixed; inset: 0; } body, .cursor-text { display: none; }"
-    );
-    await waitFor(() => q('[data-testid="page-theme-css"]') !== null);
-    const heading = q('[data-testid="page-preview-page"] .wp-heading')!;
-    expect(getComputedStyle(heading).color).toBe("rgb(255, 0, 0)");
-    expect(getComputedStyle(document.body).display).not.toBe("none");
-    expect(getComputedStyle(row("Talk")).display).not.toBe("none");
-    const frame = heading.closest(".wp-frame")!.getBoundingClientRect();
-    const box = heading.getBoundingClientRect();
-    expect(box.left).toBeGreaterThanOrEqual(frame.left - 1);
-    expect(box.right).toBeLessThanOrEqual(frame.right + 1);
-    expect(box.bottom).toBeLessThanOrEqual(frame.bottom + 1);
+    // The heading style is picked from the swatches; the preview follows.
+    const root = () => q('[data-testid="page-preview-page"]')!;
+    expect(root().getAttribute("data-heading")).toBe("simple");
+    await userEvent.click(page.getByTestId("theme-heading-bar"));
+    await waitFor(() => root().getAttribute("data-heading") === "bar");
+    expect(page.getByTestId("theme-heading-bar").element().getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(row("How"));
+    await waitFor(() => counter() === "Page 3 / 3");
+    expect(parseFloat(getComputedStyle(root().querySelector(".wp-heading")!).borderLeftWidth)).toBeGreaterThan(0);
 
     // Escape closes the panel; the theme stays.
-    page.getByTestId("theme-css").element().focus();
+    page.getByTestId("theme-heading-bar").element().focus();
     await userEvent.keyboard("{Escape}");
     await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') === null);
-    expect(q('[data-testid="page-theme-css"]')).not.toBeNull();
+    expect(root().getAttribute("data-heading")).toBe("bar");
   });
 
   it("uses the same theme in the slideshow", async () => {
     await openPageMode();
     q<HTMLButtonElement>('[data-testid="page-theme-open"]')!.click();
     await waitFor(() => q('[data-testid="page-theme-panel"][data-open]') !== null);
-    await userEvent.fill(page.getByTestId("theme-css"), ".wp-heading { color: rgb(0, 0, 255); }");
-    await waitFor(() => q('[data-testid="page-theme-css"]') !== null);
+    await userEvent.click(page.getByTestId("theme-heading-accent"));
+    await waitFor(() => q('[data-testid="page-preview-page"][data-heading="accent"]') !== null);
     q<HTMLButtonElement>('[data-testid="page-present"]')!.click();
     await waitFor(() => q('[data-testid="slideshow"]') !== null);
-    expect(getComputedStyle(q('[data-testid="slide"] .wp-heading')!).color).toBe("rgb(0, 0, 255)");
+    // The accent colour (the default theme's #10b981).
+    expect(getComputedStyle(q('[data-testid="slide"] .wp-heading')!).color).toBe("rgb(16, 185, 129)");
   });
 });

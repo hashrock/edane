@@ -3,12 +3,10 @@
  * Shared by the slideshow (data-variant="slide"), the editor's page preview
  * and the published web page (data-variant="web").
  *
- * The `wp-*` class names are a public contract: the theme's author CSS
- * targets them. Rename one and existing themes silently stop applying.
- *
  * Theme values arrive as custom properties on .wp-root (themeVars in
  * application/pageThemeStyle.ts): --wp-heading-font, --wp-body-font,
- * --wp-fg, --wp-accent, --wp-bg.
+ * --wp-fg, --wp-accent, --wp-bg. Its closed choices arrive as data
+ * attributes on .wp-root: data-variant, data-heading, data-effect, data-stagger.
  */
 
 .wp-body {
@@ -66,6 +64,27 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Heading styles (data-heading). Sizes in em of the heading, so they scale
+   with it in both variants. `simple` adds nothing: the title page's rule and
+   plain headings elsewhere, the look pages always had. The title page keeps
+   its rule in every style. */
+.wp-root[data-heading="underline"] .wp-page:not(.wp-page-title) .wp-heading {
+  padding-bottom: 0.25em;
+  border-bottom: 0.06em solid var(--wp-accent, #10b981);
+}
+.wp-root[data-heading="bar"] .wp-page:not(.wp-page-title) .wp-heading {
+  padding-left: 0.45em;
+  border-left: 0.14em solid var(--wp-accent, #10b981);
+}
+.wp-root[data-heading="band"] .wp-page:not(.wp-page-title) .wp-heading {
+  padding: 0.2em 0.5em;
+  border-radius: 0.15em;
+  background: color-mix(in srgb, var(--wp-accent, #10b981) 16%, transparent);
+}
+.wp-root[data-heading="accent"] .wp-heading {
+  color: var(--wp-accent, #10b981);
 }
 
 .wp-items {
@@ -273,8 +292,8 @@
   }
 }
 
-/* --- In the editor: a frame that clips and contains whatever the theme's
-   author CSS paints (fixed positioning included), so it can't cover the app. --- */
+/* --- In the editor: a frame that clips and contains the page (the web
+   variant's fixed background included), so it can't cover the app. --- */
 
 .wp-frame {
   position: relative;
