@@ -76,6 +76,7 @@ export const ROUTE_POLICY = {
   // Sign-in.
   "GET /auth/google": { access: "public" },
   "POST /auth/logout": { access: "public" },
+  "DELETE /api/account": { access: "browser-user" },
 
   // Notes (the API token scope).
   "GET /api/notes/:id/sync": { access: "user" },

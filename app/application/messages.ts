@@ -350,6 +350,15 @@ export const MESSAGES_JA = {
   noConnectedApps: "接続中のアプリはありません",
   disconnect: "接続解除",
 
+  // --- アカウント削除（設定） ---
+  deleteAccountHeading: "アカウントの削除",
+  deleteAccountDescription:
+    "ノート・画像・公開URL・APIトークン・接続中のアプリをすべて削除し、ログアウトします。元に戻せません。",
+  deleteAccountConfirmLabel: "確認のためメールアドレス（{email}）を入力してください",
+  deleteAccountButton: "アカウントを削除",
+  deletingAccount: "削除中…",
+  deleteAccountFailed: "アカウントを削除できませんでした",
+
   // --- OAuth 同意画面 ---
   oauthConsentTitle: "アプリの接続",
   oauthConsentHeading: "{client} が edane への接続を求めています",
@@ -755,6 +764,15 @@ export const MESSAGES_EN = {
     "For ChatGPT or Claude (claude.ai / Claude Desktop) connectors, just add {url}; they connect through the sign-in and consent screen.",
   noConnectedApps: "No connected apps",
   disconnect: "Disconnect",
+
+  // --- Account deletion (settings) ---
+  deleteAccountHeading: "Delete account",
+  deleteAccountDescription:
+    "Deletes all your notes, images, published URLs, API tokens and connected apps, and signs you out. This cannot be undone.",
+  deleteAccountConfirmLabel: "To confirm, type your email address ({email})",
+  deleteAccountButton: "Delete account",
+  deletingAccount: "Deleting…",
+  deleteAccountFailed: "Could not delete the account",
 
   // --- OAuth consent page ---
   oauthConsentTitle: "Connect an app",
