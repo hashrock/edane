@@ -195,6 +195,31 @@ export default function Settings({ user }: { user: User }) {
     await loadPublications();
   };
 
+  const [deleteEmail, setDeleteEmail] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState(false);
+
+  const deleteAccount = async () => {
+    setDeletingAccount(true);
+    setDeleteAccountError(false);
+    try {
+      const res = await fetch("/api/account", {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: deleteEmail }),
+      });
+      if (!res.ok) {
+        setDeleteAccountError(true);
+        return;
+      }
+      // Full reload: the session is gone, so Inertia state must not linger.
+      window.location.href = "/";
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
   const copyPubUrl = async (url: string) => {
     const ok = await copyText(url);
     setCopiedPubUrl(ok ? url : null);
@@ -567,6 +592,40 @@ export default function Settings({ user }: { user: User }) {
             {t("connectedAppsHint", { url: `${window.location.origin}/mcp` })}
           </p>
         </section>
+
+        {user && (
+          <section className="mt-12">
+            <h2 className="mb-2 text-sm font-semibold uppercase text-red-500">
+              {t("deleteAccountHeading")}
+            </h2>
+            <div className="rounded-xl border border-red-200 bg-white p-4 text-sm">
+              <p className="mb-3 text-slate-600">{t("deleteAccountDescription")}</p>
+              <label className="mb-1 block text-xs text-slate-500" htmlFor="delete-account-email">
+                {t("deleteAccountConfirmLabel", { email: user.email })}
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  id="delete-account-email"
+                  type="email"
+                  autoComplete="off"
+                  value={deleteEmail}
+                  onChange={(e) => setDeleteEmail(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5"
+                />
+                <button
+                  onClick={deleteAccount}
+                  disabled={deleteEmail !== user.email || deletingAccount}
+                  className="rounded-lg bg-red-600 px-3 py-1.5 font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {deletingAccount ? t("deletingAccount") : t("deleteAccountButton")}
+                </button>
+              </div>
+              {deleteAccountError && (
+                <p className="mt-2 text-xs text-red-600">{t("deleteAccountFailed")}</p>
+              )}
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
