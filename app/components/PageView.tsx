@@ -8,7 +8,7 @@
  * Server-safe: no effects or browser APIs outside {@link PageBackground}'s
  * effect, so the published page is this same markup rendered to a string.
  */
-import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { MindMapModel } from "../domain/model";
 import type { PageBackground as PageBackgroundOptions, PageTheme } from "../domain/pageTheme";
 import type { Slide } from "../application/slides";
@@ -24,10 +24,25 @@ export type PageVariant = "slide" | "web";
 /** The selector the theme's author CSS is scoped to. */
 export const PAGE_SCOPE = ".wp-root";
 
+/**
+ * How page content renders markdown and image URLs. The default is safe
+ * without a DOM, for what the server renders (the published page, and the
+ * editor's preview of it). The slideshow is shown only in the editor, so it
+ * provides the editor's DOMPurify rendering instead: raw HTML and data: /
+ * relative image URLs keep working there as before.
+ */
+export interface PageContentPolicy {
+  markdownHtml: (src: string) => string;
+  imageSrc: (raw: string) => string | null;
+}
+
+export const PageContentContext = createContext<PageContentPolicy>({ markdownHtml: renderSafeMarkdown, imageSrc: safePageUrl });
+
 /** The theme's font stylesheet and scoped author CSS (render once per document). */
 export function PageThemeAssets({ theme }: { theme: PageTheme }) {
   const fonts = googleFontsHref(theme);
-  const css = scopeUserCss(theme.css, PAGE_SCOPE);
+  // The preview re-renders on every keystroke; the CSS only when it changes.
+  const css = useMemo(() => scopeUserCss(theme.css, PAGE_SCOPE), [theme.css]);
   return (
     <>
       {fonts && <link rel="stylesheet" href={fonts} />}
@@ -119,13 +134,14 @@ export function PageSection({ slide, index }: { slide: Slide; index: number }) {
 /** One node as page content, by kind. */
 function NodeContent({ node }: { node: MindMapModel }) {
   const type = node.type ?? "text";
+  const policy = useContext(PageContentContext);
   if (type === "image") {
-    const src = safePageUrl(node.text);
+    const src = policy.imageSrc(node.text);
     return src ? <img className="wp-image" src={src} alt="" /> : null;
   }
   if (type === "markdown") {
-    // Sanitized by renderSafeMarkdown (no raw HTML, safe URLs only).
-    return <div className="wp-markdown" dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(node.text) }} />;
+    // Sanitized by the policy: renderSafeMarkdown (no raw HTML, safe URLs only) or DOMPurify.
+    return <div className="wp-markdown" dangerouslySetInnerHTML={{ __html: policy.markdownHtml(node.text) }} />;
   }
   const text = nodeDisplayText(node);
   return (

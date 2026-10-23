@@ -128,39 +128,49 @@ export function startBackground(
   const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const gl = canvas.getContext("webgl", { antialias: false, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: false });
-  const vs = gl && compile(gl, gl.VERTEX_SHADER, VERTEX);
-  const fs = gl && compile(gl, gl.FRAGMENT_SHADER, FRAGMENT);
-  const program = gl && vs && fs ? gl.createProgram() : null;
-  let ready = false;
-  if (gl && program && vs && fs) {
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    ready = !!gl.getProgramParameter(program, gl.LINK_STATUS);
+  type Uniforms = Record<"res" | "time" | "scroll" | "a" | "b" | "preset", WebGLUniformLocation | null>;
+  let u: Uniforms | null = null;
+  /** Compile and bind everything on the context; again after it is restored. Null when WebGL can't draw. */
+  function setup(g: WebGLRenderingContext): Uniforms | null {
+    const vs = compile(g, g.VERTEX_SHADER, VERTEX);
+    const fs = compile(g, g.FRAGMENT_SHADER, FRAGMENT);
+    const program = vs && fs ? g.createProgram() : null;
+    if (!program || !vs || !fs) return null;
+    g.attachShader(program, vs);
+    g.attachShader(program, fs);
+    g.linkProgram(program);
+    if (!g.getProgramParameter(program, g.LINK_STATUS)) return null;
+    g.useProgram(program);
+    const buffer = g.createBuffer();
+    g.bindBuffer(g.ARRAY_BUFFER, buffer);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+    const pos = g.getAttribLocation(program, "a_pos");
+    g.enableVertexAttribArray(pos);
+    g.vertexAttribPointer(pos, 2, g.FLOAT, false, 0, 0);
+    const uniform = (name: string) => g.getUniformLocation(program, name);
+    return {
+      res: uniform("u_res"),
+      time: uniform("u_time"),
+      scroll: uniform("u_scroll"),
+      a: uniform("u_a"),
+      b: uniform("u_b"),
+      preset: uniform("u_preset"),
+    };
   }
-  const uniform = (name: string) => (ready ? gl!.getUniformLocation(program!, name) : null);
-  const u = {
-    res: uniform("u_res"),
-    time: uniform("u_time"),
-    scroll: uniform("u_scroll"),
-    a: uniform("u_a"),
-    b: uniform("u_b"),
-    preset: uniform("u_preset"),
-  };
-  if (ready) {
-    gl!.useProgram(program);
-    const buffer = gl!.createBuffer();
-    gl!.bindBuffer(gl!.ARRAY_BUFFER, buffer);
-    gl!.bufferData(gl!.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl!.STATIC_DRAW);
-    const pos = gl!.getAttribLocation(program!, "a_pos");
-    gl!.enableVertexAttribArray(pos);
-    gl!.vertexAttribPointer(pos, 2, gl!.FLOAT, false, 0, 0);
-  }
+  if (gl) u = setup(gl);
   const onLost = (e: Event) => {
+    // Preventing the default is what lets the browser restore the context later.
     e.preventDefault();
-    ready = false;
+    u = null;
+  };
+  const onRestored = () => {
+    if (destroyed || !gl) return;
+    u = setup(gl);
+    dirty = true;
+    schedule();
   };
   canvas.addEventListener("webglcontextlost", onLost);
+  canvas.addEventListener("webglcontextrestored", onRestored);
 
   const resize = new ResizeObserver(() => {
     dirty = true;
@@ -173,13 +183,14 @@ export function startBackground(
 
   function draw(now: number) {
     frame = 0;
-    if (destroyed || !ready) return;
+    if (destroyed || !u) return;
     const dt = Math.min(now - last, 100) / 1000;
     last = now;
     if (animating()) elapsed += dt * options.speed;
     if (!dirty && !animating()) return;
     dirty = false;
     const g = gl!;
+    const loc = u;
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * resolution;
     const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
     const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
@@ -192,12 +203,12 @@ export function startBackground(
       g.clearColor(0, 0, 0, 0);
       g.clear(g.COLOR_BUFFER_BIT);
     } else {
-      g.uniform2f(u.res, w, h);
-      g.uniform1f(u.time, elapsed);
-      g.uniform1f(u.scroll, (scrollY() / Math.max(1, canvas.clientHeight)) * options.parallax);
-      g.uniform3fv(u.a, rgb(options.colorA));
-      g.uniform3fv(u.b, rgb(options.colorB));
-      g.uniform1f(u.preset, PRESET_INDEX[options.preset]);
+      g.uniform2f(loc.res, w, h);
+      g.uniform1f(loc.time, elapsed);
+      g.uniform1f(loc.scroll, (scrollY() / Math.max(1, canvas.clientHeight)) * options.parallax);
+      g.uniform3fv(loc.a, rgb(options.colorA));
+      g.uniform3fv(loc.b, rgb(options.colorB));
+      g.uniform1f(loc.preset, PRESET_INDEX[options.preset]);
       g.drawArrays(g.TRIANGLES, 0, 3);
     }
     if (animating()) schedule();
@@ -224,6 +235,7 @@ export function startBackground(
       if (frame) cancelAnimationFrame(frame);
       resize.disconnect();
       canvas.removeEventListener("webglcontextlost", onLost);
+      canvas.removeEventListener("webglcontextrestored", onRestored);
       gl?.getExtension("WEBGL_lose_context")?.loseContext();
     },
   };

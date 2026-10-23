@@ -17,12 +17,25 @@ import { jsonForScript } from "./lib/escapeHtml";
 /** Id of the data block carrying the background options to the runtime. */
 export const WEB_PAGE_CONFIG_ID = "wp-config";
 
+/**
+ * The page's language, for screen readers and the browser's hyphenation and
+ * translation: "ja" when the text has kana or kanji. Otherwise none is declared
+ * — a note's language isn't recorded, and a wrong guess is worse than none.
+ */
+function pageLang(title: string, slides: ReturnType<typeof buildSlides>): string | undefined {
+  const japanese = /[\u3040-\u30ff\u3400-\u9fff]/;
+  if (japanese.test(title)) return "ja";
+  return slides.some(({ heading, items }) => japanese.test(heading.text) || items.some(({ node }) => japanese.test(node.text)))
+    ? "ja"
+    : undefined;
+}
+
 function WebPageDocument({ doc }: { doc: MindMapDocument }) {
   const theme = effectiveTheme(doc.theme);
   const slides = buildSlides(doc);
   const title = doc.title || (doc.roots[0] ? nodeDisplayText(doc.roots[0]) : "");
   return (
-    <html lang="ja">
+    <html lang={pageLang(title, slides)}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />

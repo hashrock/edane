@@ -12,8 +12,11 @@
  *    style the whole app) — unbalanced CSS is dropped entirely;
  *  - at-rules are allowlisted: `@import` / `@font-face` / `@namespace` / a
  *    nested `@scope` … are removed (no loading other origins' CSS or fonts,
- *    no unscoping); `@keyframes` are hoisted out of the scope, where they are
- *    valid;
+ *    no unscoping), at every depth — also inside style rules (CSS nesting) —
+ *    and an escaped at-keyword is dropped rather than read as a style rule;
+ *  - `@keyframes` are hoisted out of the scope, where they are valid, and their
+ *    names get a prefix (rewritten in `animation` declarations), since keyframe
+ *    names are global and would otherwise redefine the app's own animations;
  *  - `<` is escaped, so the text can't close the `<style>` element it lives in.
  *
  * Depends on nothing.
@@ -81,16 +84,41 @@ function statementEnd(css: string, start: number): number {
   return depth === 0 ? css.length : -1;
 }
 
+/** Prefix for the author's keyframe names: they are global, so they must not collide with the app's own. */
+const KEYFRAMES_PREFIX = "wpu-";
+const ANIMATION_DECLARATION = /^((?:-webkit-)?animation(?:-name)?\s*:)([^]*)$/i;
+
+/** The keyframe names `css` defines (only plain identifiers; anything else is dropped). */
+function keyframeNames(css: string): Set<string> {
+  return new Set([...css.matchAll(/@(?:-webkit-)?keyframes\s+([-\w]+)/gi)].map((m) => m[1]));
+}
+
+/** An `animation` / `animation-name` declaration with the author's keyframe names prefixed. */
+function renameAnimation(statement: string, names: Set<string>): string {
+  const decl = ANIMATION_DECLARATION.exec(statement);
+  if (!decl) return statement;
+  const value = decl[2].replace(/(^|[\s,])([-\w]+)(?=$|[\s,;!])/g, (all, before: string, name: string) =>
+    names.has(name) ? `${before}${KEYFRAMES_PREFIX}${name}` : all
+  );
+  return decl[1] + value;
+}
+
+type Filtered = { scoped: string; hoisted: string };
+
 /**
- * Split into top-level statements, filtering at-rules (recursively inside the
- * allowed group rules). Null when the braces don't balance.
+ * Split into statements, filtering at-rules at every depth — inside the allowed
+ * group rules and inside style rules too (CSS nesting puts at-rules there).
+ * `inBlock`: the body of a style rule, whose whitespace and declarations are
+ * kept as written. Null when the braces don't balance.
  */
-function filterStatements(css: string): { scoped: string; hoisted: string } | null {
+function filterStatements(css: string, names: Set<string>, inBlock = false): Filtered | null {
   let scoped = "";
   let hoisted = "";
   let i = 0;
+  const sep = inBlock ? "" : "\n";
   while (i < css.length) {
     if (/\s/.test(css[i])) {
+      if (inBlock) scoped += css[i];
       i++;
       continue;
     }
@@ -98,23 +126,37 @@ function filterStatements(css: string): { scoped: string; hoisted: string } | nu
     if (end < 0) return null;
     const statement = css.slice(i, end);
     i = end;
-    const at = /^@([-\w]+)/.exec(statement);
-    if (!at) {
-      scoped += statement + "\n";
-      continue;
-    }
-    const name = at[1].toLowerCase();
-    if (!ALLOWED_AT_RULES.has(name)) continue;
-    if (HOISTED_AT_RULES.has(name)) {
-      hoisted += statement + "\n";
-      continue;
-    }
-    // A group rule: filter its body by the same rules.
     const open = statement.indexOf("{");
-    if (open < 0 || !statement.endsWith("}")) continue;
-    const inner = filterStatements(statement.slice(open + 1, -1));
+    const hasBlock = open >= 0 && statement.endsWith("}");
+    if (!statement.startsWith("@")) {
+      if (!hasBlock) {
+        scoped += (inBlock ? renameAnimation(statement, names) : statement) + sep;
+        continue;
+      }
+      // A style rule: its body may nest rules and at-rules.
+      const inner = filterStatements(statement.slice(open + 1, -1), names, true);
+      if (!inner) return null;
+      scoped += `${statement.slice(0, open)}{${inner.scoped}}${sep}`;
+      hoisted += inner.hoisted;
+      continue;
+    }
+    // The at-keyword must be a plain identifier: an escaped one (`@\73 cope`)
+    // is decoded by the browser, so it would slip past the allowlist.
+    const at = /^@([-\w]+)(?![-\w\\])/.exec(statement);
+    if (!at) continue;
+    const name = at[1].toLowerCase();
+    if (!ALLOWED_AT_RULES.has(name) || !hasBlock) continue;
+    const hoist = HOISTED_AT_RULES.has(name);
+    const inner = filterStatements(statement.slice(open + 1, -1), names, inBlock && !hoist);
     if (!inner) return null;
-    scoped += `${statement.slice(0, open)}{\n${inner.scoped}}\n`;
+    if (hoist) {
+      const prelude = /^@[-\w]+\s+([-\w]+)\s*$/.exec(statement.slice(0, open));
+      if (!prelude) continue;
+      hoisted += `@${at[1]} ${KEYFRAMES_PREFIX}${prelude[1]} {\n${inner.scoped}}\n${inner.hoisted}`;
+      continue;
+    }
+    // A group rule: its body is filtered by the same rules.
+    scoped += `${statement.slice(0, open)}{\n${inner.scoped}}${sep}`;
     hoisted += inner.hoisted;
   }
   return { scoped, hoisted };
@@ -127,7 +169,7 @@ function filterStatements(css: string): { scoped: string; hoisted: string } | nu
 export function scopeUserCss(css: string, scope: string): string {
   const stripped = stripComments(css);
   if (stripped === null) return "";
-  const filtered = filterStatements(stripped);
+  const filtered = filterStatements(stripped, keyframeNames(stripped));
   if (!filtered) return "";
   const { scoped, hoisted } = filtered;
   if (!scoped.trim() && !hoisted.trim()) return "";

@@ -16,7 +16,7 @@
 4. **ユーザー CSS はページ内に閉じ込める。** 公開ノートの閲覧者はアプリの中で作者の CSS を見ることになるため、次のようにする。
    - `@scope (.wp-root)` で包む。
    - 括弧の釣り合わない CSS は丸ごと捨てる。
-   - at-rule は許可リスト（media / supports / container / keyframes）に絞り、keyframes はスコープの外へ出す。
+   - at-rule は許可リスト（media / supports / container / keyframes）に絞る。スタイル規則の中にネストした at-rule も同じく絞り、エスケープした at-keyword は捨てる。keyframes はスコープの外へ出し、アプリのアニメーションと名前が衝突しないよう `wpu-` を前置する（`animation` の参照も書き換える）。
    - `<` はエスケープする。
    - エディタではページを `.wp-frame`（`contain: layout paint`）に入れ、`position: fixed` でもアプリを覆えないようにする。
 5. **公開ページはサーバーで描く静的 HTML にする。** `/w/:id` は、毎回その時点のノートから `renderToString` で描く（保存＝反映、スナップショットは持たない）。スクリプトは `webpage-runtime.ts`（WebGL 背景とスクロールエフェクト）だけで、無くても全文が読める。CSP は `default-src 'none'` を基本にし、許可するのは自前のスクリプト、Google Fonts、https の画像だけ。Markdown は DOM の無いサーバーでも安全な `renderSafeMarkdown` で描く（生の HTML はテキストにし、URL は http(s) か同一オリジンのパスだけ通す）。

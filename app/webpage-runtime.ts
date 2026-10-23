@@ -38,7 +38,14 @@ function start() {
     },
     { threshold: 0.12 }
   );
-  root.querySelectorAll(".wp-page").forEach((page) => observer.observe(page));
+  // Pages already on screen are shown as they are: hiding them for an entrance
+  // would make the first view flash out and back in on load.
+  const viewport = window.innerHeight;
+  root.querySelectorAll(".wp-page").forEach((page) => {
+    const { top, bottom } = page.getBoundingClientRect();
+    if (top < viewport && bottom > 0) page.classList.add("wp-in");
+    else observer.observe(page);
+  });
   root.setAttribute("data-animate", "");
 }
 

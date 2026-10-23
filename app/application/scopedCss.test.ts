@@ -33,7 +33,7 @@ describe("scopeUserCss", () => {
     expect(scopeUserCss(".a { color: red } /* x", scope)).toBe("");
   });
 
-  it("removes disallowed at-rules, keeps group rules (filtered) and hoists keyframes", () => {
+  it("removes disallowed at-rules, keeps group rules (filtered) and hoists keyframes under a prefixed name", () => {
     const css = `@import url(https://evil.example/x.css);
 @font-face { font-family: X; src: url(https://evil.example/x.woff); }
 @scope (body) { * { display: none } }
@@ -42,8 +42,28 @@ describe("scopeUserCss", () => {
 .b { animation: spin 1s; }`;
     const out = scopeUserCss(css, scope);
     expect(out).not.toMatch(/@import|@font-face|evil|body/);
-    expect(out.startsWith("@keyframes spin")).toBe(true);
-    expect(out).toContain(`@scope (${scope}) {\n@media (max-width: 600px) {\n.a { color: red; }\n}\n.b { animation: spin 1s; }\n}`);
+    expect(out.startsWith("@keyframes wpu-spin {")).toBe(true);
+    expect(out).toContain(`@scope (${scope}) {\n@media (max-width: 600px) {\n.a { color: red; }\n}\n.b { animation: wpu-spin 1s; }\n}`);
+  });
+
+  it("never defines a keyframe name the app could be using", () => {
+    const out = scopeUserCss("@keyframes spin { to { opacity: 0 } } .b { animation-name: spin, pulse; animation: 1s spin infinite }", scope);
+    expect(out).not.toMatch(/@keyframes spin/);
+    expect(out).toContain("animation-name: wpu-spin, pulse;");
+    expect(out).toContain("animation: 1s wpu-spin infinite");
+    expect(scopeUserCss('@keyframes "spin" { to { opacity: 0 } }', scope)).toBe("");
+  });
+
+  it("drops escaped at-keywords instead of reading them as style rules", () => {
+    expect(scopeUserCss("@\\73 cope (html) { body { display: none } }", scope)).toBe("");
+    expect(scopeUserCss("@m\\65 dia all { body { display: none } }", scope)).toBe("");
+    expect(scopeUserCss("@\\69mport url(https://evil.example/x.css);", scope)).toBe("");
+  });
+
+  it("filters at-rules nested in style rules", () => {
+    const out = scopeUserCss(".x { color: red; @scope (body) { * { display: none } } @media (x) { color: blue; } }", scope);
+    expect(out).not.toMatch(/@scope \(body\)|display: none/);
+    expect(out).toContain(".x { color: red;  @media (x) {\n color: blue; } }");
   });
 
   it("escapes < so the text can't close its <style> element", () => {

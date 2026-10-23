@@ -603,7 +603,7 @@ app.post("/api/notes/:id/webpage", async (c) => {
   // The unique index on note_id settles a double click: the loser reads the winner's row.
   await db.insert(webPages).values(created).onConflictDoNothing();
   const row = await db.select().from(webPages).where(eq(webPages.noteId, note.id)).get();
-  return c.json(webPageStatus(note, row ?? null), 201);
+  return c.json(webPageStatus(note, row ?? null), row?.id === created.id ? 201 : 200);
 });
 
 app.delete("/api/notes/:id/webpage", async (c) => {

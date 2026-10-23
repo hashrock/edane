@@ -130,3 +130,17 @@ export function normalizePageTheme(value: unknown): PageTheme | null {
 export function effectiveTheme(theme: PageTheme | undefined): PageTheme {
   return theme ?? DEFAULT_PAGE_THEME;
 }
+
+/**
+ * `current` with the fields `edit` changed from `base` — the pending edit
+ * replayed on a theme that changed meanwhile (undo, another session), so it
+ * doesn't put back what that change replaced.
+ */
+export function rebaseTheme(edit: PageTheme, base: PageTheme, current: PageTheme): PageTheme {
+  const pick = <T extends object>(e: T, b: T, c: T): T => {
+    const out = { ...c };
+    for (const k of Object.keys(e) as (keyof T)[]) if (e[k] !== b[k]) out[k] = e[k];
+    return out;
+  };
+  return { ...pick(edit, base, current), background: pick(edit.background, base.background, current.background) };
+}

@@ -3,7 +3,11 @@ import type { MindMapDocument } from "../domain/model";
 import { effectiveTheme } from "../domain/pageTheme";
 import { buildSlides, slideIndexOf, type Slide } from "../application/slides";
 import { t } from "../application/i18n";
-import { PageBackground, PageRoot, PageSection, PageThemeAssets } from "./PageView";
+import { renderMarkdownHtml } from "../lib/markdownHtml";
+import { PageBackground, PageContentContext, PageRoot, PageSection, PageThemeAssets, type PageContentPolicy } from "./PageView";
+
+/** The slideshow renders content as the editor does (it is never server-rendered). */
+const SLIDESHOW_CONTENT: PageContentPolicy = { markdownHtml: renderMarkdownHtml, imageSrc: (raw) => raw || null };
 
 interface Props {
   doc: MindMapDocument;
@@ -75,7 +79,9 @@ export default function SlideShow({ doc, startNodeId, onExit }: Props) {
         <PageRoot theme={theme} variant="slide" className="h-full w-full">
           <PageBackground background={theme.background} />
           {slide ? (
-            <PageSection slide={slide} index={index} />
+            <PageContentContext.Provider value={SLIDESHOW_CONTENT}>
+              <PageSection slide={slide} index={index} />
+            </PageContentContext.Provider>
           ) : (
             <p className="relative flex h-full items-center justify-center text-[3cqw] opacity-50">
               {t("presentEmpty")}

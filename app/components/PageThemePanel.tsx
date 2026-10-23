@@ -7,6 +7,7 @@ import {
   PAGE_FONT,
   SCROLL_EFFECT,
   effectiveTheme,
+  rebaseTheme,
   type BackgroundPreset,
   type PageFont,
   type PageTheme,
@@ -60,6 +61,10 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
   const [draft, setDraft] = useState(stored);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<PageTheme | null>(null);
+  /** The stored theme the pending edit (`latest`) started from. */
+  const base = useRef<PageTheme | null>(null);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -68,16 +73,23 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
     timer.current = null;
     if (latest.current) onChangeRef.current(latest.current);
     latest.current = null;
+    base.current = null;
   }, []);
 
-  // A change from elsewhere (undo, another session) shows up unless one of ours is pending.
+  // A change from elsewhere (undo, another session) shows up; a pending edit of ours is replayed on top of it.
   useEffect(() => {
-    if (!timer.current) setDraft(effectiveTheme(theme));
+    const current = effectiveTheme(theme);
+    if (latest.current && base.current) {
+      latest.current = rebaseTheme(latest.current, base.current, current);
+      base.current = current;
+      setDraft(latest.current);
+    } else setDraft(current);
   }, [theme]);
   useEffect(() => flush, [flush]);
 
   const update = (next: PageTheme) => {
     setDraft(next);
+    if (!latest.current) base.current = effectiveTheme(themeRef.current);
     latest.current = next;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(flush, COMMIT_DELAY);
@@ -190,6 +202,7 @@ export default function PageThemePanel({ theme, onChange, onClose, readOnly, not
             if (timer.current) clearTimeout(timer.current);
             timer.current = null;
             latest.current = null;
+            base.current = null;
             setDraft(DEFAULT_PAGE_THEME);
             onChange(null);
           }}
@@ -227,6 +240,7 @@ function PublishSection({ noteId, isPublic }: { noteId: string; isPublic: boolea
 
   useEffect(() => {
     let live = true;
+    setError(null);
     webPageApi(noteId, "GET").then(
       (s) => live && setStatus(s),
       (e: Error) => live && setError(e.message)
@@ -255,7 +269,15 @@ function PublishSection({ noteId, isPublic }: { noteId: string; isPublic: boolea
     <section data-testid="webpage-publish" className="space-y-2 border-t border-slate-100 px-4 py-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("webPublish")}</h3>
       {!isPublic ? (
-        <p className="text-xs text-slate-500">{t("webPublishPrivate")}</p>
+        <>
+          <p className="text-xs text-slate-500">{t("webPublishPrivate")}</p>
+          {/* A page published before the note went private can still be revoked. */}
+          {status && (
+            <button type="button" disabled={busy} data-testid="webpage-unpublish" className={`${button} text-red-600 hover:bg-red-50`} onClick={() => void run("DELETE")}>
+              {t("webPublishUnpublish")}
+            </button>
+          )}
+        </>
       ) : status === undefined && !error ? (
         <p className="text-xs text-slate-400">{t("loading")}</p>
       ) : status && url ? (
