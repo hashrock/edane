@@ -11,7 +11,7 @@ import { rootView } from "./root-view";
 import { users, notes, apiTokens, images, nodePublications, webPages } from "./db/schema";
 import { authMiddleware, selectAuth } from "./auth";
 import { requireRouteUser, routePolicyMiddleware, signedInUser } from "./auth/routePolicy";
-import { findUserByEmail, insertUser } from "./utils/userRepository";
+import { deleteUserAccount, findUserByEmail, insertUser } from "./utils/userRepository";
 import { insertNote, insertPublication, listLiveNotes } from "./utils/noteRepository";
 import { hashToken } from "./utils/tokenHash";
 import { decodeStoredNoteContent, noteKeys, noteStorageMode } from "./utils/crypto";
@@ -135,6 +135,27 @@ app.post("/auth/logout", async (c) => {
   return c.redirect("/");
 });
 
+/** R2 deletes at most this many keys per call. */
+const R2_DELETE_BATCH = 1000;
+// Delete the account and everything in it. Irreversible, so the body must
+// repeat the account's email. Open editor sockets need no closing: their
+// session row is gone and so is every note, so their next commit is refused.
+app.delete("/api/account", async (c) => {
+  const user = signedInUser(c);
+  const body = await c.req.json<{ email?: unknown }>().catch(() => ({}) as { email?: unknown });
+  if (body.email !== user.email) {
+    return c.json({ error: "Email does not match" }, 400);
+  }
+  const imageKeys = await deleteUserAccount(drizzle(c.env.DB), user.id);
+  // The rows are gone, so a failure here only leaves unreachable binaries.
+  const chunks = [];
+  for (let i = 0; i < imageKeys.length; i += R2_DELETE_BATCH) chunks.push(imageKeys.slice(i, i + R2_DELETE_BATCH));
+  for (const r of await Promise.allSettled(chunks.map((keys) => c.env.IMAGES.delete(keys)))) {
+    if (r.status === "rejected") console.error("R2 delete failed", r.reason);
+  }
+  await c.get("auth").signOut(c);
+  return c.json({ ok: true });
+});
 // All editor writes go through the note coordinator, including legacy PUT.
 app.get("/api/notes/:id/sync", async (c) => {
   const user = signedInUser(c);
@@ -744,6 +765,8 @@ const routes = app
     const db = drizzle(c.env.DB);
     const note = await loadOwnedNote(db, c.req.param("id"), user.id);
     if (note) {
+      // Deleting a whole account tears notes down in bulk (deleteUserAccount):
+      // a new note-owned table needs deleting there too.
       // Publications reference the note; drop them first so their URLs die
       // with the note instead of dangling (and the FK stays satisfied).
       await db
