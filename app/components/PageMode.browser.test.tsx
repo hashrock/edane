@@ -88,12 +88,19 @@ describe("Pages mode (browser e2e)", () => {
     await waitFor(() => counter() === "Page 2 / 3");
     const count = () => q('[data-testid="page-branch-count"]')?.textContent;
     expect(count()).toBe("Pages in this branch: 1");
+    // Hovering a choice shows on the rows how it would split the branch, without choosing it.
+    const marks = () => Array.from(document.querySelectorAll('[data-testid="page-mark"]')).map((m) => m.textContent);
+    await userEvent.hover(q('[data-testid="page-split-each"]')!);
+    await waitFor(() => marks().length === 3);
+    expect(marks()).toEqual(["Page 2", "Page 3", "Page 4"]);
+    expect(counter()).toBe("Page 2 / 3");
+    await userEvent.unhover(q('[data-testid="page-split-each"]')!);
+    await waitFor(() => marks().length === 0);
     q<HTMLButtonElement>('[data-testid="page-split-each"]')!.click();
     await waitFor(() => counter() === "Page 2 / 5");
     expect(count()).toBe("Pages in this branch: 3");
     expect(q('[data-testid="page-split-each"]')!.getAttribute("aria-checked")).toBe("true");
-    // For a few seconds the rows show which page each went to, numbered at each page's first row.
-    const marks = () => Array.from(document.querySelectorAll('[data-testid="page-mark"]')).map((m) => m.textContent);
+    // Choosing one shows the result for a few seconds (without a pointer that hovers, the only way to see it).
     expect(marks()).toEqual(["Page 2", "Page 3", "Page 4"]);
     await waitFor(() => marks().length === 0, 5000);
     q<HTMLButtonElement>('[data-testid="page-split-auto"]')!.click();

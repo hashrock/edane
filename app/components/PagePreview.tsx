@@ -39,12 +39,14 @@ const SPLITS: Choice<boolean | null>[] = [
 ];
 
 /** A small segmented control: one radio button per choice. */
-function Segmented<T>({ label, testId, choices, value, onChange, className = "" }: {
+function Segmented<T>({ label, testId, choices, value, onChange, onHover, className = "" }: {
   label: string;
   testId: string;
   choices: Choice<T>[];
   value: T;
   onChange: (value: T) => void;
+  /** The choice under the pointer or keyboard focus, or null when it leaves. */
+  onHover?: (choice: Choice<T> | null) => void;
   className?: string;
 }) {
   return (
@@ -60,6 +62,10 @@ function Segmented<T>({ label, testId, choices, value, onChange, className = "" 
             data-testid={`${testId}-${c.id}`}
             title={c.hint && t(c.hint)}
             onClick={() => onChange(c.value)}
+            onMouseEnter={onHover && (() => onHover(c))}
+            onMouseLeave={onHover && (() => onHover(null))}
+            onFocus={onHover && (() => onHover(c))}
+            onBlur={onHover && (() => onHover(null))}
             className={`rounded px-2 py-0.5 text-[11px] ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
           >
             {t(c.label)}
@@ -84,6 +90,8 @@ interface Props {
   onOpenTheme?: () => void;
   /** Set how the selected node's branch is split into slides (`null` = automatic). Absent = read-only. */
   onSlideSplit?: (nodeId: string, split: boolean | null) => void;
+  /** A split choice is hovered: show what it would do (`undefined` = no longer hovered). */
+  onSlideSplitPreview?: (nodeId: string, split: boolean | null | undefined) => void;
   onExit: () => void;
 }
 
@@ -97,7 +105,7 @@ interface Props {
  * Follows the selection and every edit live. It never takes the keyboard.
  * Its left and bottom edges drag to resize it, keeping the page's 16:9.
  */
-export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onSlideSplit, onExit }: Props) {
+export default function PagePreview({ doc, activeNodeId, format, onFormatChange, onPresent, publish, onOpenTheme, onSlideSplit, onSlideSplitPreview, onExit }: Props) {
   useLocale();
   const [open, setOpen] = useState(true);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -283,6 +291,7 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
               choices={SPLITS}
               value={active.slideSplit ?? null}
               onChange={(split) => onSlideSplit(active.id, split)}
+              onHover={onSlideSplitPreview && ((c) => onSlideSplitPreview(active.id, c ? c.value : undefined))}
             />
           )}
         </div>

@@ -3595,7 +3595,8 @@ export function MindmapEditorView({
   // After a branch's split choice changes, each of its nodes is tinted in the
   // colour of the slide it went to, and the first node of every slide carries
   // that slide's number, so the cut between pages reads on the map itself.
-  // NoteEditor clears the marks after a few seconds; they fade in and out.
+  // NoteEditor decides how long they stay (while a choice is hovered, or a few
+  // seconds after one is chosen); they fade in.
   useEffect(() => {
     const Konva = konvaRef.current;
     const pageLayer = pageLayerRef.current;
@@ -3648,17 +3649,10 @@ export function MindmapEditorView({
     // Numbers above every tint, so a neighbour's box never covers one.
     badges.forEach((b) => group.add(b));
     pageLayer.add(group);
-    const fadeIn = new Konva.Tween({ node: group, duration: 0.2, opacity: 1, easing: Konva.Easings.EaseOut });
-    let fadeOut: any = null;
-    const holdTimer = setTimeout(() => {
-      fadeOut = new Konva.Tween({ node: group, duration: 0.5, opacity: 0, easing: Konva.Easings.EaseInOut });
-      fadeOut.play();
-    }, 2400);
+    const fadeIn = new Konva.Tween({ node: group, duration: 0.15, opacity: 1, easing: Konva.Easings.EaseOut });
     fadeIn.play();
     return () => {
-      clearTimeout(holdTimer);
       fadeIn.destroy();
-      fadeOut?.destroy();
       group.destroy();
       pageLayer.batchDraw();
     };

@@ -6,6 +6,7 @@ import PagePreview from "./PagePreview";
 import { useNoteEditor } from "./useNoteEditor";
 import type { EditorLayout } from "../application/editSurface";
 import type { PageTheme } from "../domain/pageTheme";
+import { setSlideSplit as withSlideSplit } from "../domain/model";
 import type { PageVariant } from "./PageView";
 import { branchPageMarks, buildSlides } from "../application/slides";
 
@@ -126,8 +127,16 @@ export default function NoteEditor(props: Props) {
     [dispatch]
   );
 
-  // Choosing how a branch splits shows, on the map itself, which nodes went to
-  // which page — for a few seconds, while that branch stays selected.
+  // Hovering a split choice shows, on the map itself, which nodes would go to
+  // which page with it; choosing one shows the result for a few seconds (the
+  // only way to see it without a pointer that hovers). Either holds only while
+  // that branch stays selected.
+  const [hoverSplit, setHoverSplit] = useState<{ nodeId: string; split: boolean | null } | null>(null);
+  const previewSlideSplit = useCallback(
+    (nodeId: string, split: boolean | null | undefined) =>
+      setHoverSplit(split === undefined ? null : { nodeId, split }),
+    []
+  );
   // A fresh object per choice, so choosing again restarts the timer.
   const [marksFor, setMarksFor] = useState<{ nodeId: string } | null>(null);
   useEffect(() => {
@@ -142,13 +151,16 @@ export default function NoteEditor(props: Props) {
     },
     [dispatch]
   );
-  const marksNodeId =
-    pageMode && marksFor && marksFor.nodeId === engine.state.view.activeNodeId ? marksFor.nodeId : null;
-  const pageMarks = useMemo(
-    () => (marksNodeId ? branchPageMarks(buildSlides(engine.model), engine.model, marksNodeId) : null),
-    // marksFor too: a repeated choice replays the marks.
-    [marksNodeId, marksFor, engine.model]
-  );
+  const activeNodeId = engine.state.view.activeNodeId;
+  const hovered = pageMode && hoverSplit?.nodeId === activeNodeId ? hoverSplit : null;
+  const chosen = pageMode && marksFor?.nodeId === activeNodeId ? marksFor : null;
+  const pageMarks = useMemo(() => {
+    if (hovered) {
+      const doc = withSlideSplit(engine.model, hovered.nodeId, hovered.split);
+      return branchPageMarks(buildSlides(doc), doc, hovered.nodeId);
+    }
+    return chosen ? branchPageMarks(buildSlides(engine.model), engine.model, chosen.nodeId) : null;
+  }, [hovered, chosen, engine.model]);
 
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
   const layout: Layout = override ?? defaultLayout;
@@ -191,6 +203,7 @@ export default function NoteEditor(props: Props) {
             publish={engine.noteId && !engine.readOnly ? { noteId: engine.noteId, isPublic: engine.isPublic } : undefined}
             onOpenTheme={engine.readOnly ? undefined : openTheme}
             onSlideSplit={engine.readOnly ? undefined : setSlideSplit}
+            onSlideSplitPreview={engine.readOnly ? undefined : previewSlideSplit}
             onExit={pageModeToggle.toggle}
           />
         </div>
