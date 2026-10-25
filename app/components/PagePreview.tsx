@@ -102,7 +102,7 @@ function SplitOverview({ slides, indices, theme, width, height, onDismiss }: {
       data-testid="page-split-overview"
       aria-label={t("pageSplitOverview", { n: String(indices.length) })}
       onClick={onDismiss}
-      className="absolute inset-0 z-10 flex cursor-pointer flex-wrap content-center justify-center bg-slate-700/90 motion-safe:animate-[wp-overview-in_150ms_ease-out]"
+      className="absolute inset-0 z-10 flex cursor-pointer flex-wrap content-center justify-center bg-slate-700 motion-safe:animate-[wp-overview-in_150ms_ease-out]"
       style={{ gap, padding: gap }}
     >
       {shown.map((i, k) => (
@@ -127,7 +127,7 @@ function SplitOverview({ slides, indices, theme, width, height, onDismiss }: {
           >
             <PageSection slide={slides[i]} index={i} />
           </PageRoot>
-          <span className="absolute left-0.5 top-0.5 rounded bg-emerald-600 px-1 text-[10px] font-medium leading-4 tabular-nums text-white">
+          <span className="absolute bottom-0.5 right-0.5 rounded bg-emerald-600 px-1 text-[10px] font-medium leading-4 tabular-nums text-white">
             {k === shown.length - 1 && indices.length > shown.length ? `${k + 1}…${indices.length}` : k + 1}
           </span>
         </div>
