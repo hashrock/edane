@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
-import { branchPageMarks, branchSlideCount, branchSlideIndices, buildSlides, slideIndexOf } from "./slides";
+import { branchPageMarks, branchSlideCount, branchSlideIndices, buildSlides, slideFits, slideIndexOf } from "./slides";
 
 function n(id: string, text: string, children: MindMapModel[] = [], extra: Partial<MindMapModel> = {}): MindMapModel {
   return { id, text, children, ...extra };
@@ -181,6 +181,18 @@ describe("buildSlides", () => {
     const two = buildSlides(doc(n("r", "R", [n("c", "Conclusion", [n("p", para), n("q", "next week")])])));
     expect(two.every((s) => s.heading.id !== "p")).toBe(true);
     expect(two[1].heading.id).toBe("c");
+  });
+
+  it("pages an item too tall for a slide alone, without crowding the others onto one page", () => {
+    // Found by slides.property.test.ts: the image with an image under it is taller
+    // than a page, and the even split used to stretch every page to its height.
+    const img = (id: string, children: MindMapModel[] = []) => n(id, "", children, { type: "image" });
+    const d = doc(n("r", "R", [n("c", "C", [img("a"), img("b"), img("big", [img("under")])])]));
+    const pages = buildSlides(d).filter((s) => s.heading.id === "c");
+    expect(pages.map((s) => s.items.filter((i) => i.depth === 0).map((i) => i.node.id))).toEqual([["a"], ["b"], ["big"]]);
+    for (const s of pages) {
+      expect(s.items.filter((i) => i.depth === 0).length <= 1 || slideFits(s.heading, s.items)).toBe(true);
+    }
   });
 
   it("splits the ancestors of a node marked slideSplit, so the switch always shows", () => {
