@@ -420,10 +420,15 @@ export function slideIndexOf(slides: Slide[], doc: MindMapDocument, nodeId: stri
   return 0;
 }
 
-/** The slides that present some node of `nodeId`'s branch (the node and its descendants). */
-export function branchSlideCount(slides: Slide[], doc: MindMapDocument, nodeId: string | null): number {
+/** Indices of the slides that present some node of `nodeId`'s branch (the node and its descendants). */
+export function branchSlideIndices(slides: Slide[], doc: MindMapDocument, nodeId: string | null): number[] {
   const node = nodeId ? findNode(doc, nodeId) : null;
-  if (!node) return 0;
+  if (!node) return [];
   const ids = new Set(subtreeIds(node));
-  return slides.filter((s) => s.ids.some((id) => ids.has(id))).length;
+  return slides.flatMap((s, i) => (s.ids.some((id) => ids.has(id)) ? [i] : []));
+}
+
+/** How many slides present some node of `nodeId`'s branch. */
+export function branchSlideCount(slides: Slide[], doc: MindMapDocument, nodeId: string | null): number {
+  return branchSlideIndices(slides, doc, nodeId).length;
 }

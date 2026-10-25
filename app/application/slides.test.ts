@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
-import { branchSlideCount, buildSlides, slideIndexOf } from "./slides";
+import { branchSlideCount, branchSlideIndices, buildSlides, slideIndexOf } from "./slides";
 
 function n(id: string, text: string, children: MindMapModel[] = [], extra: Partial<MindMapModel> = {}): MindMapModel {
   return { id, text, children, ...extra };
@@ -223,5 +223,14 @@ describe("branchSlideCount", () => {
     expect(branchSlideCount(slides, d, "list")).toBe(2);
     expect(branchSlideCount(slides, d, "r")).toBe(slides.length);
     expect(branchSlideCount(slides, d, null)).toBe(0);
+  });
+
+  it("lists those slides in deck order", () => {
+    const d = doc(n("r", "R", [n("a", "A"), n("list", "L", leaves("x", 15)), n("b", "B")]));
+    const slides = buildSlides(d);
+    const indices = branchSlideIndices(slides, d, "list");
+    expect(indices).toHaveLength(2);
+    expect(indices.every((i) => slides[i].heading.id === "list")).toBe(true);
+    expect(indices[1]).toBe(indices[0] + 1);
   });
 });
