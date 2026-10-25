@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapDocument, MindMapModel } from "../domain/model";
-import { branchSlideCount, buildSlides, slideIndexOf } from "./slides";
+import { branchPageMarks, branchSlideCount, branchSlideIndices, buildSlides, slideIndexOf } from "./slides";
 
 function n(id: string, text: string, children: MindMapModel[] = [], extra: Partial<MindMapModel> = {}): MindMapModel {
   return { id, text, children, ...extra };
@@ -223,5 +223,38 @@ describe("branchSlideCount", () => {
     expect(branchSlideCount(slides, d, "list")).toBe(2);
     expect(branchSlideCount(slides, d, "r")).toBe(slides.length);
     expect(branchSlideCount(slides, d, null)).toBe(0);
+  });
+
+  it("lists those slides in deck order", () => {
+    const d = doc(n("r", "R", [n("a", "A"), n("list", "L", leaves("x", 15)), n("b", "B")]));
+    const slides = buildSlides(d);
+    const indices = branchSlideIndices(slides, d, "list");
+    expect(indices).toHaveLength(2);
+    expect(indices.every((i) => slides[i].heading.id === "list")).toBe(true);
+    expect(indices[1]).toBe(indices[0] + 1);
+  });
+});
+
+describe("branchPageMarks", () => {
+  it("gives every node of the branch its page, numbered at the page's first node", () => {
+    const d = doc(n("r", "R", [n("p", "P", [n("a", "A", leaves("a", 2)), n("b", "B", leaves("b", 2))], { slideSplit: true })]));
+    const slides = buildSlides(d);
+    const marks = branchPageMarks(slides, d, "p");
+    // An agenda page under P, then one page per child.
+    expect(marks.get("p")).toEqual({ page: 2, order: 0, first: true });
+    expect(marks.get("a")).toEqual({ page: 3, order: 1, first: true });
+    expect(marks.get("a0")).toEqual({ page: 3, order: 1, first: false });
+    expect(marks.get("b1")).toEqual({ page: 4, order: 2, first: false });
+    expect(marks.has("r")).toBe(false);
+    expect(branchPageMarks(slides, d, null).size).toBe(0);
+  });
+
+  it("splits a list continued over pages between them", () => {
+    const d = doc(n("r", "R", [n("list", "L", leaves("x", 15))]));
+    const slides = buildSlides(d);
+    const marks = branchPageMarks(slides, d, "list");
+    const pages = new Set([...marks.values()].map((m) => m.page));
+    expect(pages.size).toBe(2);
+    expect([...marks.values()].filter((m) => m.first)).toHaveLength(2);
   });
 });

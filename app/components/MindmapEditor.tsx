@@ -39,6 +39,7 @@ import {
   parseBranch,
 } from "../application/branchClipboard";
 import ViewControls, { type PageModeToggle } from "./ViewControls";
+import { pageMarkColor, type PageMarks } from "./pageMarks";
 import {
   attachStagePanZoom,
   stageTransform,
@@ -413,6 +414,8 @@ interface ViewProps {
   onPresent?: () => void;
   /** Webページモード toggle (header button). Absent = no web page mode. */
   pageMode?: PageModeToggle;
+  /** Which page each node of a branch is on, shown over the map for a moment (see NoteEditor). */
+  pageMarks?: PageMarks;
 }
 
 /**
@@ -428,6 +431,7 @@ export function MindmapEditorView({
   onLayoutChange,
   onPresent,
   pageMode,
+  pageMarks = null,
 }: ViewProps) {
   const {
     state,
@@ -563,6 +567,8 @@ export function MindmapEditorView({
   const flashLayerRef = useRef<any>(null);
   // Overlay layer for the collapse/expand morph tween (see the morph effect).
   const morphLayerRef = useRef<any>(null);
+  // Overlay layer for the branch's page marks (see the page-marks effect).
+  const pageLayerRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
@@ -1741,6 +1747,12 @@ export function MindmapEditorView({
       stage.add(flashLayer);
       flashLayerRef.current = flashLayer;
 
+      // Page marks: which slide each node of a branch went to, shown for a
+      // moment after its split choice changes. Non-interactive.
+      const pageLayer = new Konva.Layer({ listening: false });
+      stage.add(pageLayer);
+      pageLayerRef.current = pageLayer;
+
       // Collapse/expand morph overlay. Sits above the main layer so the morphing
       // circle covers the freshly-drawn real toggle button underneath, then
       // clears to reveal it (see the morph effect). Non-interactive.
@@ -2348,6 +2360,7 @@ export function MindmapEditorView({
         dragLayerRef.current = null;
         flashLayerRef.current = null;
         morphLayerRef.current = null;
+        pageLayerRef.current = null;
       }
     };
   }, [dispatch]);
@@ -3577,6 +3590,73 @@ export function MindmapEditorView({
       flashLayer.batchDraw();
     };
   }, [highlightIds, nodes]);
+
+  // --- Page marks ---
+  // After a branch's split choice changes, each of its nodes is tinted in the
+  // colour of the slide it went to, and the first node of every slide carries
+  // that slide's number, so the cut between pages reads on the map itself.
+  // NoteEditor decides how long they stay (while a choice is hovered, or a few
+  // seconds after one is chosen); they fade in.
+  useEffect(() => {
+    const Konva = konvaRef.current;
+    const pageLayer = pageLayerRef.current;
+    if (!Konva || !pageLayer) return;
+    pageLayer.destroyChildren();
+    if (!pageMarks || pageMarks.size === 0) {
+      pageLayer.batchDraw();
+      return;
+    }
+    const group = new Konva.Group({ opacity: 0, listening: false });
+    const badges: any[] = [];
+    for (const node of nodes) {
+      const mark = pageMarks.get(node.id);
+      if (!mark) continue;
+      const color = pageMarkColor(mark);
+      const isRoot = node.depth === 0;
+      const width = nodeBoxWidth(node.width, isRoot);
+      const top = node.y - node.height / 2;
+      group.add(
+        new Konva.Rect({
+          x: node.x - 4,
+          y: top - 4,
+          width: width + 8,
+          height: node.height + 8,
+          cornerRadius: 12,
+          fill: withAlpha(color, 0.14),
+          stroke: color,
+          strokeWidth: 2,
+          listening: false,
+        })
+      );
+      if (mark.first) {
+        const label = new Konva.Text({
+          text: t("pageMarkLabel", { n: String(mark.page) }),
+          fontSize: 11,
+          fontStyle: "bold",
+          fontFamily: "sans-serif",
+          fill: "#ffffff",
+          padding: 3,
+          listening: false,
+        });
+        const badge = new Konva.Group({ x: node.x - 6, y: top - 4 - label.height() + 2, listening: false });
+        badge.add(
+          new Konva.Rect({ width: label.width(), height: label.height(), cornerRadius: 4, fill: color, listening: false }),
+          label
+        );
+        badges.push(badge);
+      }
+    }
+    // Numbers above every tint, so a neighbour's box never covers one.
+    badges.forEach((b) => group.add(b));
+    pageLayer.add(group);
+    const fadeIn = new Konva.Tween({ node: group, duration: 0.15, opacity: 1, easing: Konva.Easings.EaseOut });
+    fadeIn.play();
+    return () => {
+      fadeIn.destroy();
+      group.destroy();
+      pageLayer.batchDraw();
+    };
+  }, [pageMarks, nodes, locale]);
 
   // --- Collapse / expand morph ---
   // The unified toggle button (drawn on the main layer) flips between "−" and
