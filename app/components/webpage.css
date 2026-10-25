@@ -343,12 +343,6 @@
   overflow: hidden;
   contain: layout paint style;
 }
-/* The editor preview's split overview (PagePreview) fading in. */
-@keyframes wp-overview-in {
-  from {
-    opacity: 0;
-  }
-}
 .wp-frame .wp-root[data-variant] > .wp-bg {
   position: absolute;
   height: 100%;

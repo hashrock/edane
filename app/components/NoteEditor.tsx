@@ -7,9 +7,13 @@ import { useNoteEditor } from "./useNoteEditor";
 import type { EditorLayout } from "../application/editSurface";
 import type { PageTheme } from "../domain/pageTheme";
 import type { PageVariant } from "./PageView";
+import { branchPageMarks, buildSlides } from "../application/slides";
 
 const loadPageThemePanel = () => import("./PageThemePanel");
 const PageThemePanel = lazy(loadPageThemePanel);
+
+/** How long the map shows a branch's pages after its split choice changes. */
+const PAGE_MARKS_MS = 3000;
 
 interface Props {
   noteId?: string;
@@ -122,9 +126,28 @@ export default function NoteEditor(props: Props) {
     [dispatch]
   );
 
+  // Choosing how a branch splits shows, on the map itself, which nodes went to
+  // which page — for a few seconds, while that branch stays selected.
+  // A fresh object per choice, so choosing again restarts the timer.
+  const [marksFor, setMarksFor] = useState<{ nodeId: string } | null>(null);
+  useEffect(() => {
+    if (!marksFor) return;
+    const timer = setTimeout(() => setMarksFor(null), PAGE_MARKS_MS);
+    return () => clearTimeout(timer);
+  }, [marksFor]);
   const setSlideSplit = useCallback(
-    (nodeId: string, split: boolean | null) => dispatch({ type: "setSlideSplit", nodeId, split }, "style"),
+    (nodeId: string, split: boolean | null) => {
+      dispatch({ type: "setSlideSplit", nodeId, split }, "style");
+      setMarksFor({ nodeId });
+    },
     [dispatch]
+  );
+  const marksNodeId =
+    pageMode && marksFor && marksFor.nodeId === engine.state.view.activeNodeId ? marksFor.nodeId : null;
+  const pageMarks = useMemo(
+    () => (marksNodeId ? branchPageMarks(buildSlides(engine.model), engine.model, marksNodeId) : null),
+    // marksFor too: a repeated choice replays the marks.
+    [marksNodeId, marksFor, engine.model]
   );
 
   const defaultLayout: Layout = mounted && narrow ? "outline" : "canvas";
@@ -143,6 +166,7 @@ export default function NoteEditor(props: Props) {
     onLayoutChange: changeLayout,
     onPresent: present,
     pageMode: pageModeToggle,
+    pageMarks,
   };
   return (
     <>

@@ -428,6 +428,39 @@ export function branchSlideIndices(slides: Slide[], doc: MindMapDocument, nodeId
   return slides.flatMap((s, i) => (s.ids.some((id) => ids.has(id)) ? [i] : []));
 }
 
+/** Where a node of a branch lands in the deck: shown over the map while choosing how to split it. */
+export interface PageMark {
+  /** The deck's page number (1-based), as the preview counter and the slideshow count. */
+  page: number;
+  /** The page's position within the branch (0-based): picks its colour. */
+  order: number;
+  /** The first node of its page in outline order: where the page number is drawn. */
+  first: boolean;
+}
+
+/**
+ * The page each node of `nodeId`'s branch is presented on (blank leaves,
+ * never presented, are left out).
+ */
+export function branchPageMarks(slides: Slide[], doc: MindMapDocument, nodeId: string | null): Map<string, PageMark> {
+  const node = nodeId ? findNode(doc, nodeId) : null;
+  const marks = new Map<string, PageMark>();
+  if (!node) return marks;
+  const ids = subtreeIds(node);
+  const pageOf = new Map<string, { page: number; order: number }>();
+  branchSlideIndices(slides, doc, nodeId).forEach((i, order) => {
+    for (const id of slides[i].ids) if (!pageOf.has(id)) pageOf.set(id, { page: i + 1, order });
+  });
+  const seen = new Set<number>();
+  for (const id of ids) {
+    const p = pageOf.get(id);
+    if (!p) continue;
+    marks.set(id, { ...p, first: !seen.has(p.page) });
+    seen.add(p.page);
+  }
+  return marks;
+}
+
 /** How many slides present some node of `nodeId`'s branch. */
 export function branchSlideCount(slides: Slide[], doc: MindMapDocument, nodeId: string | null): number {
   return branchSlideIndices(slides, doc, nodeId).length;

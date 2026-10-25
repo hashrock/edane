@@ -92,17 +92,17 @@ describe("Pages mode (browser e2e)", () => {
     await waitFor(() => counter() === "Page 2 / 5");
     expect(count()).toBe("Pages in this branch: 3");
     expect(q('[data-testid="page-split-each"]')!.getAttribute("aria-checked")).toBe("true");
-    // For a few seconds, every page of the branch shows at once, numbered.
-    const overviewPages = () => document.querySelectorAll('[data-testid="page-split-overview-page"]');
-    expect(overviewPages()).toHaveLength(3);
-    expect(q('[data-testid="page-split-overview"]')!.getAttribute("aria-label")).toBe("How this branch is split: 3 pages");
-    await waitFor(() => overviewPages().length === 0, 5000);
+    // For a few seconds the rows show which page each went to, numbered at each page's first row.
+    const marks = () => Array.from(document.querySelectorAll('[data-testid="page-mark"]')).map((m) => m.textContent);
+    expect(marks()).toEqual(["Page 2", "Page 3", "Page 4"]);
+    await waitFor(() => marks().length === 0, 5000);
     q<HTMLButtonElement>('[data-testid="page-split-auto"]')!.click();
     await waitFor(() => counter() === "Page 2 / 3");
-    expect(overviewPages()).toHaveLength(1);
-    // Clicking it dismisses it early.
-    q<HTMLElement>('[data-testid="page-split-overview"]')!.click();
-    await waitFor(() => overviewPages().length === 0);
+    expect(marks()).toEqual(["Page 2"]);
+    // Selecting another node takes them away.
+    await userEvent.click(row("fast"));
+    await waitFor(() => marks().length === 0);
+    await userEvent.click(row("Why"));
     // A leaf has no children to split.
     await userEvent.click(row("How"));
     await waitFor(() => counter() === "Page 3 / 3");

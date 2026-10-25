@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { findNode, type MindMapDocument } from "../domain/model";
-import type { PageTheme } from "../domain/pageTheme";
 import { effectiveTheme } from "../domain/pageTheme";
-import { branchSlideIndices, buildSlides, slideIndexOf, splittable, type Slide } from "../application/slides";
+import { branchSlideCount, buildSlides, slideIndexOf, splittable } from "../application/slides";
 import {
   DEFAULT_PREVIEW_SCALE,
   PREVIEW_VIRTUAL_HEIGHT as VIRTUAL_HEIGHT,
@@ -71,71 +70,6 @@ function Segmented<T>({ label, testId, choices, value, onChange, className = "" 
   );
 }
 
-/** How long the split overview stays after the choice changes. */
-const OVERVIEW_MS = 3000;
-/** Thumbnails the overview draws at most; the rest are counted. */
-const OVERVIEW_MAX = 16;
-
-/**
- * Every page of a branch at once, as numbered thumbnails over the preview:
- * what a split choice just did, before the preview goes back to the one page.
- * Clicking it dismisses it early.
- */
-function SplitOverview({ slides, indices, theme, width, height, onDismiss }: {
-  slides: Slide[];
-  indices: number[];
-  theme: PageTheme;
-  width: number;
-  height: number;
-  onDismiss: () => void;
-}) {
-  const shown = indices.slice(0, OVERVIEW_MAX);
-  const cols = Math.ceil(Math.sqrt(shown.length));
-  const rows = Math.ceil(shown.length / cols);
-  const gap = 4;
-  const scale = Math.min(
-    (width - gap * (cols + 1)) / cols / VIRTUAL_WIDTH,
-    (height - gap * (rows + 1)) / rows / VIRTUAL_HEIGHT
-  );
-  return (
-    <div
-      data-testid="page-split-overview"
-      aria-label={t("pageSplitOverview", { n: String(indices.length) })}
-      onClick={onDismiss}
-      className="absolute inset-0 z-10 flex cursor-pointer flex-wrap content-center justify-center bg-slate-700 motion-safe:animate-[wp-overview-in_150ms_ease-out]"
-      style={{ gap, padding: gap }}
-    >
-      {shown.map((i, k) => (
-        <div
-          key={i}
-          data-testid="page-split-overview-page"
-          className="relative overflow-hidden rounded-sm ring-1 ring-white/40"
-          style={{ width: VIRTUAL_WIDTH * scale, height: VIRTUAL_HEIGHT * scale }}
-        >
-          <PageRoot
-            theme={theme}
-            variant="slide"
-            style={{
-              width: VIRTUAL_WIDTH,
-              height: VIRTUAL_HEIGHT,
-              minHeight: 0,
-              overflow: "hidden",
-              transform: `scale(${scale})`,
-              transformOrigin: "0 0",
-              ["--wp-page-h" as string]: `${VIRTUAL_HEIGHT}px`,
-            }}
-          >
-            <PageSection slide={slides[i]} index={i} />
-          </PageRoot>
-          <span className="absolute bottom-0.5 right-0.5 rounded bg-emerald-600 px-1 text-[10px] font-medium leading-4 tabular-nums text-white">
-            {k === shown.length - 1 && indices.length > shown.length ? `${k + 1}…${indices.length}` : k + 1}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 interface Props {
   doc: MindMapDocument;
   /** The selected node; the preview shows the page that presents it. */
@@ -167,14 +101,6 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
   useLocale();
   const [open, setOpen] = useState(true);
   const [publishOpen, setPublishOpen] = useState(false);
-  // The branch whose pages the split overview shows, for a few seconds after its choice changes.
-  // A fresh object per choice, so choosing again restarts the timer.
-  const [overview, setOverview] = useState<{ nodeId: string } | null>(null);
-  useEffect(() => {
-    if (!overview) return;
-    const timer = setTimeout(() => setOverview(null), OVERVIEW_MS);
-    return () => clearTimeout(timer);
-  }, [overview]);
   const [scale, setScale] = useState(DEFAULT_PREVIEW_SCALE);
   // The size the background's drawing buffer is made for: it is rebuilt only when a drag ends, not on every move.
   const [settledScale, setSettledScale] = useState(DEFAULT_PREVIEW_SCALE);
@@ -232,13 +158,7 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
   const theme = effectiveTheme(doc.theme);
   // How many pages the selected branch takes, and the choice of how to split it.
   const active = activeNodeId ? findNode(doc, activeNodeId) : null;
-  const branchPages = useMemo(
-    () => (active && splittable(active) ? branchSlideIndices(slides, doc, active.id) : []),
-    [slides, doc, active]
-  );
-  const branch = branchPages.length;
-  // Only while that branch is still the selected one.
-  const overviewPages = overview && overview.nodeId === active?.id ? branchPages : [];
+  const branch = active && splittable(active) ? branchSlideCount(slides, doc, active.id) : 0;
   const button = "rounded-md px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100";
   const primary =
     "flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50";
@@ -314,16 +234,6 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
             />
             {section}
           </PageRoot>
-          {overviewPages.length > 0 && (
-            <SplitOverview
-              slides={slides}
-              indices={overviewPages}
-              theme={theme}
-              width={width}
-              height={height}
-              onDismiss={() => setOverview(null)}
-            />
-          )}
         </div>
       )}
       <div className="flex items-center gap-1 px-0.5 pt-1">
@@ -372,10 +282,7 @@ export default function PagePreview({ doc, activeNodeId, format, onFormatChange,
               testId="page-split"
               choices={SPLITS}
               value={active.slideSplit ?? null}
-              onChange={(split) => {
-                onSlideSplit(active.id, split);
-                setOverview({ nodeId: active.id });
-              }}
+              onChange={(split) => onSlideSplit(active.id, split)}
             />
           )}
         </div>

@@ -39,6 +39,8 @@ import { useTextInputHandlers } from "./useTextInputHandlers";
 import { t } from "../application/i18n";
 import { useLocale } from "./useLocale";
 import ServiceSwitcher from "./ServiceSwitcher";
+import { pageMarkColor, type PageMarks } from "./pageMarks";
+import { withAlpha } from "../application/accentColor";
 
 interface Props {
   engine: NoteEditorEngine;
@@ -57,6 +59,8 @@ interface Props {
   onPresent?: () => void;
   /** Webページモード toggle (header button). Absent = no web page mode. */
   pageMode?: PageModeToggle;
+  /** Which page each node of a branch is on, shown on the rows for a moment (see NoteEditor). */
+  pageMarks?: PageMarks;
 }
 
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
@@ -82,6 +86,7 @@ export default function OutlineEditor({
   onLayoutChange,
   onPresent,
   pageMode,
+  pageMarks = null,
 }: Props) {
   useLocale(); // 言語切り替えで再レンダー（t() の購読）
   const {
@@ -431,14 +436,24 @@ export default function OutlineEditor({
                 node.checked !== undefined && supportsCheckbox(type);
               const isDone = node.checked === true;
               const displayText = isEditingThis ? editingText : node.text;
+              // The slide this row went to, tinted in its colour for a moment
+              // after its branch's split choice changes (see pageMarks).
+              const mark = pageMarks?.get(node.id);
+              const markColor = mark && pageMarkColor(mark);
 
               return (
                 <li key={node.id}>
                   <div
-                    className={`flex items-start gap-1.5 rounded-lg py-1 pr-1 ${
+                    className={`flex items-start gap-1.5 rounded-lg py-1 pr-1 transition-[background-color,box-shadow] duration-200 ${
                       isActive ? "bg-slate-100" : ""
                     }`}
-                    style={{ paddingLeft: depth * INDENT }}
+                    style={{
+                      paddingLeft: depth * INDENT,
+                      ...(markColor && {
+                        backgroundColor: withAlpha(markColor, 0.14),
+                        boxShadow: `inset 3px 0 0 ${markColor}`,
+                      }),
+                    }}
                   >
                     {/* Bullet / disclosure */}
                     <button
@@ -600,6 +615,16 @@ export default function OutlineEditor({
                       >
                         ↗
                       </a>
+                    )}
+
+                    {mark?.first && (
+                      <span
+                        data-testid="page-mark"
+                        className="mt-1 shrink-0 rounded px-1 text-[11px] font-bold leading-4 text-white"
+                        style={{ backgroundColor: markColor }}
+                      >
+                        {t("pageMarkLabel", { n: String(mark.page) })}
+                      </span>
                     )}
                   </div>
                 </li>
