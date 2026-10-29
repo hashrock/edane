@@ -171,6 +171,7 @@ const KINDS = {
   moveToChild: true,
   typeText: true,
   setSelection: true,
+  setTextRange: true,
   copyBranch: true,
   cutBranch: true,
   pasteBranch: true,
@@ -323,6 +324,19 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       };
     case "setSelection":
       return { type: kind, cursorPos: pos(a), selectionEnd: pos(b) };
+    case "setTextRange": {
+      // What Shift+arrows produce: anchored on the active node, the focus in
+      // any visible node. Usually a no-op outside editing, as in the app.
+      const anchorId = state.view.activeNodeId ?? vis(a);
+      const focusId = vis(b);
+      return {
+        type: kind,
+        range: {
+          anchor: { id: anchorId, offset: pos(a) },
+          focus: { id: focusId, offset: pos(c, textOf(focusId)) },
+        },
+      };
+    }
     case "pasteBranch":
       return flag ? { type: kind } : { type: kind, node: cloneWithNewIds(step.branch, mint) };
     case "activateNode": {

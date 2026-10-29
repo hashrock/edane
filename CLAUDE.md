@@ -17,6 +17,13 @@
 
 かつて↓のフォールバックをフラット順の隣にしていたときは、「自分が親の最後の子か」というユーザーに見えない条件で↓が子に降りたり降りなかったりしていた。**行き止まりを避けるためにフォールバックや記憶を足すときは、その移動先が木のどこでも同じ規則で決まるか確かめること。**
 
+### ノードをまたぐテキスト選択（`ViewState.textRange`）
+
+編集中の Shift+矢印がノードの端を越えると、選択はフラット順（`getFlatOrder`）で隣のノードへ伸びる（`app/application/textRange.ts`）。ドキュメントを「1ノード＝1行、インデント＝深さ」のテキストとして読み、その上の2点 `anchor` / `focus` で範囲を表す。**anchor は常に編集中のノード**（`activeNodeId`）で、キーボードは共有textareaに残る。textarea は anchor の担当部分だけを選択して表示し、ほかのノードの部分は各ビューが描く。
+
+- 範囲を作るのは `setTextRange` だけ。それ以外のアクションはすべて reducer の末尾で範囲を消す（`selectedIds` と同じ方式）。例外は、textarea が渡された選択をそのまま報告してくる `setSelection` だけ。
+- 範囲があるあいだは keymap の `edit-range-*` がすべてのキーを受け持つ。修飾なしの矢印は範囲を畳む（←/→ は範囲の始点/終点へ、↑/↓ は focus から1行先へ）ので、不変条件は範囲中も成り立つ。それ以外のキーは focus で範囲を畳んで握りつぶす。anchor の部分だけを書き換えさせないため。Cmd/Ctrl+C は範囲をインデント付きの行としてコピーする（`rangeToPlainText`）。範囲の削除・切り取り・置き換えはまだ無い（cut / paste は何もしない）。
+
 ### ドキュメントはルートの配列（multi-root）
 
 `MindMapDocument`（`app/domain/model.ts`）は `{ title, roots }`。`title` はノートのタイトルでノードではない（ヘッダーで編集し、`notes.title` 列に保存する）。`roots` は木の配列で、各ルート（`MindMapModel`）が canvas / outline に独立した木として並ぶ。**「見えないルートノード」は存在しない**。ノードを探す・位置を知るときは `findNode(doc, id)` / `locateNode(doc, id)`（`parent === null` ならルート、`siblings` は `doc.roots` か `parent.children`）を使い、`parent.id === model.id` のような比較を書かないこと。

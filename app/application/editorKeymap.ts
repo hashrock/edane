@@ -48,6 +48,14 @@ import {
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
 import { verticalMove as measuredVerticalMove } from "../lib/textGeometry";
+import {
+  beginRange,
+  orderedRange,
+  rangeTextOf,
+  stepPoint,
+  type RangeDir,
+  type TextPoint,
+} from "./textRange";
 
 export type KeyMode = "selection" | "editing";
 export type KeyResult = "handled" | "pass";
@@ -108,6 +116,11 @@ export interface KeyContext {
   /** Caret start / end read from the live textarea. */
   pos: number;
   selEnd: number;
+  /**
+   * The textarea's selectionDirection is "backward": `pos` is the moving end.
+   * Only Shift+arrows read it (to know where a cross-node range starts).
+   */
+  backward?: boolean;
 }
 
 export interface KeyBinding {
@@ -122,6 +135,12 @@ export interface KeyBinding {
   keys: string;
   when: "global" | "selection" | "editing" | "both";
   match: (e: KeymapKeyEvent) => boolean;
+  /**
+   * Further restricts the binding to some states (absent = always). A binding
+   * whose `active` is false is skipped as if it didn't match, so a later one
+   * can take the key.
+   */
+  active?: (ctx: KeyContext) => boolean;
   run: (ctx: KeyContext) => KeyOutcome;
 }
 
@@ -157,6 +176,26 @@ const insertChild = (nodeId: string): KeyEffect[] => [
 
 // Treat Cmd (mac) and Ctrl (win/linux) as the same "primary" modifier.
 const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
+
+const ARROW_DIRS: Record<string, RangeDir> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
+/** Keys that are only a modifier going down: never end a range. */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "AltGraph", "CapsLock"]);
+/** A cross-node range is live (see ViewState.textRange). */
+const inRange = (ctx: KeyContext) => ctx.state.view.textRange !== undefined;
+/** Put the caret at a point, ending the range: edit that node there. */
+const caretAt = (p: TextPoint): KeyEffect =>
+  dispatch({
+    type: "activateNode",
+    nodeId: p.id,
+    cursorPos: p.offset,
+    selectionEnd: p.offset,
+    editing: true,
+  });
 
 export function buildKeymap(
   prefs: EditorPreferences = DEFAULT_PREFERENCES,
@@ -571,6 +610,86 @@ export function buildKeymap(
     ...(prefs.selectionMode ? selectionBindings : alwaysEditBindings),
 
     // ---- Editing mode ----
+    // Cross-node text selection (application/textRange.ts). Shift+arrows that
+    // would leave the node start a range instead of stopping at the edge; once
+    // one is live these bindings own every key, so nothing reaches the
+    // textarea that could edit only the anchor's part of it.
+    {
+      id: "edit-range-extend",
+      label: "kmExtendSelection",
+      keys: "Shift + ←→↑↓",
+      when: "editing",
+      match: (e) => e.shiftKey && !mod(e) && !e.altKey && e.key in ARROW_DIRS,
+      run: (ctx) => {
+        const { view, document } = ctx.state;
+        const model = document.model;
+        if (!view.activeNodeId) return PASS;
+        const dir = ARROW_DIRS[ctx.e.key];
+        const textOf = rangeTextOf(model, view.activeNodeId, view.editingText);
+        const range = view.textRange
+          ? {
+              anchor: view.textRange.anchor,
+              focus: stepPoint(model, view.textRange.focus, dir, textOf, verticalMove),
+            }
+          : beginRange(
+              model,
+              view.activeNodeId,
+              textOf,
+              { pos: ctx.pos, selEnd: ctx.selEnd, backward: !!ctx.backward },
+              dir,
+              verticalMove
+            );
+        // Still inside the node: the textarea extends its own selection.
+        if (!range) return PASS;
+        return handled(dispatch({ type: "setTextRange", range }));
+      },
+    },
+    {
+      // Plain arrows end the range the way a textarea collapses its selection:
+      // ←/→ to its start/end, ↑/↓ one line on from the moving end. Either way
+      // the caret moves, keeping the keyboard-escape invariant.
+      id: "edit-range-collapse",
+      label: "",
+      keys: "←→↑↓",
+      when: "editing",
+      match: (e) => !e.shiftKey && !mod(e) && !e.altKey && e.key in ARROW_DIRS,
+      active: inRange,
+      run: (ctx) => {
+        const range = ctx.state.view.textRange!;
+        const model = ctx.state.document.model;
+        const dir = ARROW_DIRS[ctx.e.key];
+        if (dir === "left") return handled(caretAt(orderedRange(model, range).start));
+        if (dir === "right") return handled(caretAt(orderedRange(model, range).end));
+        const { focus } = range;
+        const text = rangeTextOf(model, ctx.state.view.activeNodeId, ctx.state.view.editingText)(focus.id);
+        const moved = verticalMove(text, focus.offset, dir === "up" ? -1 : 1);
+        return handled(
+          caretAt(focus),
+          moved !== null
+            ? dispatch({ type: "setSelection", cursorPos: moved, selectionEnd: moved })
+            : dispatch({ type: dir === "up" ? "moveUp" : "moveDown" })
+        );
+      },
+    },
+    {
+      // Every other key ends the range at its moving end and is swallowed:
+      // typing, Backspace, Enter, Tab would otherwise act on the anchor's
+      // part alone. Copy / cut / paste / select-all chords pass through to
+      // their clipboard events (the views handle the range there), and a
+      // modifier going down must not end the range it is about to extend.
+      id: "edit-range-guard",
+      label: "",
+      keys: "",
+      when: "editing",
+      match: () => true,
+      active: inRange,
+      run: (ctx) => {
+        const { e } = ctx;
+        if (MODIFIER_KEYS.has(e.key)) return PASS;
+        if (mod(e) && ["c", "x", "v", "a"].includes(e.key.toLowerCase())) return PASS;
+        return handled(caretAt(ctx.state.view.textRange!.focus));
+      },
+    },
     {
       id: "edit-newline",
       label: "kmNewline",
@@ -765,6 +884,7 @@ export function runKeymap(
       if (b.when !== "both" && b.when !== mode) continue;
       if (!b.match(ctx.e)) continue;
     }
+    if (b.active && !b.active(ctx)) continue;
     return b.run(ctx);
   }
   return PASS;

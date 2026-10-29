@@ -13,6 +13,11 @@ import type { UndoType } from "../application/editorReducer";
 import { pasteCommand } from "../application/editorCommands";
 import { serializeDocument } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
+import {
+  rangeSegments,
+  rangeTextOf,
+  rangeToPlainText,
+} from "../application/textRange";
 import { supportsCheckbox } from "../application/nodeUtils";
 import {
   buildKeymap,
@@ -63,6 +68,9 @@ interface Props {
   pageMarks?: PageMarks;
 }
 
+// Background of the part of a row a cross-node selection covers.
+const RANGE_HIGHLIGHT = "bg-sky-200/70";
+
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
 // narrow screen.
 const INDENT = 18;
@@ -112,10 +120,20 @@ export default function OutlineEditor({
   } = engine;
 
   const {
-    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
+    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd, textRange },
   } = state;
 
   const rows = useMemo(() => outlineRows(model), [model]);
+  // The rows a cross-node selection covers, with the covered part of each
+  // (the anchor row's part is the textarea's own selection).
+  const rangeSegs = useMemo(
+    () =>
+      textRange
+        ? rangeSegments(model, textRange, rangeTextOf(model, activeNodeId, editingText))
+        : null,
+    [model, textRange, activeNodeId, editingText]
+  );
+  const rangeLastId = rangeSegs ? [...rangeSegs.keys()].pop() : undefined;
   // The root is the note title (edited in the header); it is not an outline
   // row — the rows start at the top-level nodes. See outlineRows().
   const title = model.title;
@@ -182,6 +200,7 @@ export default function OutlineEditor({
         node: activeNode(st),
         pos: inputRef.current?.selectionStart || 0,
         selEnd: inputRef.current?.selectionEnd || 0,
+        backward: inputRef.current?.selectionDirection === "backward",
       });
       if (outcome.result === "handled") e.preventDefault();
       applyKeyEffects(outcome.effects, st, keyDeps);
@@ -191,8 +210,33 @@ export default function OutlineEditor({
 
   // Paste of multi-line (indented) text becomes fresh nodes; single-line text
   // is left to the native textarea.
+  // A selection across nodes copies as indented lines (the textarea only
+  // holds the anchor's part of it). Cutting / pasting over one is not
+  // supported yet, so neither may act on the anchor's part alone.
+  const handleCopy = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const st = stateRef.current;
+      const range = st.view.textRange;
+      if (!range) return; // native text copy
+      e.preventDefault();
+      const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
+      e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
+    },
+    [stateRef]
+  );
+  const handleCut = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (stateRef.current.view.textRange) e.preventDefault();
+    },
+    [stateRef]
+  );
+
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (stateRef.current.view.textRange) {
+        e.preventDefault();
+        return;
+      }
       const text = e.clipboardData.getData("text");
       if (!text || !text.includes("\n")) return;
       e.preventDefault();
@@ -436,6 +480,8 @@ export default function OutlineEditor({
                 node.checked !== undefined && supportsCheckbox(type);
               const isDone = node.checked === true;
               const displayText = isEditingThis ? editingText : node.text;
+              // The anchor row's part shows as the textarea's own selection.
+              const rangeSeg = isEditingThis ? undefined : rangeSegs?.get(node.id);
               // The slide this row went to, tinted in its colour for a moment
               // after its branch's split choice changes (see pageMarks).
               const mark = pageMarks?.get(node.id);
@@ -577,7 +623,20 @@ export default function OutlineEditor({
                             ? node.linkTitle || node.text || "empty"
                             : isEmpty
                               ? t("emptyItem")
-                              : displayText}
+                              : rangeSeg && type === "text"
+                                ? <>
+                                    {displayText.slice(0, rangeSeg[0])}
+                                    <span data-testid="range-highlight" className={RANGE_HIGHLIGHT}>
+                                      {displayText.slice(rangeSeg[0], rangeSeg[1])}
+                                    </span>
+                                    {displayText.slice(rangeSeg[1])}
+                                  </>
+                                : displayText}
+                          {/* The range runs on past this row: mark its line
+                              break, so empty rows and line ends show too. */}
+                          {rangeSeg && node.id !== rangeLastId && (
+                            <span className={`${RANGE_HIGHLIGHT} inline-block w-1.5`}>&#8203;</span>
+                          )}
                         </span>
                       )}
                       {collapsed && hasChildren && (
@@ -641,6 +700,8 @@ export default function OutlineEditor({
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
+            onCopy={handleCopy}
+            onCut={handleCut}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}

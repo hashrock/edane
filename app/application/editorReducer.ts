@@ -70,6 +70,7 @@ import {
 } from "../domain/model";
 import type { PageTheme } from "../domain/pageTheme";
 import { assertNever } from "../lib/assertNever";
+import { anchorSegment, rangeTextOf, type TextRange } from "./textRange";
 
 export interface DocumentState {
   model: MindMapDocument;
@@ -119,6 +120,20 @@ export interface ViewState {
    * `setSelection`, which is only the textarea reporting its own caret.
    */
   selectedIds?: string[];
+  /**
+   * A text selection that crosses node boundaries (Shift+arrows past a
+   * node's edge — see application/textRange.ts). Absent means the selection
+   * is just `cursorPos`/`selectionEnd` inside the active node. While present,
+   * `range.anchor.id` is the active node being edited and `cursorPos`/
+   * `selectionEnd` hold the anchor's covered segment, so the textarea draws
+   * its own part of the range.
+   *
+   * Only `setTextRange` sets it, and every other action clears it (once, at
+   * the tail of {@link editorReducer}, like `selectedIds`) — except a
+   * `setSelection` that only echoes the segment back, which is the textarea
+   * reporting the selection we just gave it.
+   */
+  textRange?: TextRange;
 }
 
 export interface EditorState {
@@ -206,6 +221,9 @@ export type EditorAction =
       commitModel: boolean;
     }
   | { type: "setSelection"; cursorPos: number; selectionEnd: number }
+  // Shift+arrows across a node boundary: the new cross-node selection. The
+  // anchor must be the node being edited; otherwise this is a no-op.
+  | { type: "setTextRange"; range: TextRange }
   // --- branch clipboard ---
   | { type: "copyBranch" }
   | { type: "cutBranch" }
@@ -783,6 +801,7 @@ function documentReducer(
     case "arrowLeftEdge":
     case "arrowRightEdge":
     case "setSelection":
+    case "setTextRange":
     case "activateNode":
     case "startEditing":
     case "selectAllInNode":
@@ -888,6 +907,11 @@ function keepsSelection(type: EditorAction["type"]): boolean {
     // lived between mousedown and mouseup.
     type === "setSelection"
   );
+}
+
+/** Identity-preserving: only allocates when there was a range to drop. */
+function withoutTextRange(view: ViewState): ViewState {
+  return view.textRange === undefined ? view : { ...view, textRange: undefined };
 }
 
 function withCaretInBuffer(view: ViewState): ViewState {
@@ -1191,6 +1215,21 @@ function viewReducer(
       };
     }
 
+    case "setTextRange": {
+      const { anchor, focus } = action.range;
+      if (!view.editing || view.activeNodeId !== anchor.id) return view;
+      const visible = getFlatOrder(model);
+      if (!visible.includes(focus.id)) return view;
+      const textOf = rangeTextOf(model, view.activeNodeId, view.editingText);
+      const clamp = (p: typeof anchor) => ({
+        id: p.id,
+        offset: Math.min(Math.max(p.offset, 0), textOf(p.id).length),
+      });
+      const range = { anchor: clamp(anchor), focus: clamp(focus) };
+      const [cursorPos, selectionEnd] = anchorSegment(model, range, textOf);
+      return { ...view, textRange: range, cursorPos, selectionEnd };
+    }
+
     case "activateNode": {
       const node = findNode(model, action.nodeId);
       if (!node) return view;
@@ -1428,7 +1467,9 @@ export function editorReducer(
       action.state.document,
       state.document
     );
-    const view = keepsSelection(action.type) ? reconciled : withoutSelection(reconciled);
+    const view = withoutTextRange(
+      keepsSelection(action.type) ? reconciled : withoutSelection(reconciled)
+    );
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
   }
@@ -1464,6 +1505,15 @@ export function editorReducer(
   if (!keepsSelection(action.type)) {
     nextView = withoutSelection(nextView);
   }
+  // Likewise the cross-node range: only setTextRange makes one, and only the
+  // textarea echoing its segment back (a setSelection that changed nothing)
+  // leaves it alone. Any other edit, move or click ends it.
+  const keepsRange =
+    action.type === "setTextRange" ||
+    (action.type === "setSelection" &&
+      nextView.cursorPos === state.view.cursorPos &&
+      nextView.selectionEnd === state.view.selectionEnd);
+  if (!keepsRange) nextView = withoutTextRange(nextView);
 
   if (docResult.document === state.document && nextView === state.view) {
     return state;

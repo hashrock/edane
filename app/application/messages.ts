@@ -69,6 +69,7 @@ export const MESSAGES_JA = {
   kmToggleTask: "チェックボックスの完了 / 未完了",
   kmToggleCollapse: "折りたたみ / 展開",
   kmNewline: "改行",
+  kmExtendSelection: "選択範囲を広げる（ノードをまたぐ）",
   kmSplitNode: "ノードを分割 / 追加",
   kmExitEditing: "編集を終了",
 
@@ -514,6 +515,7 @@ export const MESSAGES_EN = {
   kmToggleTask: "Complete / reopen task",
   kmToggleCollapse: "Collapse / expand",
   kmNewline: "New line",
+  kmExtendSelection: "Extend selection (across nodes)",
   kmSplitNode: "Split / add node",
   kmExitEditing: "Finish editing",
 

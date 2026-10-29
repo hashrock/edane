@@ -29,6 +29,11 @@ import {
   planGroupCollapse,
 } from "../application/selection";
 import { modelToMarkdown } from "../application/markdown";
+import {
+  rangeSegments,
+  rangeTextOf,
+  rangeToPlainText,
+} from "../application/textRange";
 import { planPaste } from "../application/pastePlan";
 import { pasteCommand, type PasteSource } from "../application/editorCommands";
 import { assertNever } from "../lib/assertNever";
@@ -465,7 +470,7 @@ export function MindmapEditorView({
 
   // Derived views of the editor state (keeps downstream code/deps unchanged)
   const {
-    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd, selectedIds },
+    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd, selectedIds, textRange },
   } = state;
 
   // Shared text-input glue (input ref, IME state, typeText handlers) — the same
@@ -1029,6 +1034,15 @@ export function MindmapEditorView({
 
   const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const st = stateRef.current;
+    // A selection across nodes: its text, one indented line per node — the
+    // textarea only holds the anchor's part of it.
+    const range = st.view.textRange;
+    if (range) {
+      e.preventDefault();
+      const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
+      e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
+      return;
+    }
     if (st.view.editing && hasTextRange(st)) return; // native text copy
     e.preventDefault();
     dispatch({ type: "copyBranch" });
@@ -1048,6 +1062,12 @@ export function MindmapEditorView({
   const handleCut = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
+      // Cutting a cross-node range (deleting across nodes) is not supported
+      // yet; never let the textarea cut just the anchor's part.
+      if (st.view.textRange) {
+        e.preventDefault();
+        return;
+      }
       if (st.view.editing && hasTextRange(st)) return; // native text cut
       e.preventDefault();
       // Mirror copy's system-clipboard payload before the branch leaves the tree.
@@ -1067,7 +1087,8 @@ export function MindmapEditorView({
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (readOnly) {
+      // Replacing a cross-node range is not supported yet (see handleCut).
+      if (readOnly || stateRef.current.view.textRange) {
         e.preventDefault();
         return;
       }
@@ -1690,6 +1711,7 @@ export function MindmapEditorView({
           node: activeNode(state),
           pos: inputRef.current?.selectionStart || 0,
           selEnd: inputRef.current?.selectionEnd || 0,
+          backward: inputRef.current?.selectionDirection === "backward",
         },
         prefs
       );
@@ -3438,38 +3460,77 @@ export function MindmapEditorView({
         ((activeNode.fontSize ?? DEFAULT_FONT_SIZE) * 10) / DEFAULT_FONT_SIZE
       );
 
-      // Selection highlight (per line, so it spans multi-line ranges).
-      if (data && cursorPos !== selectionEnd) {
-        const a = Math.min(cursorPos, selectionEnd);
-        const b = Math.max(cursorPos, selectionEnd);
-        for (let li = 0; li < data.lines.length; li++) {
-          const lineStart = data.lineStarts[li];
-          const lineEnd = lineStart + data.lines[li].length;
-          const segStart = Math.max(a, lineStart);
-          const segEnd = Math.min(b, lineEnd);
-          if (segEnd <= segStart) continue;
-          const offs = data.lineOffsets[li];
-          const x1 = offs[segStart - lineStart] || 0;
-          const x2 = offs[segEnd - lineStart] || 0;
-          if (x2 <= x1) continue;
-          const lineCenterY = textTop + li * lineHeight + lineHeight / 2;
+      // Selection highlight (per line, so it spans multi-line ranges): the
+      // in-node selection, or every node a cross-node range covers.
+      const drawSegment = (
+        n: MindMapNode,
+        nodeData: LineData,
+        a: number,
+        b: number,
+        // The range runs on past this node: mark its "line break" too, so an
+        // empty node or a range starting at a line's end still shows.
+        trailing: boolean
+      ) => {
+        const nodeIsRoot = n.depth === 0;
+        const nodeLineHeight = nodeData.lineHeight;
+        const nodeTop = n.y - (nodeData.lines.length * nodeLineHeight) / 2;
+        const half = Math.round(((n.fontSize ?? DEFAULT_FONT_SIZE) * 10) / DEFAULT_FONT_SIZE);
+        const fill = nodeIsRoot ? "rgba(255, 255, 255, 0.3)" : withAlpha(getAccent(), 0.18);
+        const rect = (li: number, x1: number, x2: number) => {
+          const lineCenterY = nodeTop + li * nodeLineHeight + nodeLineHeight / 2;
           cursorLayer.add(
             new Konva.Rect({
-              x: activeNode.x + nodeTextOffsetX(activeNode) + x1,
-              y: lineCenterY - caretHalf,
+              x: n.x + nodeTextOffsetX(n) + x1,
+              y: lineCenterY - half,
               width: x2 - x1,
-              height: caretHalf * 2,
-              fill: isRoot
-                ? "rgba(255, 255, 255, 0.3)"
-                : withAlpha(getAccent(), 0.18),
+              height: half * 2,
+              fill,
               listening: false,
             })
           );
+        };
+        for (let li = 0; li < nodeData.lines.length; li++) {
+          const lineStart = nodeData.lineStarts[li];
+          const lineEnd = lineStart + nodeData.lines[li].length;
+          const segStart = Math.max(a, lineStart);
+          const segEnd = Math.min(b, lineEnd);
+          if (segEnd <= segStart) continue;
+          const offs = nodeData.lineOffsets[li];
+          const x1 = offs[segStart - lineStart] || 0;
+          const x2 = offs[segEnd - lineStart] || 0;
+          if (x2 > x1) rect(li, x1, x2);
         }
+        if (trailing) {
+          const last = nodeData.lines.length - 1;
+          const offs = nodeData.lineOffsets[last];
+          const x = offs?.[offs.length - 1] || 0;
+          rect(last, x, x + 6);
+        }
+      };
+
+      if (textRange) {
+        const textOf = rangeTextOf(stateRef.current.document.model, activeNodeId, editingText);
+        const segments = rangeSegments(stateRef.current.document.model, textRange, textOf);
+        const ids = [...segments.keys()];
+        ids.forEach((id, i) => {
+          const n = nodes.find((m) => m.id === id);
+          const nodeData = lineDataRef.current.get(id);
+          if (!n || !nodeData) return; // culled off-screen
+          const [a, b] = segments.get(id)!;
+          drawSegment(n, nodeData, a, b, i < ids.length - 1);
+        });
+      } else if (data && cursorPos !== selectionEnd) {
+        drawSegment(
+          activeNode,
+          data,
+          Math.min(cursorPos, selectionEnd),
+          Math.max(cursorPos, selectionEnd),
+          false
+        );
       }
 
       // Cursor line
-      if (cursorVisible && cursorPos === selectionEnd) {
+      if (cursorVisible && cursorPos === selectionEnd && !textRange) {
         const { line, col } = data
           ? posToLineCol(data, cursorPos)
           : { line: 0, col: 0 };
@@ -3495,7 +3556,7 @@ export function MindmapEditorView({
     }
 
     cursorLayer.draw();
-  }, [activeNodeId, editing, cursorPos, selectionEnd, cursorVisible, nodes]);
+  }, [activeNodeId, editing, editingText, cursorPos, selectionEnd, textRange, cursorVisible, nodes]);
 
   // --- Paste / insert flash ---
   // A soft amber glow that blooms in and gently dissolves around just-inserted

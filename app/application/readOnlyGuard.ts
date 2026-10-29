@@ -66,6 +66,8 @@ const READ_ONLY_ALLOWED = {
   // 範囲選択は編集ジェスチャ（どちらも `editing: true` を立てる）。
   selectAllInNode: false,
   dragSelect: false,
+  // ノードをまたぐ範囲選択も編集中にしか作れない（アンカーは編集中のノード）。
+  setTextRange: false,
   // IME 変換中はモデルを変えないが、編集バッファを書く操作。
   typeText: false,
 
