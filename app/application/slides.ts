@@ -260,9 +260,10 @@ function paginate(heading: MindMapModel, units: SlideItem[][]): SlideItem[][] {
     let used = Infinity;
     units.forEach((u, i) => {
       const h = heights[i];
-      if (used + ITEM_GAP + h > limit) {
+      // A unit taller than a page is alone on its own: nothing joins it.
+      if (h > room || used + ITEM_GAP + h > limit) {
         pages.push([...u]);
-        used = h;
+        used = h > room ? Infinity : h;
       } else {
         pages[pages.length - 1].push(...u);
         used += ITEM_GAP + h;
@@ -272,8 +273,9 @@ function paginate(heading: MindMapModel, units: SlideItem[][]): SlideItem[][] {
   };
   const count = greedy(room).length;
   // The smallest page limit that still needs no more pages: an even split.
-  let lo = Math.max(...heights);
-  let hi = Math.max(room, lo);
+  // Never above the room: the oversized units are already alone.
+  let lo = Math.max(0, ...heights.filter((h) => h <= room));
+  let hi = room;
   for (let i = 0; i < 24; i++) {
     const mid = (lo + hi) / 2;
     if (greedy(mid).length <= count) hi = mid;
