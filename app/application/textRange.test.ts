@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { MindMapDocument } from "../domain/model";
-import { editorReducer, freshEditorState, type EditorState } from "./editorReducer";
-import { activeNode, buildKeymap, runKeymap, type KeymapKeyEvent } from "./editorKeymap";
+import { verticalMove as lines } from "../lib/textGeometry";
+import { editorReducer, type EditorState } from "./editorReducer";
+import { buildKeymap, type KeymapKeyEvent } from "./editorKeymap";
+import { editorStateAt, pressKey } from "./editorState.arb";
+import { rangeClipboardCommand, type RangeClipboardOp } from "./editorCommands";
+import { sequentialIds } from "../domain/model.arb";
 import {
   beginRange,
   rangeSegments,
@@ -9,21 +13,7 @@ import {
   rangeToPlainText,
   stepPoint,
   type TextRange,
-  type VerticalMove,
 } from "./textRange";
-
-/** Hard-newline line moves (what both layouts' verticalMove do). */
-const lines: VerticalMove = (text, pos, dir) => {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
-  let line = 0;
-  while (line + 1 < starts.length && starts[line + 1] <= pos) line++;
-  const target = line + dir;
-  if (target < 0 || target >= starts.length) return null;
-  const col = pos - starts[line];
-  const end = target + 1 < starts.length ? starts[target + 1] - 1 : text.length;
-  return Math.min(starts[target] + col, end);
-};
 
 /**
  *   hello world
@@ -82,6 +72,30 @@ describe("stepPoint", () => {
   });
 });
 
+describe("a node not drawn as its own text is taken whole", () => {
+  const d: MindMapDocument = {
+    title: "",
+    roots: [
+      { id: "a", text: "ab", children: [] },
+      { id: "img", text: "https://example.com/a.png", type: "image", children: [] },
+      { id: "b", text: "cd", children: [] },
+    ],
+  };
+  it("one Shift+arrow crosses it, never stepping through its URL", () => {
+    const t = textOf(d);
+    const len = t.text("img").length;
+    expect(stepPoint(d, { id: "img", offset: 0 }, "right", t, lines)).toEqual({ id: "img", offset: len });
+    expect(stepPoint(d, { id: "img", offset: len }, "left", t, lines)).toEqual({ id: "img", offset: 0 });
+    // Vertically into it, the range covers it whole.
+    expect(stepPoint(d, { id: "a", offset: 1 }, "down", t, lines)).toEqual({ id: "img", offset: len });
+    expect(stepPoint(d, { id: "b", offset: 1 }, "up", t, lines)).toEqual({ id: "img", offset: 0 });
+  });
+  it("except while it is the node being edited: its textarea shows that text", () => {
+    const t = rangeTextOf(d, "img", "https://example.com/a.png");
+    expect(stepPoint(d, { id: "img", offset: 3 }, "right", t, lines)).toEqual({ id: "img", offset: 4 });
+  });
+});
+
 describe("beginRange", () => {
   const d = doc();
   it("is null while the moving end stays inside the node", () => {
@@ -103,10 +117,10 @@ describe("rangeSegments", () => {
   it("covers the start node's tail, the middle whole, the end node's head", () => {
     const d = doc();
     expect([...rangeSegments(d, range(["c2", 2], ["r", 6]), textOf(d))]).toEqual([
-      ["r", [6, 11]],
-      ["c1", [0, 9]],
-      ["g", [0, 5]],
-      ["c2", [0, 2]],
+      ["r", { from: 6, to: 11, breaks: true }],
+      ["c1", { from: 0, to: 9, breaks: true }],
+      ["g", { from: 0, to: 5, breaks: true }],
+      ["c2", { from: 0, to: 2, breaks: false }],
     ]);
   });
 });
@@ -159,26 +173,12 @@ const key = (k: string, mods: Partial<KeymapKeyEvent> = {}): KeymapKeyEvent => (
   ...mods,
 });
 
-/** Press a key with the textarea's selection mirroring the view (forward). */
 function press(st: EditorState, e: KeymapKeyEvent): { state: EditorState; handled: boolean } {
-  const outcome = runKeymap(keymap, {
-    e,
-    state: st,
-    node: activeNode(st),
-    pos: st.view.cursorPos,
-    selEnd: st.view.selectionEnd,
-  });
-  let next = st;
-  for (const f of outcome.effects) {
-    if (f.kind === "dispatch") next = editorReducer(next, f.action);
-  }
-  return { state: next, handled: outcome.result === "handled" };
+  const { state, outcome } = pressKey(keymap, st, e);
+  return { state, handled: outcome.result === "handled" };
 }
 
-function editing(nodeId: string, pos: number): EditorState {
-  const s = freshEditorState(doc(), nodeId);
-  return editorReducer(s, { type: "activateNode", nodeId, cursorPos: pos, selectionEnd: pos, editing: true });
-}
+const editing = (nodeId: string, pos: number) => editorStateAt(doc(), nodeId, { editing: true, pos });
 
 describe("Shift+arrows across nodes (keymap → reducer)", () => {
   it("Shift+↓ on the last line starts a range; the textarea selects the anchor's part", () => {
@@ -227,16 +227,29 @@ describe("Shift+arrows across nodes (keymap → reducer)", () => {
     expect([down.view.activeNodeId, down.view.editing, down.view.textRange]).toEqual(["g", true, undefined]);
   });
 
-  it("typing replaces the whole range; the joined line keeps the start node", () => {
-    // Range: "hello |world" … "child |one". c1 goes; its child g now hangs
-    // under the joined line, like the text "hello aone\n    grand" reads.
+  it("a character goes to the textarea, and its edit replaces the whole range", () => {
+    // Range: "hello |world" … "child |one". The key passes; the textarea swaps
+    // its selection (the anchor's part, "world") for the character — typed,
+    // dictated or autocorrected alike. c1 goes; its child g now hangs under
+    // the joined line, like the text "hello aone\n    grand" reads.
     const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
-    const { state, handled } = press(st, key("a"));
-    expect(handled).toBe(true);
-    expect(state.view.textRange).toBeUndefined();
-    expect([state.view.activeNodeId, state.view.editingText, state.view.cursorPos]).toEqual(["r", "hello aone", 7]);
-    const r = state.document.model.roots[0];
-    expect(r.children.map((c) => c.id)).toEqual(["g", "c2"]);
+    for (const ch of ["a", "と"]) {
+      expect(press(st, key(ch)).handled, ch).toBe(false);
+      const next = editorReducer(st, {
+        type: "typeText",
+        text: `hello ${ch}`,
+        cursorPos: 7,
+        selectionEnd: 7,
+        commitModel: true,
+      });
+      expect([next.view.activeNodeId, next.view.editingText, next.view.cursorPos, next.view.textRange], ch).toEqual([
+        "r",
+        `hello ${ch}one`,
+        7,
+        undefined,
+      ]);
+      expect(next.document.model.roots[0].children.map((c) => c.id), ch).toEqual(["g", "c2"]);
+    }
   });
 
   it("Backspace / Delete delete the range, Enter deletes it and splits there", () => {
@@ -253,25 +266,13 @@ describe("Shift+arrows across nodes (keymap → reducer)", () => {
     expect(state.view.activeNodeId).toBe(r.children[0].id);
   });
 
-  it("text that reaches the textarea without a key replaces the whole range too", () => {
-    // Dictation / autocorrect: the textarea swaps its selection (the anchor's
-    // part, "world") for the new text with no keydown the keymap could see.
-    const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
-    const next = editorReducer(st, {
-      type: "typeText",
-      text: "hello と",
-      cursorPos: 7,
-      selectionEnd: 7,
-      commitModel: true,
-    });
-    expect([next.view.editingText, next.view.cursorPos, next.view.textRange]).toEqual(["hello とone", 7, undefined]);
-    expect(next.document.model.roots[0].children.map((c) => c.id)).toEqual(["g", "c2"]);
-  });
-
   it("an IME's first key empties the range for the composition", () => {
     const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
-    const { state, handled } = press(st, { ...key("Process"), keyCode: 229 });
-    expect(handled).toBe(true);
+    // Not cancelled (that would lose the composition): the textarea is
+    // synced right away instead, so the composition lands at the caret.
+    const { state, outcome } = pressKey(keymap, st, { ...key("Process"), keyCode: 229 });
+    expect(outcome.result).toBe("native");
+    expect(outcome.effects.at(-1)).toEqual({ kind: "syncInput" });
     expect([state.view.editingText, state.view.cursorPos]).toEqual(["hello one", 6]);
   });
 
@@ -303,5 +304,35 @@ describe("Shift+arrows across nodes (keymap → reducer)", () => {
     expect(press(editing("c2", 2), key("ArrowUp", { shiftKey: true, metaKey: true })).state.view.textRange).toEqual(
       range(["c2", 2], ["r", 0])
     );
+  });
+});
+
+describe("rangeClipboardCommand", () => {
+  const run = (st: EditorState, op: RangeClipboardOp) => {
+    const cmd = rangeClipboardCommand(st, op, { nextId: sequentialIds() });
+    let next = st;
+    for (const f of cmd?.effects ?? []) if (f.kind === "dispatch") next = editorReducer(next, f.action);
+    return { cmd, next };
+  };
+  const ranged = () => press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
+
+  it("is null without a range: the event is the textarea's own", () => {
+    expect(rangeClipboardCommand(editing("r", 6), { kind: "copy" })).toBeNull();
+  });
+  it("copy gives the text only; cut also deletes the range", () => {
+    expect(run(ranged(), { kind: "copy" }).cmd).toEqual({ text: "world\n  child ", effects: [] });
+    const { cmd, next } = run(ranged(), { kind: "cut" });
+    expect(cmd?.text).toBe("world\n  child ");
+    expect(next.view.editingText).toBe("hello one");
+  });
+  it("paste replaces the range in one step, or pastes nodes after the joined line", () => {
+    expect(run(ranged(), { kind: "paste", text: "X", asNodes: false }).next.view.editingText).toBe("hello Xone");
+    const { next } = run(ranged(), { kind: "paste", text: "p\n  q", asNodes: true });
+    const r = next.document.model.roots[0];
+    expect(r.text).toBe("hello one");
+    // The joined line is a root, which takes pasted nodes as its last children.
+    expect(r.children.map((c) => c.text)).toEqual(["grand", "two\nlines", "p"]);
+    // Nothing to paste: the range stays.
+    expect(run(ranged(), { kind: "paste", text: "", asNodes: false }).cmd?.effects).toEqual([]);
   });
 });

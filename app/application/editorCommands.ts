@@ -26,6 +26,7 @@ import type { EditorState } from "./editorReducer";
 import type { KeyEffect } from "./editorKeymap";
 import { markdownToModel } from "./markdown";
 import { textToNodes } from "./persistence";
+import { orderedRange, rangeTextOf, rangeToPlainText } from "./textRange";
 import { assertNever } from "../lib/assertNever";
 
 /** What is being pasted, after the clipboard has been decoded. */
@@ -117,5 +118,62 @@ function pastedNodes(
       return textToNodes(source.text, nextId);
     default:
       return assertNever(source.mode);
+  }
+}
+
+/** A clipboard event over a cross-node range, after its data has been read. */
+export type RangeClipboardOp =
+  | { kind: "copy" }
+  | { kind: "cut" }
+  /** `asNodes`: the view pastes this text as nodes (the outline's multi-line paste). */
+  | { kind: "paste"; text: string; asNodes: boolean };
+
+/**
+ * A copy / cut / paste over a cross-node range (ViewState.textRange), or null
+ * when there is no range and the event is the textarea's own. The textarea
+ * holds only the anchor's part of a range, so the views hand every clipboard
+ * event over one to this: `text` (when present) goes to the clipboard, then
+ * the effects run.
+ *
+ * Cut deletes the range; paste replaces it with the pasted text in one step
+ * (one undo entry) — or, where the view pastes text as nodes, deletes it and
+ * pastes the nodes after the line it leaves. A paste with nothing in it
+ * leaves the range alone.
+ */
+export function rangeClipboardCommand(
+  state: EditorState,
+  op: RangeClipboardOp,
+  opts: { nextId?: IdSource } = {}
+): { text?: string; effects: KeyEffect[] } | null {
+  const range = state.view.textRange;
+  if (!range) return null;
+  const { model } = state.document;
+  const replace = (text: string): KeyEffect => ({
+    kind: "dispatch",
+    action: { type: "replaceTextRange", text },
+    undoType: "replace-range",
+  });
+  const save: KeyEffect = { kind: "save" };
+  switch (op.kind) {
+    case "copy":
+    case "cut": {
+      const text = rangeToPlainText(
+        model,
+        range,
+        rangeTextOf(model, state.view.activeNodeId, state.view.editingText)
+      );
+      return { text, effects: op.kind === "cut" ? [replace(""), save] : [] };
+    }
+    case "paste": {
+      if (!op.asNodes) return { effects: op.text ? [replace(op.text), save] : [] };
+      const paste = pasteCommand(
+        state,
+        { kind: "text", text: op.text },
+        { targetId: orderedRange(model, range).start.id, nextId: opts.nextId }
+      );
+      return { effects: paste ? [replace(""), ...paste] : [] };
+    }
+    default:
+      return assertNever(op);
   }
 }

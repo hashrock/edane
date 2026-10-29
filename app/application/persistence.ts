@@ -33,37 +33,43 @@ import { t } from "./i18n";
 /** Format tag written by {@link serializeDocument}. */
 export const CONTENT_FORMAT_VERSION = 2;
 
+/**
+ * Build a forest from nodes listed in reading order with their depths, the
+ * way an indented outline reads: each node hangs under the nearest preceding
+ * node of smaller depth (a jump of several levels nests just one deeper). The
+ * nodes' own `children` are ignored; nested nodes lose any canvas `position`,
+ * which only a root may carry. Shared by {@link textToNodes} and the
+ * cross-node range edit (textRange.replaceRange), so pasting an outline and
+ * editing one read the same structure out of the same indentation.
+ */
+export function nestByDepth(lines: readonly { node: MindMapModel; depth: number }[]): MindMapModel[] {
+  const roots: MindMapModel[] = [];
+  const stack: { children: MindMapModel[]; depth: number }[] = [{ children: roots, depth: -1 }];
+  for (const { node, depth } of lines) {
+    while (stack.length > 1 && stack[stack.length - 1].depth >= depth) stack.pop();
+    const copy: MindMapModel = { ...node, children: [] };
+    if (stack.length > 1) delete copy.position;
+    stack[stack.length - 1].children.push(copy);
+    stack.push({ children: copy.children, depth });
+  }
+  return roots;
+}
+
 /** Convert indented plain text (one node per line) into a forest. */
 export function textToNodes(
   content: string,
   nextId: IdSource = generateId
 ): MindMapModel[] {
-  const roots: MindMapModel[] = [];
-  if (!content || content.trim() === "") return roots;
-
-  const lines = content.split("\n");
-  const stack: { children: MindMapModel[]; depth: number }[] = [
-    { children: roots, depth: -1 },
-  ];
-
-  for (const line of lines) {
-    if (line.trim() === "") continue;
-    const depth = line.search(/\S/);
-    const text = line.trim();
-    const newNode: MindMapModel = {
-      id: nextId(),
-      text,
-      children: [],
-    };
-
-    while (stack.length > 1 && stack[stack.length - 1].depth >= depth) {
-      stack.pop();
-    }
-    stack[stack.length - 1].children.push(newNode);
-    stack.push({ children: newNode.children, depth });
-  }
-
-  return roots;
+  if (!content || content.trim() === "") return [];
+  return nestByDepth(
+    content
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => ({
+        node: { id: nextId(), text: line.trim(), children: [] },
+        depth: line.search(/\S/),
+      }))
+  );
 }
 
 /**

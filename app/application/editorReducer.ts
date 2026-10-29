@@ -70,7 +70,7 @@ import {
 } from "../domain/model";
 import type { PageTheme } from "../domain/pageTheme";
 import { assertNever } from "../lib/assertNever";
-import { anchorSegment, rangeTextOf, replaceRange, type TextRange } from "./textRange";
+import { anchorSegment, clampPoint, rangeTextOf, replaceRange, type TextRange } from "./textRange";
 
 export interface DocumentState {
   model: MindMapDocument;
@@ -1238,13 +1238,9 @@ function viewReducer(
       if (!view.editing || view.activeNodeId !== anchor.id) return view;
       const visible = getFlatOrder(model);
       if (!visible.includes(focus.id)) return view;
-      const textOf = rangeTextOf(model, view.activeNodeId, view.editingText);
-      const clamp = (p: typeof anchor) => ({
-        id: p.id,
-        offset: Math.min(Math.max(p.offset, 0), textOf(p.id).length),
-      });
-      const range = { anchor: clamp(anchor), focus: clamp(focus) };
-      const [cursorPos, selectionEnd] = anchorSegment(model, range, textOf);
+      const texts = rangeTextOf(model, view.activeNodeId, view.editingText);
+      const range = { anchor: clampPoint(anchor, texts), focus: clampPoint(focus, texts) };
+      const [cursorPos, selectionEnd] = anchorSegment(model, range, texts);
       return { ...view, textRange: range, cursorPos, selectionEnd };
     }
 

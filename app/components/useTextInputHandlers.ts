@@ -12,6 +12,8 @@
 
 import { useState, useRef, useCallback } from "react";
 import type { NoteEditorEngine } from "./useNoteEditor";
+import { rangeClipboardCommand } from "../application/editorCommands";
+import { applyKeyEffects } from "./applyKeyEffects";
 
 export interface TextInputHandlers {
   /** Ref for the view's editing textarea (hidden on canvas, inline on outline). */
@@ -32,6 +34,13 @@ export interface TextInputHandlers {
    * showing what the reducer just made of it.
    */
   syncInputNow: (view: { editingText: string; cursorPos: number; selectionEnd: number }) => void;
+  /**
+   * Take a copy / cut / paste over a cross-node range off the textarea
+   * (which holds only the anchor's part of it). Returns false, touching
+   * nothing, when there is no range: the event is the view's to handle.
+   * `pasteAsNodes`: this view pastes the text as nodes.
+   */
+  handleRangeClipboard: (e: React.ClipboardEvent, opts?: { pasteAsNodes?: boolean }) => boolean;
 }
 
 export function useTextInputHandlers(
@@ -115,9 +124,29 @@ export function useTextInputHandlers(
     el.setSelectionRange(view.cursorPos, view.selectionEnd);
   }, []);
 
+  const handleRangeClipboard = useCallback<TextInputHandlers["handleRangeClipboard"]>(
+    (e, opts = {}) => {
+      const st = stateRef.current;
+      const text = e.clipboardData.getData("text");
+      const cmd = rangeClipboardCommand(
+        st,
+        e.type === "paste"
+          ? { kind: "paste", text, asNodes: !!opts.pasteAsNodes }
+          : { kind: e.type === "cut" ? "cut" : "copy" }
+      );
+      if (!cmd) return false;
+      e.preventDefault();
+      if (cmd.text !== undefined) e.clipboardData.setData("text/plain", cmd.text);
+      applyKeyEffects(cmd.effects, st, { dispatch, saveNote });
+      return true;
+    },
+    [dispatch, saveNote, stateRef]
+  );
+
   return {
     inputRef,
     syncInputNow,
+    handleRangeClipboard,
     isComposing,
     isComposingRef,
     handleInputChange,

@@ -32,7 +32,6 @@ import { modelToMarkdown } from "../application/markdown";
 import {
   rangeSegments,
   rangeTextOf,
-  rangeToPlainText,
 } from "../application/textRange";
 import { planPaste } from "../application/pastePlan";
 import { pasteCommand, type PasteSource } from "../application/editorCommands";
@@ -134,7 +133,6 @@ import type { EditorState, ViewState } from "../application/editorReducer";
 import {
   buildKeymap,
   runKeymap,
-  isImeKey,
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
@@ -486,6 +484,7 @@ export function MindmapEditorView({
     handleSelect,
     handleUrlChange,
     syncInputNow,
+    handleRangeClipboard,
   } = useTextInputHandlers(engine);
 
   // Custom nodes (image / link) keep their rendered preview while editing and
@@ -758,12 +757,14 @@ export function MindmapEditorView({
   const title = model.title;
 
   // --- Cursor blink ---
+  // No caret is drawn over a cross-node range, so nothing to blink (each
+  // blink would redraw the whole range).
   useEffect(() => {
-    if (!activeNodeId) return;
+    if (!activeNodeId || textRange) return;
     setCursorVisible(true);
     const interval = setInterval(() => setCursorVisible((v) => !v), 530);
     return () => clearInterval(interval);
-  }, [activeNodeId, cursorPos, editingText]);
+  }, [activeNodeId, cursorPos, editingText, textRange]);
 
   // --- Sync the hidden input to the editor state (single place) ---
   // Replaces the scattered value/setSelectionRange/focus calls. While an
@@ -776,8 +777,7 @@ export function MindmapEditorView({
   useEffect(() => {
     const el = inputRef.current;
     if (!el || isComposingRef.current) return;
-    if (el.value !== editingText) el.value = editingText;
-    el.setSelectionRange(cursorPos, selectionEnd);
+    syncInputNow({ editingText, cursorPos, selectionEnd });
     if (activeNodeId && !urlEditing && !mdPanelEditing) el.focus();
   }, [
     editingText,
@@ -1035,16 +1035,8 @@ export function MindmapEditorView({
     st.view.cursorPos !== st.view.selectionEnd;
 
   const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (handleRangeClipboard(e)) return; // a selection across nodes
     const st = stateRef.current;
-    // A selection across nodes: its text, one indented line per node — the
-    // textarea only holds the anchor's part of it.
-    const range = st.view.textRange;
-    if (range) {
-      e.preventDefault();
-      const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
-      e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
-      return;
-    }
     if (st.view.editing && hasTextRange(st)) return; // native text copy
     e.preventDefault();
     dispatch({ type: "copyBranch" });
@@ -1059,24 +1051,12 @@ export function MindmapEditorView({
       e.clipboardData.setData("text/plain", modelToMarkdown(node));
       e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
     }
-  }, [dispatch]);
+  }, [dispatch, handleRangeClipboard]);
 
   const handleCut = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (handleRangeClipboard(e)) return; // a selection across nodes
       const st = stateRef.current;
-      // A cross-node range: its text goes to the clipboard and the range
-      // out of the document — never just the anchor's part, which is all the
-      // textarea holds.
-      const range = st.view.textRange;
-      if (range) {
-        e.preventDefault();
-        if (readOnly) return;
-        const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
-        e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
-        const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
-        if (noteId && next.document.model !== st.document.model) saveNote(next.document.model);
-        return;
-      }
       if (st.view.editing && hasTextRange(st)) return; // native text cut
       e.preventDefault();
       // Mirror copy's system-clipboard payload before the branch leaves the tree.
@@ -1091,7 +1071,7 @@ export function MindmapEditorView({
       if (noteId && next.document.model !== st.document.model)
         saveNote(next.document.model);
     },
-    [dispatch, noteId, saveNote, readOnly]
+    [dispatch, noteId, saveNote, handleRangeClipboard]
   );
 
   const handlePaste = useCallback(
@@ -1100,14 +1080,8 @@ export function MindmapEditorView({
         e.preventDefault();
         return;
       }
-      // Pasting over a cross-node range: the range goes first, then this is
-      // an ordinary paste at the caret it leaves (the textarea must already
-      // hold the joined text for the native paste to land in it).
-      if (stateRef.current.view.textRange) {
-        const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
-        syncInputNow(next.view);
-        if (noteId) saveNote(next.document.model);
-      }
+      // Over a selection across nodes, the pasted text replaces it.
+      if (handleRangeClipboard(e)) return;
       // Pasting an image file into an empty node uploads it and turns the node
       // into an image. (Non-empty nodes fall through to normal text paste.)
       const files = e.clipboardData.files;
@@ -1168,7 +1142,7 @@ export function MindmapEditorView({
       }
       return assertNever(plan);
     },
-    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage, dispatch, syncInputNow, noteId, saveNote]
+    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage, handleRangeClipboard]
   );
 
   // Resolve the Markdown paste dialog with one of the three strategies.
@@ -1699,8 +1673,9 @@ export function MindmapEditorView({
       present: onPresent,
       undo,
       redo,
+      syncInput: syncInputNow,
     }),
-    [dispatch, dispatchAnchored, saveNote, undo, redo, onPresent]
+    [dispatch, dispatchAnchored, saveNote, undo, redo, onPresent, syncInputNow]
   );
 
   const handleKeyDown = useCallback(
@@ -1731,13 +1706,10 @@ export function MindmapEditorView({
         },
         prefs
       );
-      const ime = isImeKey(e);
-      if (outcome.result === "handled" && !ime) e.preventDefault();
-      const next = applyKeyEffects(outcome.effects, state, keyDeps);
-      // The composition starts in the textarea right after this handler.
-      if (ime && next !== state) syncInputNow(next.view);
+      if (outcome.result === "handled") e.preventDefault();
+      applyKeyEffects(outcome.effects, state, keyDeps);
     },
-    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs, syncInputNow]
+    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs]
   );
 
   // --- Guest mode: hand the current document off to be saved to an account ---
@@ -3528,16 +3500,16 @@ export function MindmapEditorView({
       };
 
       if (textRange) {
-        const textOf = rangeTextOf(stateRef.current.document.model, activeNodeId, editingText);
-        const segments = rangeSegments(stateRef.current.document.model, textRange, textOf);
-        const ids = [...segments.keys()];
-        ids.forEach((id, i) => {
-          const n = nodes.find((m) => m.id === id);
-          if (!n) return; // culled off-screen
-          // An image / link / markdown card draws something other than its
-          // raw text (a picture, a title, a preview), so no character offsets
-          // line up with it: the range covers the whole box.
-          if (n.type !== "text") {
+        const model = stateRef.current.document.model;
+        const texts = rangeTextOf(model, activeNodeId, editingText);
+        const byId = new Map(nodes.map((n) => [n.id, n]));
+        for (const [id, seg] of rangeSegments(model, textRange, texts)) {
+          const n = byId.get(id);
+          if (!n) continue; // culled off-screen
+          // A node the range takes whole (an image, a link title, a markdown
+          // card) draws no characters to line offsets up with: mark its box.
+          if (texts.atomic(id)) {
+            if (seg.to === seg.from) continue;
             cursorLayer.add(
               new Konva.Rect({
                 x: n.x,
@@ -3549,13 +3521,11 @@ export function MindmapEditorView({
                 listening: false,
               })
             );
-            return;
+            continue;
           }
           const nodeData = lineDataRef.current.get(id);
-          if (!nodeData) return;
-          const [a, b] = segments.get(id)!;
-          drawSegment(n, nodeData, a, b, i < ids.length - 1);
-        });
+          if (nodeData) drawSegment(n, nodeData, seg.from, seg.to, seg.breaks);
+        }
       } else if (data && cursorPos !== selectionEnd) {
         drawSegment(
           activeNode,

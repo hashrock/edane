@@ -17,13 +17,9 @@
  * in as a {@link VerticalMove}, the same one the keymap's ↑/↓ use.
  */
 
-import {
-  findNode,
-  getFlatOrder,
-  getNodeDepths,
-  type MindMapDocument,
-  type MindMapModel,
-} from "../domain/model";
+import { getFlatOrder, type MindMapDocument, type MindMapModel } from "../domain/model";
+import { drawsOwnText } from "./nodeUtils";
+import { nestByDepth } from "./persistence";
 
 export interface TextPoint {
   id: string;
@@ -55,20 +51,45 @@ export type RangeDir =
 /** Line-wise caret move inside a node; null = past the first / last line. */
 export type VerticalMove = (text: string, pos: number, dir: -1 | 1) => number | null;
 
-/** A node's text as the range sees it (the edit buffer for the anchor). */
-export type TextOf = (id: string) => string;
+/** What a range reads off the nodes. */
+export interface RangeText {
+  /** A node's text (the edit buffer for the node being edited). */
+  text(id: string): string;
+  /**
+   * The node is taken whole or not at all: its offsets are only 0 and the
+   * end. True for a kind not drawn as its raw text (nodeUtils.drawsOwnText)
+   * — except the node being edited, whose textarea shows exactly that text.
+   */
+  atomic(id: string): boolean;
+}
 
 /**
  * The texts a range is measured against: the live edit buffer for the node
  * being edited (it can run a keystroke ahead of the model), the model's text
- * for every other node.
+ * for every other node. One pass over the tree, then constant-time lookups.
  */
 export function rangeTextOf(
   doc: MindMapDocument,
   editingId: string | null,
   editingText: string
-): TextOf {
-  return (id) => (id === editingId ? editingText : findNode(doc, id)?.text ?? "");
+): RangeText {
+  const byId = new Map<string, MindMapModel>();
+  const walk = (n: MindMapModel) => {
+    byId.set(n.id, n);
+    n.children.forEach(walk);
+  };
+  doc.roots.forEach(walk);
+  return {
+    text: (id) => (id === editingId ? editingText : byId.get(id)?.text ?? ""),
+    atomic: (id) => id !== editingId && !drawsOwnText(byId.get(id)?.type ?? "text"),
+  };
+}
+
+/** A point inside its node's text; in a node taken whole, at one of its ends. */
+export function clampPoint(p: TextPoint, texts: RangeText): TextPoint {
+  const len = texts.text(p.id).length;
+  const offset = Math.min(Math.max(p.offset, 0), len);
+  return { id: p.id, offset: texts.atomic(p.id) && offset > 0 ? len : offset };
 }
 
 /** Column of `offset` within its hard line. */
@@ -104,39 +125,44 @@ export function stepPoint(
   doc: MindMapDocument,
   point: TextPoint,
   dir: RangeDir,
-  textOf: TextOf,
+  texts: RangeText,
   verticalMove: VerticalMove
 ): TextPoint {
-  const text = textOf(point.id);
-  const offset = Math.min(Math.max(point.offset, 0), text.length);
+  const text = texts.text(point.id);
+  const atomic = texts.atomic(point.id);
+  const { offset } = clampPoint(point, texts);
   const order = getFlatOrder(doc);
   const idx = order.indexOf(point.id);
   const prevId = idx > 0 ? order[idx - 1] : null;
   const nextId = idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null;
+  const at = (o: number): TextPoint => ({ id: point.id, offset: o });
   switch (dir) {
     case "lineStart":
-      return { id: point.id, offset: text.lastIndexOf("\n", offset - 1) + 1 };
+      return at(atomic ? 0 : text.lastIndexOf("\n", offset - 1) + 1);
     case "lineEnd": {
       const end = text.indexOf("\n", offset);
-      return { id: point.id, offset: end === -1 ? text.length : end };
+      return at(atomic || end === -1 ? text.length : end);
     }
     case "docStart":
       return { id: order[0] ?? point.id, offset: 0 };
     case "docEnd": {
       const last = order[order.length - 1] ?? point.id;
-      return { id: last, offset: textOf(last).length };
+      return { id: last, offset: texts.text(last).length };
     }
     case "left":
-      if (offset > 0) return { id: point.id, offset: charStep(text, offset, -1) };
-      return prevId ? { id: prevId, offset: textOf(prevId).length } : { id: point.id, offset };
+      if (offset > 0) return at(atomic ? 0 : charStep(text, offset, -1));
+      return prevId ? { id: prevId, offset: texts.text(prevId).length } : at(offset);
     case "right":
-      if (offset < text.length) return { id: point.id, offset: charStep(text, offset, 1) };
-      return nextId ? { id: nextId, offset: 0 } : { id: point.id, offset };
+      if (offset < text.length) return at(atomic ? text.length : charStep(text, offset, 1));
+      return nextId ? { id: nextId, offset: 0 } : at(offset);
+    // Vertically into a node taken whole, the focus lands past it, so a
+    // range growing that way covers it (one shrinking back uncovers it).
     case "up": {
-      const moved = verticalMove(text, offset, -1);
-      if (moved !== null) return { id: point.id, offset: moved };
-      if (!prevId) return { id: point.id, offset: 0 };
-      const prev = textOf(prevId);
+      const moved = atomic ? null : verticalMove(text, offset, -1);
+      if (moved !== null) return at(moved);
+      if (!prevId) return at(0);
+      if (texts.atomic(prevId)) return { id: prevId, offset: 0 };
+      const prev = texts.text(prevId);
       const lastLine = prev.lastIndexOf("\n") + 1;
       return {
         id: prevId,
@@ -144,10 +170,11 @@ export function stepPoint(
       };
     }
     case "down": {
-      const moved = verticalMove(text, offset, 1);
-      if (moved !== null) return { id: point.id, offset: moved };
-      if (!nextId) return { id: point.id, offset: text.length };
-      const next = textOf(nextId);
+      const moved = atomic ? null : verticalMove(text, offset, 1);
+      if (moved !== null) return at(moved);
+      if (!nextId) return at(text.length);
+      const next = texts.text(nextId);
+      if (texts.atomic(nextId)) return { id: nextId, offset: next.length };
       const firstEnd = next.indexOf("\n");
       return {
         id: nextId,
@@ -166,14 +193,14 @@ export function stepPoint(
 export function beginRange(
   doc: MindMapDocument,
   anchorId: string,
-  textOf: TextOf,
+  texts: RangeText,
   sel: { pos: number; selEnd: number; backward: boolean },
   dir: RangeDir,
   verticalMove: VerticalMove
 ): TextRange | null {
   const focusOffset = sel.backward ? sel.pos : sel.selEnd;
   const anchorOffset = sel.backward ? sel.selEnd : sel.pos;
-  const focus = stepPoint(doc, { id: anchorId, offset: focusOffset }, dir, textOf, verticalMove);
+  const focus = stepPoint(doc, { id: anchorId, offset: focusOffset }, dir, texts, verticalMove);
   if (focus.id === anchorId) return null;
   return { anchor: { id: anchorId, offset: anchorOffset }, focus };
 }
@@ -192,28 +219,36 @@ export function orderedRange(
     : { start: range.focus, end: range.anchor };
 }
 
+/** The part of one node a range covers. */
+export interface Segment {
+  from: number;
+  to: number;
+  /** The range runs on past this node: its line break is covered too. */
+  breaks: boolean;
+}
+
 /**
- * The covered `[from, to)` offsets of every visible node the range touches,
- * in reading order: the start node from its offset to its end, the nodes in
- * between whole, the end node up to its offset.
+ * The covered part of every visible node the range touches, in reading
+ * order: the start node from its offset to its end, the nodes in between
+ * whole, the end node up to its offset.
  */
 export function rangeSegments(
   doc: MindMapDocument,
   range: TextRange,
-  textOf: TextOf
-): Map<string, [number, number]> {
+  texts: RangeText
+): Map<string, Segment> {
   const { start, end } = orderedRange(doc, range);
   const order = getFlatOrder(doc);
   const lo = order.indexOf(start.id);
   const hi = order.indexOf(end.id);
-  const segments = new Map<string, [number, number]>();
+  const segments = new Map<string, Segment>();
   if (lo === -1 || hi === -1) return segments;
   for (let i = lo; i <= hi; i++) {
     const id = order[i];
-    const len = textOf(id).length;
+    const len = texts.text(id).length;
     const from = i === lo ? Math.min(start.offset, len) : 0;
     const to = i === hi ? Math.min(end.offset, len) : len;
-    segments.set(id, [from, Math.max(from, to)]);
+    segments.set(id, { from, to: Math.max(from, to), breaks: i < hi });
   }
   return segments;
 }
@@ -222,9 +257,32 @@ export function rangeSegments(
 export function anchorSegment(
   doc: MindMapDocument,
   range: TextRange,
-  textOf: TextOf
+  texts: RangeText
 ): [number, number] {
-  return rangeSegments(doc, range, textOf).get(range.anchor.id) ?? [0, 0];
+  const { start, end } = orderedRange(doc, range);
+  const { anchor } = range;
+  if (start.id === end.id) return [start.offset, end.offset];
+  return start === anchor ? [anchor.offset, texts.text(anchor.id).length] : [0, anchor.offset];
+}
+
+/**
+ * Every node as a line of the plain-text reading — depth-first, hidden
+ * subtrees included — and the span of lines from the range's start node to
+ * its end node. A collapsed node's hidden descendants sit between it and the
+ * next visible node, so they fall inside the span whenever the range runs
+ * past that node; the end node's own hidden ones come after it, outside.
+ */
+function rangeLines(doc: MindMapDocument, range: TextRange) {
+  const lines: { node: MindMapModel; depth: number }[] = [];
+  const walk = (n: MindMapModel, depth: number) => {
+    lines.push({ node: n, depth });
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  doc.roots.forEach((r) => walk(r, 0));
+  const { start, end } = orderedRange(doc, range);
+  const i = lines.findIndex((l) => l.node.id === start.id);
+  const j = lines.findIndex((l) => l.node.id === end.id);
+  return { lines, start, end, i, j };
 }
 
 /**
@@ -233,37 +291,24 @@ export function anchorSegment(
  * per level below the shallowest node in the range, so it reads as an
  * outline anywhere and pastes back into edane as the same structure
  * (persistence.textToNodes). The start / end nodes contribute only their
- * covered part, like the first / last line of a textarea selection.
- *
- * A collapsed node's hidden descendants sit between it and the next visible
- * node in this reading, so they are copied whenever the range runs past that
- * node — every node but the end one. Within one node the result is just the
- * selected substring, as a native in-node copy would give.
+ * covered part, like the first / last line of a textarea selection; hidden
+ * descendants the range runs past are copied whole (see {@link rangeLines}).
+ * Within one node the result is just the selected substring, as a native
+ * in-node copy would give.
  */
 export function rangeToPlainText(
   doc: MindMapDocument,
   range: TextRange,
-  textOf: TextOf
+  texts: RangeText
 ): string {
-  const segments = rangeSegments(doc, range, textOf);
-  if (segments.size === 1) {
-    const [[id, [from, to]]] = segments;
-    return textOf(id).slice(from, to);
-  }
-  const depths = getNodeDepths(doc);
-  const entries: { depth: number; text: string }[] = [];
-  const hidden = (n: MindMapModel) => {
-    for (const child of n.children) {
-      entries.push({ depth: depths.get(child.id) ?? 0, text: child.text });
-      hidden(child);
-    }
-  };
-  const ids = [...segments.keys()];
-  ids.forEach((id, i) => {
-    const [from, to] = segments.get(id)!;
-    entries.push({ depth: depths.get(id) ?? 0, text: textOf(id).slice(from, to) });
-    const node = findNode(doc, id);
-    if (node?.collapsed && i < ids.length - 1) hidden(node);
+  const { lines, start, end, i, j } = rangeLines(doc, range);
+  if (i === -1 || j === -1) return "";
+  if (i === j) return texts.text(start.id).slice(start.offset, end.offset);
+  const entries = lines.slice(i, j + 1).map(({ node, depth }, k) => {
+    const text = texts.text(node.id);
+    const from = k === 0 ? start.offset : 0;
+    const to = k === j - i ? end.offset : text.length;
+    return { depth, text: text.slice(from, to) };
   });
   // An empty covered part (a range ending at a node's start, an empty node)
   // prints as a bare line break, so it must not set the indentation either.
@@ -282,57 +327,33 @@ export function rangeToPlainText(
  * the covered text goes, the start node's head and the end node's tail join
  * into one line on the start node (which keeps its id and depth), and every
  * line after the range keeps its own indentation, so it hangs under whatever
- * shallower line now precedes it — exactly what deleting those characters
- * from the copied text and pasting it back would build. Nodes wholly inside
- * the range go, including the hidden descendants of a collapsed node the
- * range runs past (they are part of what a copy of the range holds).
+ * shallower line now precedes it (persistence.nestByDepth) — exactly what
+ * deleting those characters from the copied text and pasting it back would
+ * build. Nodes wholly inside the range go, including the hidden descendants
+ * a copy of the range holds.
  *
  * Returns the new document and where the caret lands (after `insert`).
  */
 export function replaceRange(
   doc: MindMapDocument,
   range: TextRange,
-  textOf: TextOf,
+  texts: RangeText,
   insert: string
 ): { doc: MindMapDocument; caret: TextPoint } {
-  const { start, end } = orderedRange(doc, range);
-  const head = textOf(start.id).slice(0, start.offset);
-  const tail = textOf(end.id).slice(end.offset);
+  const { lines, start, end, i, j } = rangeLines(doc, range);
+  const head = texts.text(start.id).slice(0, start.offset);
+  const tail = texts.text(end.id).slice(end.offset);
   const caret = { id: start.id, offset: head.length + insert.length };
-
-  // Every node as a line: depth-first, hidden subtrees included.
-  const lines: { node: MindMapModel; depth: number }[] = [];
-  const walk = (n: MindMapModel, depth: number) => {
-    lines.push({ node: n, depth });
-    n.children.forEach((c) => walk(c, depth + 1));
-  };
-  doc.roots.forEach((r) => walk(r, 0));
-  const i = lines.findIndex((l) => l.node.id === start.id);
-  const j = lines.findIndex((l) => l.node.id === end.id);
   if (i === -1 || j === -1) return { doc, caret };
 
   const joined: MindMapModel = { ...lines[i].node, text: head + insert + tail };
   // Lines after the range may come to hang under the joined line; it must be
   // open to show them (the nesting rule of nestUnder).
   if (i !== j) delete joined.collapsed;
-  const kept = [
+  const roots = nestByDepth([
     ...lines.slice(0, i),
     { node: joined, depth: lines[i].depth },
     ...lines.slice(j + 1),
-  ];
-
-  // Rebuild from indentation: each line hangs under the nearest preceding
-  // shallower line (textToNodes' rule), so an untouched region rebuilds as
-  // it was.
-  const roots: MindMapModel[] = [];
-  const stack: { children: MindMapModel[]; depth: number }[] = [{ children: roots, depth: -1 }];
-  for (const { node, depth } of kept) {
-    while (stack[stack.length - 1].depth >= depth) stack.pop();
-    const copy: MindMapModel = { ...node, children: [] };
-    // Only a root carries a canvas position.
-    if (stack.length > 1) delete copy.position;
-    stack[stack.length - 1].children.push(copy);
-    stack.push({ children: copy.children, depth });
-  }
+  ]);
   return { doc: { ...doc, roots }, caret };
 }

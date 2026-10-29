@@ -92,7 +92,7 @@ describe("cross-node selection on the canvas", () => {
     expect(api().getSelection()).toMatchObject({ activeNodeId: "a", cursorPos: 2, editing: true });
   });
 
-  it("cut copies the range and deletes it; paste deletes it before pasting", async () => {
+  it("cut copies the range and deletes it; paste replaces it", async () => {
     await editA();
     await userEvent.keyboard("{Shift>}{ArrowDown}{ArrowRight}{ArrowRight}{/Shift}");
     const dt = new DataTransfer();
@@ -104,11 +104,10 @@ describe("cross-node selection on the canvas", () => {
     const paste = new DataTransfer();
     paste.setData("text/plain", "Z");
     input().dispatchEvent(new ClipboardEvent("paste", { clipboardData: paste, bubbles: true, cancelable: true }));
-    // The range ("|e" … "|Bravo") is gone; the textarea already holds the
-    // joined line, with the caret where the native paste will land.
+    // The range ("|e" … "|Bravo") is replaced by the pasted text in one step.
     await waitFor(() => api().getModel().roots.length === 1);
-    expect(input().value).toBe("Bravo");
-    expect(input().selectionStart).toBe(0);
+    expect(api().getModel().roots[0].text).toBe("ZBravo");
+    expect(api().getSelection()).toMatchObject({ cursorPos: 1, selectionEnd: 1 });
   });
 });
 

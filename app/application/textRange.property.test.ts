@@ -8,35 +8,19 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { getFlatOrder, type MindMapDocument, type MindMapModel } from "../domain/model";
 import { expectUniqueIds, modelArb, pick, sequentialIds, uncollapsedDocument } from "../domain/model.arb";
-import { textToNodes } from "./persistence";
-import { activeNode, runKeymap, type KeymapKeyEvent } from "./editorKeymap";
-import { editorReducer } from "./editorReducer";
-import { editorStateAt, keymapFor, layoutArb, prefsArb } from "./editorState.arb";
+import { verticalMove as lines } from "../lib/textGeometry";
+import { documentToText, textToNodes } from "./persistence";
+import type { KeymapKeyEvent } from "./editorKeymap";
+import { editorStateAt, keymapFor, layoutArb, pressKey, prefsArb } from "./editorState.arb";
 import {
+  clampPoint,
   orderedRange,
   rangeTextOf,
   rangeToPlainText,
   replaceRange,
   stepPoint,
   type TextPoint,
-  type VerticalMove,
 } from "./textRange";
-
-const lines: VerticalMove = (text, pos, dir) => {
-  const parts = text.split("\n");
-  let line = 0;
-  let start = 0;
-  while (line < parts.length - 1 && start + parts[line].length < pos) {
-    start += parts[line].length + 1;
-    line++;
-  }
-  const target = line + dir;
-  if (target < 0 || target >= parts.length) return null;
-  const col = pos - start;
-  let targetStart = 0;
-  for (let i = 0; i < target; i++) targetStart += parts[i].length + 1;
-  return targetStart + Math.min(col, parts[target].length);
-};
 
 const textOf = (d: MindMapDocument) => rangeTextOf(d, null, "");
 
@@ -60,11 +44,14 @@ describe("the plain-text reading", () => {
       fc.property(modelArb, (model) => {
         const order = getFlatOrder(model);
         const t = textOf(model);
-        const total = order.reduce((sum, id) => sum + t(id).length, 0) + order.length - 1;
+        // One step per character — a node taken whole is one step — plus one
+        // per line break between nodes.
+        const steps = (id: string) => (t.atomic(id) ? Math.min(1, t.text(id).length) : t.text(id).length);
+        const total = order.reduce((sum, id) => sum + steps(id), 0) + order.length - 1;
         let p = { id: order[0], offset: 0 };
         for (let i = 0; i < total; i++) p = stepPoint(model, p, "right", t, lines);
         const last = order[order.length - 1];
-        expect(p).toEqual({ id: last, offset: t(last).length });
+        expect(p).toEqual({ id: last, offset: t.text(last).length });
         expect(stepPoint(model, p, "right", t, lines)).toEqual(p);
       })
     );
@@ -75,7 +62,7 @@ describe("the plain-text reading", () => {
       fc.property(modelArb, fc.nat(), fc.nat(), (model, n, o) => {
         const id = pick(getFlatOrder(model), n);
         const t = textOf(model);
-        const p = { id, offset: o % (t(id).length + 1) };
+        const p = clampPoint({ id, offset: o % (t.text(id).length + 1) }, t);
         const right = stepPoint(model, p, "right", t, lines);
         if (right.id === p.id && right.offset === p.offset) return; // the end
         expect(stepPoint(model, right, "left", t, lines)).toEqual(p);
@@ -93,7 +80,7 @@ describe("the plain-text reading", () => {
           model,
           {
             anchor: { id: order[0], offset: 0 },
-            focus: { id: last, offset: textOf(model)(last).length },
+            focus: { id: last, offset: textOf(model).text(last).length },
           },
           textOf(model)
         );
@@ -103,20 +90,17 @@ describe("the plain-text reading", () => {
   });
 });
 
-/** The whole document as text (hidden subtrees too) and where each node's text starts in it. */
-function fullText(doc: MindMapDocument): { text: string; startOf: Map<string, number> } {
-  const lines: string[] = [];
+/** Where each node's text starts in documentToText (hidden subtrees included). */
+function textStarts(doc: MindMapDocument): Map<string, number> {
   const startOf = new Map<string, number>();
   let at = 0;
   const walk = (n: MindMapModel, depth: number) => {
-    const indent = "  ".repeat(depth);
-    startOf.set(n.id, at + indent.length);
-    lines.push(indent + n.text);
-    at += indent.length + n.text.length + 1;
+    startOf.set(n.id, at + 2 * depth);
+    at += 2 * depth + n.text.length + 1;
     n.children.forEach((c) => walk(c, depth + 1));
   };
   doc.roots.forEach((r) => walk(r, 0));
-  return { text: lines.join("\n"), startOf };
+  return startOf;
 }
 
 describe("replacing a range is editing the plain text", () => {
@@ -135,15 +119,16 @@ describe("replacing a range is editing the plain text", () => {
           const t = textOf(model);
           const point = (n: number, o: number): TextPoint => {
             const id = pick(order, n);
-            return { id, offset: o % (t(id).length + 1) };
+            return clampPoint({ id, offset: o % (t.text(id).length + 1) }, t);
           };
           const range = { anchor: point(n1, o1), focus: point(n2, o2) };
           const { start, end } = orderedRange(model, range);
-          const joined = t(start.id).slice(0, start.offset) + insert + t(end.id).slice(end.offset);
+          const joined = t.text(start.id).slice(0, start.offset) + insert + t.text(end.id).slice(end.offset);
           fc.pre(joined !== ""); // a blank line reads back as no node at all
 
           const { doc, caret } = replaceRange(model, range, t, insert);
-          const { text, startOf } = fullText(model);
+          const text = documentToText(model);
+          const startOf = textStarts(model);
           const a = startOf.get(start.id)! + start.offset;
           const b = startOf.get(end.id)! + end.offset;
           const edited = text.slice(0, a) + insert + text.slice(b);
@@ -184,15 +169,9 @@ describe("a live range never traps the keyboard", () => {
           const bindings = keymapFor(prefs, layout);
           let state = editorStateAt(model, pick(getFlatOrder(model), n), { editing: true, pos: p });
           const press = (e: KeymapKeyEvent) => {
-            const outcome = runKeymap(
-              bindings,
-              { e, state, node: activeNode(state), pos: state.view.cursorPos, selEnd: state.view.selectionEnd },
-              prefs
-            );
-            for (const f of outcome.effects) {
-              if (f.kind === "dispatch") state = editorReducer(state, f.action);
-            }
-            return outcome;
+            const pressed = pressKey(bindings, state, e, prefs);
+            state = pressed.state;
+            return pressed.outcome;
           };
           for (const e of shifts) press(e);
           if (!state.view.textRange) return; // never left the node

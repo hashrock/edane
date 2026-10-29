@@ -58,7 +58,13 @@ import {
 } from "./textRange";
 
 export type KeyMode = "selection" | "editing";
-export type KeyResult = "handled" | "pass";
+/**
+ * "handled": the caller prevents the default. "pass": the browser handles the
+ * key (no effects). "native": both — the effects run AND the browser's default
+ * follows, for a key whose default can't be cancelled without losing it (an
+ * IME's first key); a `syncInput` effect then readies the textarea for it.
+ */
+export type KeyResult = "handled" | "pass" | "native";
 
 /**
  * What a key asks the editor to do. A binding returns a list of these instead
@@ -80,7 +86,12 @@ export type KeyEffect =
   /** Start the slideshow (application/slides.ts) from the active node. */
   | { kind: "present" }
   | { kind: "undo" }
-  | { kind: "redo" };
+  | { kind: "redo" }
+  /**
+   * Write the edit buffer and caret into the textarea now, not on the next
+   * render: the key's native action (a "native" outcome) runs right after.
+   */
+  | { kind: "syncInput" };
 
 export interface KeyOutcome {
   result: KeyResult;
@@ -215,12 +226,8 @@ function selectionDir(e: KeymapKeyEvent): RangeDir | null {
 const LINE_DIRS: ReadonlySet<RangeDir> = new Set(["lineStart", "lineEnd"]);
 /** Keys that are only a modifier going down: never end a range. */
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "AltGraph", "CapsLock"]);
-/**
- * The key is going to an IME (its first keydown, before compositionstart).
- * Its default can't be cancelled without losing the composition, so the
- * views never preventDefault it, even when a binding handled it.
- */
-export const isImeKey = (e: KeymapKeyEvent) => e.key === "Process" || e.keyCode === 229;
+/** The key is going to an IME (its first keydown, before compositionstart). */
+const isImeKey = (e: KeymapKeyEvent) => e.key === "Process" || e.keyCode === 229;
 /** A cross-node range is live (see ViewState.textRange). */
 const inRange = (ctx: KeyContext) => ctx.state.view.textRange !== undefined;
 /** Put the caret at a point, ending the range: edit that node there. */
@@ -700,7 +707,7 @@ export function buildKeymap(
         if (dir === "left") return handled(caretAt(orderedRange(model, range).start));
         if (dir === "right") return handled(caretAt(orderedRange(model, range).end));
         const { focus } = range;
-        const text = rangeTextOf(model, ctx.state.view.activeNodeId, ctx.state.view.editingText)(focus.id);
+        const text = rangeTextOf(model, ctx.state.view.activeNodeId, ctx.state.view.editingText).text(focus.id);
         const moved = verticalMove(text, focus.offset, dir === "up" ? -1 : 1);
         return handled(
           caretAt(focus),
@@ -712,13 +719,16 @@ export function buildKeymap(
     },
     {
       // Every other key acts on the WHOLE range, never on the anchor's part
-      // alone: typing and Backspace / Delete replace it (textRange's
+      // alone. Backspace / Delete replace it with nothing (textRange's
       // replaceRange), Enter replaces it and then splits there, an IME's
-      // first key empties it for the composition to land in. Copy / cut /
-      // paste / select-all chords pass through to their clipboard events (the
-      // views handle the range there), and a modifier going down must not end
-      // the range it is about to extend. Anything else (Tab, Escape, F-keys)
-      // ends the range at its moving end.
+      // first key empties it for the composition to land in. Characters pass
+      // to the textarea: whatever it inserts over its selection reaches the
+      // reducer as typeText, which reads it as replacing the range — the one
+      // path for text from keys, dictation and soft keyboards alike. Copy /
+      // cut / paste / select-all chords pass through to their clipboard
+      // events (the views handle the range there), and a modifier going down
+      // must not end the range it is about to extend. Anything else (Tab,
+      // Escape, F-keys) ends the range at its moving end.
       id: "edit-range-guard",
       label: "",
       keys: "",
@@ -732,7 +742,9 @@ export function buildKeymap(
           dispatch({ type: "replaceTextRange", text }, "replace-range");
         if (MODIFIER_KEYS.has(e.key)) return PASS;
         if (mod(e) && ["c", "x", "v", "a"].includes(e.key.toLowerCase())) return PASS;
-        if (isImeKey(e)) return handled(replace(""), SAVE);
+        if (isImeKey(e)) {
+          return { result: "native", effects: [replace(""), SAVE, { kind: "syncInput" }] };
+        }
         if (!mod(e)) {
           if (e.key === "Backspace" || e.key === "Delete") return handled(replace(""), SAVE);
           if (e.key === "Enter") {
@@ -740,8 +752,8 @@ export function buildKeymap(
             const { start } = orderedRange(ctx.state.document.model, range);
             return handled(replace(""), dispatch({ type: "enter", pos: start.offset }, "enter"), SAVE);
           }
-          // A printable character (one code point; Alt may compose it).
-          if ([...e.key].length === 1) return handled(replace(e.key), SAVE);
+          // A character (one code point; Alt may compose it): the textarea's.
+          if ([...e.key].length === 1) return PASS;
         }
         return handled(caretAt(range.focus));
       },
@@ -848,14 +860,6 @@ export function buildKeymap(
       },
     },
     {
-      id: "edit-shift-left",
-      label: "",
-      keys: "Shift + ←",
-      when: "editing",
-      match: (e) => e.key === "ArrowLeft" && e.shiftKey,
-      run: () => PASS, // native selection extension
-    },
-    {
       id: "edit-left",
       label: "",
       keys: "←",
@@ -887,14 +891,6 @@ export function buildKeymap(
       run: (ctx) => {
         return handled(dispatch({ type: "cmdRight", pos: ctx.pos }));
       },
-    },
-    {
-      id: "edit-shift-right",
-      label: "",
-      keys: "Shift + →",
-      when: "editing",
-      match: (e) => e.key === "ArrowRight" && e.shiftKey,
-      run: () => PASS, // native selection extension
     },
     {
       id: "edit-right",

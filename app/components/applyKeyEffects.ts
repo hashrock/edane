@@ -29,6 +29,8 @@ export interface KeyEffectDeps {
   redo?: () => void;
   /** Highlight nodes; absent where nothing is drawn (outline). */
   flashNodes?: (ids: string[]) => void;
+  /** Write the edit buffer and caret into the textarea immediately. */
+  syncInput?: (view: EditorState["view"]) => void;
 }
 
 export function applyKeyEffects(
@@ -71,6 +73,9 @@ export function applyKeyEffects(
         break;
       case "redo":
         deps.redo?.();
+        break;
+      case "syncInput":
+        deps.syncInput?.(current.view);
         break;
       default:
         assertNever(effect);

@@ -20,8 +20,15 @@ import {
 } from "../domain/model";
 import { modelArb, nodeArb, nodeIds, pick } from "../domain/model.arb";
 import { assertNever } from "../lib/assertNever";
-import { freshEditorState, type EditorAction, type EditorState } from "./editorReducer";
-import { buildKeymap, type KeyBinding } from "./editorKeymap";
+import { editorReducer, freshEditorState, type EditorAction, type EditorState } from "./editorReducer";
+import {
+  activeNode,
+  buildKeymap,
+  runKeymap,
+  type KeyBinding,
+  type KeymapKeyEvent,
+  type KeyOutcome,
+} from "./editorKeymap";
 import type { PasteSource } from "./editorCommands";
 import {
   ARROW_BEHAVIORS,
@@ -138,6 +145,28 @@ export function keymapFor(prefs: EditorPreferences, layout: EditorLayout): KeyBi
     keymaps.set(key, bindings);
   }
   return bindings;
+}
+
+/**
+ * Press one key the way the views do: run the keymap with the textarea's
+ * selection mirroring the view, then feed its dispatches to the reducer.
+ */
+export function pressKey(
+  bindings: KeyBinding[],
+  state: EditorState,
+  e: KeymapKeyEvent,
+  prefs?: EditorPreferences
+): { state: EditorState; outcome: KeyOutcome } {
+  const outcome = runKeymap(
+    bindings,
+    { e, state, node: activeNode(state), pos: state.view.cursorPos, selEnd: state.view.selectionEnd },
+    prefs
+  );
+  let next = state;
+  for (const f of outcome.effects) {
+    if (f.kind === "dispatch") next = editorReducer(next, f.action);
+  }
+  return { state: next, outcome };
 }
 
 // --- Random action sequences ---
