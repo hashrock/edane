@@ -23,7 +23,7 @@ import {
   serializeDocument,
   textToDocument,
 } from "./persistence";
-import { parseBranch, serializeBranch } from "./branchClipboard";
+import { parseBranch, serializeBranches } from "./branchClipboard";
 
 function expectWellFormedNode(node: MindMapModel) {
   const walk = (n: MindMapModel) => {
@@ -64,13 +64,13 @@ describe("JSON round trips", () => {
     );
   });
 
-  it("parseBranch(serializeBranch(n)) === n for every well-formed branch, minus a root-only `position`", () => {
+  it("parseBranch(serializeBranches([n])) === n for every well-formed branch, minus a root-only `position`", () => {
     fc.assert(
       fc.property(nodeArb, (node) => {
         // A branch is never a document root (see branchClipboard.ts), so a
         // `position` that only made sense on the copied node as a root does
         // not survive the round trip.
-        expect(parseBranch(serializeBranch(node))).toEqual({ ...node, position: undefined });
+        expect(parseBranch(serializeBranches([node]))).toEqual({ ...node, position: undefined });
       })
     );
   });

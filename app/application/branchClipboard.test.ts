@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { subtreeIds } from "../domain/model";
-import { parseBranch } from "./branchClipboard";
+import { parseBranch, parseBranches, serializeBranches } from "./branchClipboard";
 
 describe("parseBranch with malformed payloads", () => {
   it("returns null for non-JSON or non-object input", () => {
@@ -72,5 +72,23 @@ describe("parseBranch with malformed payloads", () => {
     expect(parsed).not.toBeNull();
     const allIds = subtreeIds(parsed!);
     expect(new Set(allIds).size).toBe(allIds.length);
+  });
+});
+
+describe("several branches (a copied multi-selection)", () => {
+  it("round-trip as an array, in order", () => {
+    const a = { id: "a", text: "A", children: [{ id: "a1", text: "A1", children: [] }] };
+    const b = { id: "b", text: "B", children: [] };
+    expect(parseBranches(serializeBranches([a, b]))).toEqual([a, b]);
+    // One branch stays a plain node, readable by parseBranch as before.
+    expect(parseBranch(serializeBranches([b]))).toEqual(b);
+  });
+
+  it("keep ids unique across branches, and reject a payload with a bad entry", () => {
+    const parsed = parseBranches(JSON.stringify([{ id: "x", text: "1", children: [] }, { id: "x", text: "2", children: [] }]))!;
+    expect(parsed.map((n) => n.text)).toEqual(["1", "2"]);
+    expect(parsed[0].id).not.toBe(parsed[1].id);
+    expect(parseBranches(JSON.stringify([{ id: "x", text: "1", children: [] }, 42]))).toBeNull();
+    expect(parseBranches("[]")).toBeNull();
   });
 });

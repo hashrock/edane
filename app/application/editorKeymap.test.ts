@@ -755,3 +755,49 @@ describe("help chord (Cmd/Ctrl + /)", () => {
     expect(r.kinds).toEqual(["openHelp"]);
   });
 });
+
+describe("Shift+↑/↓ select whole nodes (canvas)", () => {
+  // Flat order: a, a1, b.
+  it("past the last line, editing gives way to a selection of this node and the next", () => {
+    const r = run(state(model(), "a", true, "A"), { key: "ArrowDown", shiftKey: true }, { pos: 1, selEnd: 1 });
+    expect(r.handled).toBe(true);
+    expect(r.dispatched).toEqual([{ type: "exitEditing" }, { type: "setSelectedIds", ids: ["a", "a1"] }]);
+  });
+
+  it("inside a multi-line node, the textarea extends its own selection", () => {
+    const lines: VerticalMove = (text, pos, dir) => (dir === 1 && pos < text.indexOf("\n") ? text.length : null);
+    const r = run(
+      state(model(), "a", true, "A\nmore"),
+      { key: "ArrowDown", shiftKey: true },
+      { pos: 0, selEnd: 0 },
+      DEFAULT_PREFERENCES,
+      "canvas",
+      lines
+    );
+    expect(r).toMatchObject({ handled: false, dispatched: [] });
+  });
+
+  it("is not offered where a node selection can't take the keyboard", () => {
+    // The outline has no keyboard host in selection mode; always-edit mode has no selection mode.
+    const outline = run(state(model(), "a", true, "A"), { key: "ArrowDown", shiftKey: true }, {}, DEFAULT_PREFERENCES, "outline");
+    expect(outline.dispatched.some((a) => a.type === "setSelectedIds")).toBe(false);
+    const alwaysEdit = run(state(model(), "a", true, "A"), { key: "ArrowDown", shiftKey: true }, {}, {
+      ...DEFAULT_PREFERENCES,
+      selectionMode: false,
+    });
+    expect(alwaysEdit.dispatched.some((a) => a.type === "setSelectedIds")).toBe(false);
+  });
+
+  it("in selection mode grows and shrinks the run from the active node", () => {
+    const st = state(model(), "a1", false);
+    expect(run(st, { key: "ArrowDown", shiftKey: true }).dispatched).toEqual([{ type: "setSelectedIds", ids: ["a1", "b"] }]);
+    const grown: EditorState = { ...st, view: { ...st.view, selectedIds: ["a1", "b"] } };
+    expect(run(grown, { key: "ArrowUp", shiftKey: true }).dispatched).toEqual([{ type: "setSelectedIds", ids: [] }]);
+  });
+
+  it("Delete with a selection deletes every selected branch at once", () => {
+    const st = state(model(), "a", false);
+    const selected: EditorState = { ...st, view: { ...st.view, selectedIds: ["a", "a1"] } };
+    expect(run(selected, { key: "Delete" }).dispatched).toEqual([{ type: "deleteNodes", nodeIds: ["a", "a1"] }]);
+  });
+});

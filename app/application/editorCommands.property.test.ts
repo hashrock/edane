@@ -56,7 +56,7 @@ function hasContent(source: PasteSource, clipboard: MindMapModel | null): boolea
       }
       return source.text.trim() !== "";
     case "branch":
-      return (source.node ?? clipboard) != null;
+      return source.nodes ? source.nodes.length > 0 : clipboard != null;
   }
 }
 
@@ -165,7 +165,7 @@ describe("pasteCommand: effect list shape when there IS something to paste", () 
     );
   });
 
-  it("branch sources dispatch pasteBranch with the given node (or none) and flash the active node", () => {
+  it("branch sources dispatch pasteBranch with the given nodes (or none) and flash the active node", () => {
     fc.assert(
       fc.property(modelAndTargetArb, branchPasteSourceArb, ({ state, targetId }, source) => {
         fc.pre(hasContent(source, state.document.clipboard));
@@ -176,7 +176,7 @@ describe("pasteCommand: effect list shape when there IS something to paste", () 
         expect(effects).toEqual([
           {
             kind: "dispatch",
-            action: { type: "pasteBranch", node: source.node },
+            action: { type: "pasteBranch", nodes: source.nodes },
             undoType: "paste-branch",
           },
           { kind: "flash", ids: "active" },

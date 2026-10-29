@@ -19,9 +19,12 @@ import { normalizeTree } from "./persistence";
 /** Custom clipboard MIME carrying the JSON branch. Only edane reads it. */
 export const BRANCH_MIME = "application/x-edane-branch";
 
-/** Serialize a branch (a node and its descendants) for the clipboard. */
-export function serializeBranch(node: MindMapModel): string {
-  return JSON.stringify(node);
+/**
+ * Serialize branches (nodes with their descendants) for the clipboard: one
+ * as a single node, several — a copied multi-selection — as an array.
+ */
+export function serializeBranches(nodes: readonly MindMapModel[]): string {
+  return JSON.stringify(nodes.length === 1 ? nodes[0] : nodes);
 }
 
 /**
@@ -45,6 +48,15 @@ export function serializeBranch(node: MindMapModel): string {
  * every future caller of a parsed branch to route through `nestUnder`.
  */
 export function parseBranch(text: string): MindMapModel | null {
+  return parseBranches(text)?.[0] ?? null;
+}
+
+/**
+ * Parse a payload of one branch or several (see {@link serializeBranches}),
+ * with ids unique across all of them. null unless every entry is a
+ * well-formed node tree (see {@link parseBranch}).
+ */
+export function parseBranches(text: string): MindMapModel[] | null {
   if (!text) return null;
   let data: unknown;
   try {
@@ -52,5 +64,14 @@ export function parseBranch(text: string): MindMapModel | null {
   } catch {
     return null;
   }
-  return normalizeTree(data, new Set(), generateId, false);
+  const entries = Array.isArray(data) ? data : [data];
+  if (entries.length === 0) return null;
+  const seen = new Set<string>();
+  const nodes: MindMapModel[] = [];
+  for (const entry of entries) {
+    const node = normalizeTree(entry, seen, generateId, false);
+    if (!node) return null;
+    nodes.push(node);
+  }
+  return nodes;
 }

@@ -18,6 +18,7 @@ import { allIds, modelArb, pick } from "../domain/model.arb";
 import { supportsCheckbox } from "./nodeUtils";
 import {
   checkboxMenuTargets,
+  extendSelection,
   nextMultiSelection,
   outermostBranches,
   planGroupCheckToggle,
@@ -233,6 +234,42 @@ describe("outermostBranches", () => {
 
         // Idempotent: the outermost set has nothing left to collapse further.
         expect(outermostBranches(doc, result)).toEqual(result);
+      })
+    );
+  });
+});
+
+describe("extendSelection (Shift+↑/↓)", () => {
+  it("is always nothing or a flat-order run of 2+ nodes with the anchor at one end", () => {
+    fc.assert(
+      fc.property(
+        modelArb,
+        fc.nat(),
+        fc.array(fc.constantFrom<-1 | 1>(-1, 1), { maxLength: 12 }),
+        (doc, n, dirs) => {
+          const order = getFlatOrder(doc);
+          const anchor = pick(order, n);
+          let ids: string[] = [];
+          for (const dir of dirs) {
+            ids = extendSelection(doc, anchor, ids, dir);
+            if (ids.length === 0) continue;
+            expect(ids.length).toBeGreaterThanOrEqual(2);
+            const start = order.indexOf(ids[0]);
+            expect(ids).toEqual(order.slice(start, start + ids.length));
+            expect([ids[0], ids[ids.length - 1]]).toContain(anchor);
+          }
+        }
+      )
+    );
+  });
+
+  it("one step back undoes a step that moved", () => {
+    fc.assert(
+      fc.property(modelArb, fc.nat(), fc.constantFrom<-1 | 1>(-1, 1), (doc, n, dir) => {
+        const anchor = pick(getFlatOrder(doc), n);
+        const grown = extendSelection(doc, anchor, [], dir);
+        if (grown.length === 0) return; // at the document's end that way
+        expect(extendSelection(doc, anchor, grown, dir === 1 ? -1 : 1)).toEqual([]);
       })
     );
   });

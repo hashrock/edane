@@ -41,7 +41,7 @@ import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
 import { findNode, hasStructuralSuccessor, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
-import { planGroupCheckToggle } from "./selection";
+import { extendSelection, planGroupCheckToggle } from "./selection";
 import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
@@ -158,6 +158,16 @@ const insertChild = (nodeId: string): KeyEffect[] => [
 // Treat Cmd (mac) and Ctrl (win/linux) as the same "primary" modifier.
 const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
 
+/** Shift+↑ = -1, Shift+↓ = +1 (no other modifier); otherwise null. */
+const shiftVertical = (e: KeymapKeyEvent): -1 | 1 | null =>
+  !e.shiftKey || mod(e) || e.altKey
+    ? null
+    : e.key === "ArrowUp"
+      ? -1
+      : e.key === "ArrowDown"
+        ? 1
+        : null;
+
 export function buildKeymap(
   prefs: EditorPreferences = DEFAULT_PREFERENCES,
   layout: EditorLayout = "canvas",
@@ -243,6 +253,22 @@ export function buildKeymap(
   // wants the adjacent node, not the adjacent sibling — see editSurface.ts).
   const siblingArrows = layout === "canvas";
   const selectionBindings: KeyBinding[] = [
+    {
+      // Select whole lines from the keyboard: the shift-click range, grown or
+      // shrunk one node at a time in flat order. Must precede sel-up/down,
+      // which take any ↑/↓.
+      id: "sel-extend",
+      label: "kmExtendSelection",
+      keys: "Shift + ↑ / ↓",
+      when: "selection",
+      match: (e) => shiftVertical(e) !== null,
+      run: (ctx) => {
+        const { activeNodeId, selectedIds } = ctx.state.view;
+        if (!activeNodeId) return handled();
+        const ids = extendSelection(ctx.state.document.model, activeNodeId, selectedIds ?? [], shiftVertical(ctx.e)!);
+        return handled(dispatch({ type: "setSelectedIds", ids }));
+      },
+    },
     {
       id: "sel-insert-sibling",
       label: "kmInsertSibling",
@@ -377,6 +403,12 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.key === "Backspace" || e.key === "Delete",
       run: (ctx) => {
+        // A multi-selection goes as a whole: every selected branch, one undo
+        // entry (the context menu's bulk delete).
+        const selected = ctx.state.view.selectedIds;
+        if (selected && selected.length > 1) {
+          return handled(dispatch({ type: "deleteNodes", nodeIds: selected }, "delete-node"));
+        }
         if (!ctx.node) return handled();
         return handled(deleteBranch(ctx.node.id));
       },
@@ -410,6 +442,38 @@ export function buildKeymap(
   ];
 
   const editIndentBindings = tabBindings("editing", "edit");
+
+  // Shift+↑/↓ past the first / last line leaves the text for a selection of
+  // whole nodes (sel-extend takes it from there). Inside the node the
+  // textarea extends its own selection. Canvas only: the outline has no
+  // keyboard host in selection mode, so leaving editing there would strand
+  // the keyboard. Needs selection mode, which is where a node selection
+  // lives.
+  const editExtend: KeyBinding[] =
+    layout === "canvas" && prefs.selectionMode
+      ? [
+          {
+            id: "edit-extend",
+            label: "",
+            keys: "Shift + ↑ / ↓",
+            when: "editing",
+            match: (e) => shiftVertical(e) !== null,
+            run: (ctx) => {
+              const { activeNodeId, editingText } = ctx.state.view;
+              const dir = shiftVertical(ctx.e)!;
+              const atEdge = verticalMove(editingText, dir === -1 ? ctx.pos : ctx.selEnd, dir) === null;
+              // A blank node would be deleted on leaving editing (exitEditing).
+              if (!activeNodeId || !atEdge || editingText.trim() === "") return PASS;
+              const ids = extendSelection(ctx.state.document.model, activeNodeId, [], dir);
+              if (ids.length === 0) return PASS; // the document's first / last node
+              return handled(
+                dispatch({ type: "exitEditing" }),
+                dispatch({ type: "setSelectedIds", ids })
+              );
+            },
+          },
+        ]
+      : [];
 
   // Escape returns from editing to selection mode; with selection mode
   // disabled there is nowhere to return to, so the binding is dropped and
@@ -571,6 +635,7 @@ export function buildKeymap(
     ...(prefs.selectionMode ? selectionBindings : alwaysEditBindings),
 
     // ---- Editing mode ----
+    ...editExtend,
     {
       id: "edit-newline",
       label: "kmNewline",

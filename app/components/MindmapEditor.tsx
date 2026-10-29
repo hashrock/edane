@@ -27,6 +27,7 @@ import {
   outermostBranches,
   planGroupCheckToggle,
   planGroupCollapse,
+  selectionToText,
 } from "../application/selection";
 import { modelToMarkdown } from "../application/markdown";
 import { planPaste } from "../application/pastePlan";
@@ -35,8 +36,8 @@ import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
   BRANCH_MIME,
-  serializeBranch,
-  parseBranch,
+  serializeBranches,
+  parseBranches,
 } from "../application/branchClipboard";
 import ViewControls, { type PageModeToggle } from "./ViewControls";
 import { pageMarkColor, type PageMarks } from "./pageMarks";
@@ -329,6 +330,27 @@ export interface RedrawStats {
   redrawTotalMs: number;
   redrawLastMs: number;
   redrawDrawMs: number;
+}
+
+/**
+ * Copy / cut of a multi-selection, as for one branch: text for other apps —
+ * one indented block per selected branch (selectionToText, as the context
+ * menu's copy) — plus every selected branch as full-fidelity JSON, so a paste
+ * back into edane brings them all (it wins over the internal clipboard, which
+ * holds a single branch). Returns the selected ids (the cut deletes them), or
+ * null when there is no multi-selection and the event is someone else's.
+ */
+function copySelection(e: React.ClipboardEvent, st: EditorState): string[] | null {
+  const ids = st.view.selectedIds;
+  if (!ids || ids.length < 2) return null;
+  e.preventDefault();
+  const { model } = st.document;
+  const branches = outermostBranches(model, ids)
+    .map((id) => findNode(model, id))
+    .filter((n) => n !== null);
+  e.clipboardData.setData("text/plain", selectionToText(model, ids));
+  e.clipboardData.setData(BRANCH_MIME, serializeBranches(branches));
+  return ids;
 }
 
 export interface MindmapTestApi {
@@ -1030,6 +1052,7 @@ export function MindmapEditorView({
   const handleCopy = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const st = stateRef.current;
     if (st.view.editing && hasTextRange(st)) return; // native text copy
+    if (copySelection(e, st)) return;
     e.preventDefault();
     dispatch({ type: "copyBranch" });
     // Keep the internal branch clipboard (for in-app paste) but also expose the
@@ -1041,7 +1064,7 @@ export function MindmapEditorView({
       : null;
     if (node) {
       e.clipboardData.setData("text/plain", modelToMarkdown(node));
-      e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+      e.clipboardData.setData(BRANCH_MIME, serializeBranches([node]));
     }
   }, [dispatch]);
 
@@ -1049,6 +1072,12 @@ export function MindmapEditorView({
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
       if (st.view.editing && hasTextRange(st)) return; // native text cut
+      const selected = copySelection(e, st);
+      if (selected) {
+        const next = dispatch({ type: "deleteNodes", nodeIds: selected }, "delete-node");
+        if (noteId && next.document.model !== st.document.model) saveNote(next.document.model);
+        return;
+      }
       e.preventDefault();
       // Mirror copy's system-clipboard payload before the branch leaves the tree.
       const node = st.view.activeNodeId
@@ -1056,7 +1085,7 @@ export function MindmapEditorView({
         : null;
       if (node) {
         e.clipboardData.setData("text/plain", modelToMarkdown(node));
-        e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+        e.clipboardData.setData(BRANCH_MIME, serializeBranches([node]));
       }
       const next = dispatch({ type: "cutBranch" }, "cut-branch");
       if (noteId && next.document.model !== st.document.model)
@@ -1091,14 +1120,14 @@ export function MindmapEditorView({
       // An edane branch on the system clipboard carries full-fidelity JSON in a
       // custom MIME alongside its Markdown text/plain, so the JSON's presence
       // means "this is our own branch" (even across tabs).
-      const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
+      const jsonBranches = parseBranches(e.clipboardData.getData(BRANCH_MIME));
 
       // Which of the paste flavours applies is a pure decision — including the
       // rule that editing mode always means a plain text paste at the caret.
       const plan = planPaste({
         editing: st.view.editing,
         text,
-        hasBranchJson: !!jsonBranch,
+        hasBranchJson: !!jsonBranches,
         hasInternalClipboard: !!st.document.clipboard,
       });
 
@@ -1108,11 +1137,11 @@ export function MindmapEditorView({
       e.preventDefault();
 
       if (plan === "branch-json" || plan === "branch-clipboard") {
-        // `node` present = the clipboard's own subtree; absent = the internal
-        // branch clipboard (see the reducer's pasteBranch).
+        // `nodes` present = the clipboard's own subtrees; absent = the
+        // internal branch clipboard (see the reducer's pasteBranch).
         runPaste({
           kind: "branch",
-          node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+          nodes: plan === "branch-json" ? (jsonBranches ?? undefined) : undefined,
         });
         return;
       }
@@ -1568,17 +1597,7 @@ export function MindmapEditorView({
     copyGroup.push({
       label: t("menuCopyBranchText"),
       onSelect: () => {
-        // One block per selected branch, in document order. A node that sits
-        // inside another selected branch is dropped (outermostBranches) —
-        // its text is already in that branch's block.
-        const text = outermostBranches(modelRef.current, targetIds)
-          .map((id) => findNode(modelRef.current, id))
-          .filter((n): n is MindMapModel => !!n)
-          // Not `.map(modelToText)`: modelToText's second parameter is the
-          // indent depth, and map would hand it the array index.
-          .map((branch) => modelToText(branch))
-          .join("\n");
-        navigator.clipboard.writeText(text);
+        navigator.clipboard.writeText(selectionToText(modelRef.current, targetIds));
       },
     });
     if (noteId && !readOnly) {

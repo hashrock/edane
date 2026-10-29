@@ -17,6 +17,10 @@
 
 かつて↓のフォールバックをフラット順の隣にしていたときは、「自分が親の最後の子か」というユーザーに見えない条件で↓が子に降りたり降りなかったりしていた。**行き止まりを避けるためにフォールバックや記憶を足すときは、その移動先が木のどこでも同じ規則で決まるか確かめること。**
 
+### キーボードでのノード単位の選択（Shift+↑/↓）
+
+ノードをまたぐ選択はノード単位だけで、文字単位の範囲は1つのノードの中（textarea のネイティブ選択）に限る。canvas の編集中に Shift+↑/↓ が先頭行/末尾行を越えると、編集を抜けて隣のノードとの複数選択（`selectedIds`）になる（`edit-extend`）。選択モードの Shift+↑/↓ は、アクティブノードを起点にフラット順の連続範囲を伸縮する（`sel-extend` / `selection.extendSelection`。shift-click と同じ範囲）。複数選択の Cmd+C / Cmd+X は、1ノードのコピーと同じく text/plain（枝ごとのインデント付きテキスト、`selectionToText`）と全枝の JSON（`BRANCH_MIME`、`serializeBranches`）を載せ、貼り付けは全枝をアクティブノードの子にする（`pasteBranch` の `nodes`）。Cmd+X と Delete は枝ごと削除（`deleteNodes`）。outline は選択モードでキーボードの受け皿が無いので `edit-extend` を出さない（出すと編集を抜けたところで閉じ込められる）。
+
 ### ドキュメントはルートの配列（multi-root）
 
 `MindMapDocument`（`app/domain/model.ts`）は `{ title, roots }`。`title` はノートのタイトルでノードではない（ヘッダーで編集し、`notes.title` 列に保存する）。`roots` は木の配列で、各ルート（`MindMapModel`）が canvas / outline に独立した木として並ぶ。**「見えないルートノード」は存在しない**。ノードを探す・位置を知るときは `findNode(doc, id)` / `locateNode(doc, id)`（`parent === null` ならルート、`siblings` は `doc.roots` か `parent.children`）を使い、`parent.id === model.id` のような比較を書かないこと。
