@@ -227,9 +227,57 @@ describe("Shift+arrows across nodes (keymap → reducer)", () => {
     expect([down.view.activeNodeId, down.view.editing, down.view.textRange]).toEqual(["g", true, undefined]);
   });
 
-  it("other keys end the range without editing anything; clipboard chords and modifiers pass", () => {
+  it("typing replaces the whole range; the joined line keeps the start node", () => {
+    // Range: "hello |world" … "child |one". c1 goes; its child g now hangs
+    // under the joined line, like the text "hello aone\n    grand" reads.
     const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
-    for (const k of ["a", "Backspace", "Enter", "Tab", "Escape"]) {
+    const { state, handled } = press(st, key("a"));
+    expect(handled).toBe(true);
+    expect(state.view.textRange).toBeUndefined();
+    expect([state.view.activeNodeId, state.view.editingText, state.view.cursorPos]).toEqual(["r", "hello aone", 7]);
+    const r = state.document.model.roots[0];
+    expect(r.children.map((c) => c.id)).toEqual(["g", "c2"]);
+  });
+
+  it("Backspace / Delete delete the range, Enter deletes it and splits there", () => {
+    const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
+    for (const k of ["Backspace", "Delete"]) {
+      const { state } = press(st, key(k));
+      expect(state.view.editingText, k).toBe("hello one");
+      expect(state.view.cursorPos, k).toBe(6);
+    }
+    const { state } = press(st, key("Enter"));
+    const r = state.document.model.roots[0];
+    expect(r.text).toBe("hello ");
+    expect(r.children[0]).toMatchObject({ text: "one" });
+    expect(state.view.activeNodeId).toBe(r.children[0].id);
+  });
+
+  it("text that reaches the textarea without a key replaces the whole range too", () => {
+    // Dictation / autocorrect: the textarea swaps its selection (the anchor's
+    // part, "world") for the new text with no keydown the keymap could see.
+    const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
+    const next = editorReducer(st, {
+      type: "typeText",
+      text: "hello と",
+      cursorPos: 7,
+      selectionEnd: 7,
+      commitModel: true,
+    });
+    expect([next.view.editingText, next.view.cursorPos, next.view.textRange]).toEqual(["hello とone", 7, undefined]);
+    expect(next.document.model.roots[0].children.map((c) => c.id)).toEqual(["g", "c2"]);
+  });
+
+  it("an IME's first key empties the range for the composition", () => {
+    const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
+    const { state, handled } = press(st, { ...key("Process"), keyCode: 229 });
+    expect(handled).toBe(true);
+    expect([state.view.editingText, state.view.cursorPos]).toEqual(["hello one", 6]);
+  });
+
+  it("Tab / Escape end the range without editing; clipboard chords and modifiers pass", () => {
+    const st = press(editing("r", 6), key("ArrowDown", { shiftKey: true })).state;
+    for (const k of ["Tab", "Escape", "F2"]) {
       const { state, handled } = press(st, key(k));
       expect(handled, k).toBe(true);
       expect(state.document, k).toBe(st.document);
@@ -241,5 +289,19 @@ describe("Shift+arrows across nodes (keymap → reducer)", () => {
       expect(handled, e.key).toBe(false);
       expect(state.view.textRange, e.key).toBeDefined();
     }
+  });
+
+  it("Shift+Home / End and ⌘/Ctrl+Shift+arrows extend the range like a textarea", () => {
+    const st = press(editing("c1", 3), key("ArrowDown", { shiftKey: true })).state; // focus g:3
+    expect(press(st, key("End", { shiftKey: true })).state.view.textRange?.focus).toEqual({ id: "g", offset: 5 });
+    expect(press(st, key("Home", { shiftKey: true })).state.view.textRange?.focus).toEqual({ id: "g", offset: 0 });
+    expect(press(st, key("ArrowDown", { shiftKey: true, ctrlKey: true })).state.view.textRange?.focus).toEqual({
+      id: "last",
+      offset: 4,
+    });
+    // Outside a range ⌘/Ctrl+Shift+↑ starts one at the document's start.
+    expect(press(editing("c2", 2), key("ArrowUp", { shiftKey: true, metaKey: true })).state.view.textRange).toEqual(
+      range(["c2", 2], ["r", 0])
+    );
   });
 });

@@ -99,6 +99,8 @@ export interface KeymapKeyEvent {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  /** 229 while an IME is taking the key (its first keydown says "Process" in Chrome only). */
+  keyCode?: number;
 }
 
 /**
@@ -183,8 +185,42 @@ const ARROW_DIRS: Record<string, RangeDir> = {
   ArrowUp: "up",
   ArrowDown: "down",
 };
+/**
+ * Which way a Shift+key moves the range's focus (null = not a selection key).
+ * Arrows go a character / line; Home / End and ⌘/Ctrl+←/→ to the ends of the
+ * line; ⌘/Ctrl+↑/↓ to the ends of the document — the keys a textarea extends
+ * its selection with, read across nodes.
+ */
+function selectionDir(e: KeymapKeyEvent): RangeDir | null {
+  if (!e.shiftKey || e.altKey) return null;
+  if (!mod(e)) {
+    if (e.key === "Home") return "lineStart";
+    if (e.key === "End") return "lineEnd";
+    return ARROW_DIRS[e.key] ?? null;
+  }
+  switch (e.key) {
+    case "ArrowLeft":
+      return "lineStart";
+    case "ArrowRight":
+      return "lineEnd";
+    case "ArrowUp":
+      return "docStart";
+    case "ArrowDown":
+      return "docEnd";
+    default:
+      return null;
+  }
+}
+/** Line-wise directions never leave the node, so they only matter in a range. */
+const LINE_DIRS: ReadonlySet<RangeDir> = new Set(["lineStart", "lineEnd"]);
 /** Keys that are only a modifier going down: never end a range. */
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "AltGraph", "CapsLock"]);
+/**
+ * The key is going to an IME (its first keydown, before compositionstart).
+ * Its default can't be cancelled without losing the composition, so the
+ * views never preventDefault it, even when a binding handled it.
+ */
+export const isImeKey = (e: KeymapKeyEvent) => e.key === "Process" || e.keyCode === 229;
 /** A cross-node range is live (see ViewState.textRange). */
 const inRange = (ctx: KeyContext) => ctx.state.view.textRange !== undefined;
 /** Put the caret at a point, ending the range: edit that node there. */
@@ -617,14 +653,17 @@ export function buildKeymap(
     {
       id: "edit-range-extend",
       label: "kmExtendSelection",
-      keys: "Shift + ←→↑↓",
+      keys: "Shift + ←→↑↓ / Home / End",
       when: "editing",
-      match: (e) => e.shiftKey && !mod(e) && !e.altKey && e.key in ARROW_DIRS,
+      match: (e) => selectionDir(e) !== null,
+      // Outside a range, Shift+Home / End and ⌘/Ctrl+Shift+←/→ stay the
+      // textarea's own (or edit-cmd-shift-*'s) in-node selection.
+      active: (ctx) => inRange(ctx) || !LINE_DIRS.has(selectionDir(ctx.e)!),
       run: (ctx) => {
         const { view, document } = ctx.state;
         const model = document.model;
         if (!view.activeNodeId) return PASS;
-        const dir = ARROW_DIRS[ctx.e.key];
+        const dir = selectionDir(ctx.e)!;
         const textOf = rangeTextOf(model, view.activeNodeId, view.editingText);
         const range = view.textRange
           ? {
@@ -672,11 +711,14 @@ export function buildKeymap(
       },
     },
     {
-      // Every other key ends the range at its moving end and is swallowed:
-      // typing, Backspace, Enter, Tab would otherwise act on the anchor's
-      // part alone. Copy / cut / paste / select-all chords pass through to
-      // their clipboard events (the views handle the range there), and a
-      // modifier going down must not end the range it is about to extend.
+      // Every other key acts on the WHOLE range, never on the anchor's part
+      // alone: typing and Backspace / Delete replace it (textRange's
+      // replaceRange), Enter replaces it and then splits there, an IME's
+      // first key empties it for the composition to land in. Copy / cut /
+      // paste / select-all chords pass through to their clipboard events (the
+      // views handle the range there), and a modifier going down must not end
+      // the range it is about to extend. Anything else (Tab, Escape, F-keys)
+      // ends the range at its moving end.
       id: "edit-range-guard",
       label: "",
       keys: "",
@@ -685,9 +727,23 @@ export function buildKeymap(
       active: inRange,
       run: (ctx) => {
         const { e } = ctx;
+        const range = ctx.state.view.textRange!;
+        const replace = (text: string): KeyEffect =>
+          dispatch({ type: "replaceTextRange", text }, "replace-range");
         if (MODIFIER_KEYS.has(e.key)) return PASS;
         if (mod(e) && ["c", "x", "v", "a"].includes(e.key.toLowerCase())) return PASS;
-        return handled(caretAt(ctx.state.view.textRange!.focus));
+        if (isImeKey(e)) return handled(replace(""), SAVE);
+        if (!mod(e)) {
+          if (e.key === "Backspace" || e.key === "Delete") return handled(replace(""), SAVE);
+          if (e.key === "Enter") {
+            if (e.shiftKey) return handled(replace("\n"), SAVE);
+            const { start } = orderedRange(ctx.state.document.model, range);
+            return handled(replace(""), dispatch({ type: "enter", pos: start.offset }, "enter"), SAVE);
+          }
+          // A printable character (one code point; Alt may compose it).
+          if ([...e.key].length === 1) return handled(replace(e.key), SAVE);
+        }
+        return handled(caretAt(range.focus));
       },
     },
     {

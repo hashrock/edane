@@ -22,7 +22,9 @@
 編集中の Shift+矢印がノードの端を越えると、選択はフラット順（`getFlatOrder`）で隣のノードへ伸びる（`app/application/textRange.ts`）。ドキュメントを「1ノード＝1行、インデント＝深さ」のテキストとして読み、その上の2点 `anchor` / `focus` で範囲を表す。**anchor は常に編集中のノード**（`activeNodeId`）で、キーボードは共有textareaに残る。textarea は anchor の担当部分だけを選択して表示し、ほかのノードの部分は各ビューが描く。
 
 - 範囲を作るのは `setTextRange` だけ。それ以外のアクションはすべて reducer の末尾で範囲を消す（`selectedIds` と同じ方式）。例外は、textarea が渡された選択をそのまま報告してくる `setSelection` だけ。
-- 範囲があるあいだは keymap の `edit-range-*` がすべてのキーを受け持つ。修飾なしの矢印は範囲を畳む（←/→ は範囲の始点/終点へ、↑/↓ は focus から1行先へ）ので、不変条件は範囲中も成り立つ。それ以外のキーは focus で範囲を畳んで握りつぶす。anchor の部分だけを書き換えさせないため。Cmd/Ctrl+C は範囲をインデント付きの行としてコピーする（`rangeToPlainText`）。範囲の削除・切り取り・置き換えはまだ無い（cut / paste は何もしない）。
+- 範囲があるあいだは keymap の `edit-range-*` がすべてのキーを受け持つ。修飾なしの矢印は範囲を畳む（←/→ は範囲の始点/終点へ、↑/↓ は focus から1行先へ）ので、不変条件は範囲中も成り立つ。Shift 付きの選択キー（矢印・Home/End・⌘/Ctrl+Shift+矢印）は範囲を伸ばす。
+- **範囲に対する編集は必ず範囲全体に効く。anchor の部分だけを書き換える経路を作らないこと。** 入力・Backspace/Delete・Enter・cut・paste はすべて `replaceTextRange`（`replaceRange`）を通る。keydown を伴わずに textarea に届いた入力（音声入力など）も、reducer が `typeText` を `replaceTextRange` に読み替える。IME の最初のキー（`isImeKey`）では範囲を空にし、preventDefault せずに textarea をその場で同期する（`syncInputNow`）。
+- 置き換えの規則はプレーンテキスト読みのとおり。範囲の文字を消し、始点ノードの頭と終点ノードの尻を始点ノード（id・深さを保つ）の1行につなぐ。範囲より後の行は自分のインデントを保ったまま、直前の浅い行の下にぶら下がる。つまり「コピーしたテキストから同じ文字を消して貼り戻す」のと同じ木になる（`textRange.property.test.ts` で総当たり）。Cmd/Ctrl+C は範囲をインデント付きの行としてコピーする（`rangeToPlainText`）。
 
 ### ドキュメントはルートの配列（multi-root）
 

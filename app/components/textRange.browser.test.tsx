@@ -75,16 +75,40 @@ describe("cross-node selection on the canvas", () => {
     expect(api().getSelection()).toMatchObject({ cursorPos: 3, selectionEnd: 3, editing: true });
   });
 
-  it("typing over a live range ends it without editing any node", async () => {
+  async function editA() {
     render(<MindmapEditor initialContent={CONTENT} initialTitle="T" />);
     await waitFor(() => api().getActiveNodeId() === "a");
     await waitFor(() => api().getRedrawStats().redrawCount > 0);
     input().focus();
     await userEvent.keyboard(" ");
     await waitFor(() => api().getSelection().editing);
-    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}x");
-    await waitFor(() => api().getActiveNodeId() === "a1");
-    expect(api().getModel().roots[0]).toMatchObject({ text: "Alpha", children: [{ text: "One" }] });
+  }
+
+  it("typing over a live range replaces it, and typing goes on at the caret", async () => {
+    await editA();
+    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}xy");
+    await waitFor(() => api().getModel().roots[0].text === "xyOne");
+    expect(api().getModel().roots[0].children).toEqual([]);
+    expect(api().getSelection()).toMatchObject({ activeNodeId: "a", cursorPos: 2, editing: true });
+  });
+
+  it("cut copies the range and deletes it; paste deletes it before pasting", async () => {
+    await editA();
+    await userEvent.keyboard("{Shift>}{ArrowDown}{ArrowRight}{ArrowRight}{/Shift}");
+    const dt = new DataTransfer();
+    input().dispatchEvent(new ClipboardEvent("cut", { clipboardData: dt, bubbles: true, cancelable: true }));
+    expect(dt.getData("text/plain")).toBe("Alpha\n  On");
+    await waitFor(() => api().getModel().roots[0].text === "e");
+
+    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
+    const paste = new DataTransfer();
+    paste.setData("text/plain", "Z");
+    input().dispatchEvent(new ClipboardEvent("paste", { clipboardData: paste, bubbles: true, cancelable: true }));
+    // The range ("|e" … "|Bravo") is gone; the textarea already holds the
+    // joined line, with the caret where the native paste will land.
+    await waitFor(() => api().getModel().roots.length === 1);
+    expect(input().value).toBe("Bravo");
+    expect(input().selectionStart).toBe(0);
   });
 });
 

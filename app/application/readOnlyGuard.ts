@@ -76,6 +76,7 @@ const READ_ONLY_ALLOWED = {
   tab: false,
   backspaceAtStart: false,
   deleteAtEnd: false,
+  replaceTextRange: false,
   moveNodeUp: false,
   moveNodeDown: false,
   moveBranch: false,

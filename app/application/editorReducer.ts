@@ -70,7 +70,7 @@ import {
 } from "../domain/model";
 import type { PageTheme } from "../domain/pageTheme";
 import { assertNever } from "../lib/assertNever";
-import { anchorSegment, rangeTextOf, type TextRange } from "./textRange";
+import { anchorSegment, rangeTextOf, replaceRange, type TextRange } from "./textRange";
 
 export interface DocumentState {
   model: MindMapDocument;
@@ -158,6 +158,7 @@ export type UndoType =
   | "insert-sibling"
   | "indent"
   | "backspace"
+  | "replace-range"
   | "enter"
   | "image-upload"
   | "style"
@@ -224,6 +225,10 @@ export type EditorAction =
   // Shift+arrows across a node boundary: the new cross-node selection. The
   // anchor must be the node being edited; otherwise this is a no-op.
   | { type: "setTextRange"; range: TextRange }
+  // Replace the live cross-node range with `text` ("" deletes it): typing,
+  // Backspace / Delete, cut and paste over a range (textRange.replaceRange).
+  // A no-op without a range.
+  | { type: "replaceTextRange"; text: string }
   // --- branch clipboard ---
   | { type: "copyBranch" }
   | { type: "cutBranch" }
@@ -345,7 +350,7 @@ function documentReducer(
   action: EditorAction,
   // The view facts a document edit may depend on (which node, and whether it
   // is being edited) — one context rather than a positional flag per fact.
-  view: Pick<ViewState, "activeNodeId" | "editing">,
+  view: Pick<ViewState, "activeNodeId" | "editing" | "editingText" | "textRange">,
   nextId: IdSource
 ): DocumentResult {
   const { activeNodeId, editing } = view;
@@ -390,6 +395,18 @@ function documentReducer(
         focusId: result.newNodeId,
         focusCursorPos: 0,
         focusSelectionEnd: 0,
+      };
+    }
+
+    case "replaceTextRange": {
+      if (!view.textRange) return { document };
+      const textOf = rangeTextOf(document.model, activeNodeId, view.editingText);
+      const { doc, caret } = replaceRange(document.model, view.textRange, textOf, action.text);
+      return {
+        document: { ...document, model: doc },
+        focusId: caret.id,
+        focusCursorPos: caret.offset,
+        focusSelectionEnd: caret.offset,
       };
     }
 
@@ -991,6 +1008,7 @@ function viewReducer(
     case "enter":
     case "backspaceAtStart":
     case "deleteAtEnd":
+    case "replaceTextRange":
     case "cutBranch":
     case "pasteBranch":
     case "toggleCollapse":
@@ -1449,6 +1467,19 @@ export function freshEditorState(model: MindMapDocument, activeNodeId: string): 
   };
 }
 
+/**
+ * What the textarea put in place of its selection, given its new value: the
+ * part between the untouched head and tail. null when the value doesn't keep
+ * them (it changed somewhere else).
+ */
+function insertedOver(view: ViewState, value: string): string | null {
+  const head = view.editingText.slice(0, view.cursorPos);
+  const tail = view.editingText.slice(view.selectionEnd);
+  if (value.length < head.length + tail.length) return null;
+  if (!value.startsWith(head) || !value.endsWith(tail)) return null;
+  return value.slice(head.length, value.length - tail.length);
+}
+
 // --- Reducer ---
 
 export function editorReducer(
@@ -1472,6 +1503,17 @@ export function editorReducer(
     );
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
+  }
+
+  // Text that reaches the textarea without a key the keymap saw (dictation,
+  // autocorrect, a soft keyboard's insertText) still lands over a live range
+  // as the textarea's edit of the anchor's part. Read it as replacing the
+  // whole range, so no path can edit that part alone.
+  if (action.type === "typeText" && action.commitModel && state.view.textRange) {
+    const inserted = insertedOver(state.view, action.text);
+    if (inserted !== null) {
+      return editorReducer(state, { type: "replaceTextRange", text: inserted }, nextId);
+    }
   }
 
   const docResult = documentReducer(

@@ -22,6 +22,7 @@ import { supportsCheckbox } from "../application/nodeUtils";
 import {
   buildKeymap,
   runKeymap,
+  isImeKey,
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
@@ -156,6 +157,7 @@ export default function OutlineEditor({
     handleCompositionEnd,
     handleSelect,
     handleUrlChange,
+    syncInputNow,
   } = useTextInputHandlers(engine);
 
   // --- Refs ---
@@ -202,40 +204,41 @@ export default function OutlineEditor({
         selEnd: inputRef.current?.selectionEnd || 0,
         backward: inputRef.current?.selectionDirection === "backward",
       });
-      if (outcome.result === "handled") e.preventDefault();
-      applyKeyEffects(outcome.effects, st, keyDeps);
+      const ime = isImeKey(e);
+      if (outcome.result === "handled" && !ime) e.preventDefault();
+      const next = applyKeyEffects(outcome.effects, st, keyDeps);
+      // The composition starts in the textarea right after this handler.
+      if (ime && next !== st) syncInputNow(next.view);
     },
-    [isComposing, keymap, keyDeps, stateRef]
+    [isComposing, keymap, keyDeps, stateRef, syncInputNow]
   );
 
   // Paste of multi-line (indented) text becomes fresh nodes; single-line text
   // is left to the native textarea.
-  // A selection across nodes copies as indented lines (the textarea only
-  // holds the anchor's part of it). Cutting / pasting over one is not
-  // supported yet, so neither may act on the anchor's part alone.
+  // A selection across nodes copies (and cuts) as indented lines — the
+  // textarea only holds the anchor's part of it. Pasting over one deletes it
+  // first, then pastes as usual at the caret it leaves.
   const handleCopy = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
       const range = st.view.textRange;
-      if (!range) return; // native text copy
+      if (!range) return; // native text copy / cut
       e.preventDefault();
       const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
       e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
+      if (e.type !== "cut" || readOnly) return;
+      const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
+      if (noteId) saveNote(next.document.model);
     },
-    [stateRef]
-  );
-  const handleCut = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (stateRef.current.view.textRange) e.preventDefault();
-    },
-    [stateRef]
+    [stateRef, dispatch, noteId, saveNote, readOnly]
   );
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (stateRef.current.view.textRange) {
-        e.preventDefault();
-        return;
+        const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
+        syncInputNow(next.view);
+        if (noteId) saveNote(next.document.model);
       }
       const text = e.clipboardData.getData("text");
       if (!text || !text.includes("\n")) return;
@@ -246,7 +249,7 @@ export default function OutlineEditor({
       const effects = pasteCommand(st, { kind: "text", text });
       if (effects) applyKeyEffects(effects, st, keyDeps);
     },
-    [keyDeps, stateRef]
+    [keyDeps, stateRef, dispatch, syncInputNow, noteId, saveNote]
   );
 
   // --- Row activation ---
@@ -705,11 +708,14 @@ export default function OutlineEditor({
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
             onCopy={handleCopy}
-            onCut={handleCut}
+            onCut={handleCopy}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
-            className="absolute resize-none overflow-hidden border-0 bg-transparent py-0.5 leading-6 text-slate-900 outline-none"
+            className={`absolute resize-none overflow-hidden border-0 bg-transparent py-0.5 leading-6 text-slate-900 outline-none ${
+              // The anchor's part of a range in the same colour as the rest.
+              textRange ? "selection:bg-sky-200/70 selection:text-slate-900" : ""
+            }`}
             style={{
               top: overlay.top,
               left: overlay.left,

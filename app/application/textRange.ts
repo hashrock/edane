@@ -37,7 +37,20 @@ export interface TextRange {
   focus: TextPoint;
 }
 
-export type RangeDir = "left" | "right" | "up" | "down";
+/**
+ * One Shift+key's worth of movement: a character / line (arrows), the ends
+ * of the focus's own line (Shift+Home / End, ⌘/Ctrl+Shift+← / →), or the
+ * ends of the whole document (⌘/Ctrl+Shift+↑ / ↓).
+ */
+export type RangeDir =
+  | "left"
+  | "right"
+  | "up"
+  | "down"
+  | "lineStart"
+  | "lineEnd"
+  | "docStart"
+  | "docEnd";
 
 /** Line-wise caret move inside a node; null = past the first / last line. */
 export type VerticalMove = (text: string, pos: number, dir: -1 | 1) => number | null;
@@ -101,6 +114,18 @@ export function stepPoint(
   const prevId = idx > 0 ? order[idx - 1] : null;
   const nextId = idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null;
   switch (dir) {
+    case "lineStart":
+      return { id: point.id, offset: text.lastIndexOf("\n", offset - 1) + 1 };
+    case "lineEnd": {
+      const end = text.indexOf("\n", offset);
+      return { id: point.id, offset: end === -1 ? text.length : end };
+    }
+    case "docStart":
+      return { id: order[0] ?? point.id, offset: 0 };
+    case "docEnd": {
+      const last = order[order.length - 1] ?? point.id;
+      return { id: last, offset: textOf(last).length };
+    }
     case "left":
       if (offset > 0) return { id: point.id, offset: charStep(text, offset, -1) };
       return prevId ? { id: prevId, offset: textOf(prevId).length } : { id: point.id, offset };
@@ -249,4 +274,65 @@ export function rangeToPlainText(
       text.split("\n").map((line) => (line === "" ? "" : "  ".repeat(depth - base) + line))
     )
     .join("\n");
+}
+
+/**
+ * Replace a range with `insert` (empty = delete it) — what typing, Backspace,
+ * cut and paste do over a selection. The rule is the plain-text reading's:
+ * the covered text goes, the start node's head and the end node's tail join
+ * into one line on the start node (which keeps its id and depth), and every
+ * line after the range keeps its own indentation, so it hangs under whatever
+ * shallower line now precedes it — exactly what deleting those characters
+ * from the copied text and pasting it back would build. Nodes wholly inside
+ * the range go, including the hidden descendants of a collapsed node the
+ * range runs past (they are part of what a copy of the range holds).
+ *
+ * Returns the new document and where the caret lands (after `insert`).
+ */
+export function replaceRange(
+  doc: MindMapDocument,
+  range: TextRange,
+  textOf: TextOf,
+  insert: string
+): { doc: MindMapDocument; caret: TextPoint } {
+  const { start, end } = orderedRange(doc, range);
+  const head = textOf(start.id).slice(0, start.offset);
+  const tail = textOf(end.id).slice(end.offset);
+  const caret = { id: start.id, offset: head.length + insert.length };
+
+  // Every node as a line: depth-first, hidden subtrees included.
+  const lines: { node: MindMapModel; depth: number }[] = [];
+  const walk = (n: MindMapModel, depth: number) => {
+    lines.push({ node: n, depth });
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  doc.roots.forEach((r) => walk(r, 0));
+  const i = lines.findIndex((l) => l.node.id === start.id);
+  const j = lines.findIndex((l) => l.node.id === end.id);
+  if (i === -1 || j === -1) return { doc, caret };
+
+  const joined: MindMapModel = { ...lines[i].node, text: head + insert + tail };
+  // Lines after the range may come to hang under the joined line; it must be
+  // open to show them (the nesting rule of nestUnder).
+  if (i !== j) delete joined.collapsed;
+  const kept = [
+    ...lines.slice(0, i),
+    { node: joined, depth: lines[i].depth },
+    ...lines.slice(j + 1),
+  ];
+
+  // Rebuild from indentation: each line hangs under the nearest preceding
+  // shallower line (textToNodes' rule), so an untouched region rebuilds as
+  // it was.
+  const roots: MindMapModel[] = [];
+  const stack: { children: MindMapModel[]; depth: number }[] = [{ children: roots, depth: -1 }];
+  for (const { node, depth } of kept) {
+    while (stack[stack.length - 1].depth >= depth) stack.pop();
+    const copy: MindMapModel = { ...node, children: [] };
+    // Only a root carries a canvas position.
+    if (stack.length > 1) delete copy.position;
+    stack[stack.length - 1].children.push(copy);
+    stack.push({ children: copy.children, depth });
+  }
+  return { doc: { ...doc, roots }, caret };
 }

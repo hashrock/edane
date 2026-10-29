@@ -25,6 +25,13 @@ export interface TextInputHandlers {
   handleCompositionEnd: () => void;
   handleSelect: () => void;
   handleUrlChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  /**
+   * Write the edit buffer and caret into the textarea right now, instead of
+   * on the next render. For a key whose native action still runs after the
+   * handler (an IME's first keydown) and must find the textarea already
+   * showing what the reducer just made of it.
+   */
+  syncInputNow: (view: { editingText: string; cursorPos: number; selectionEnd: number }) => void;
 }
 
 export function useTextInputHandlers(
@@ -101,8 +108,16 @@ export function useTextInputHandlers(
     [dispatch, noteId, saveNote, stateRef, undoManagerRef]
   );
 
+  const syncInputNow = useCallback<TextInputHandlers["syncInputNow"]>((view) => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (el.value !== view.editingText) el.value = view.editingText;
+    el.setSelectionRange(view.cursorPos, view.selectionEnd);
+  }, []);
+
   return {
     inputRef,
+    syncInputNow,
     isComposing,
     isComposingRef,
     handleInputChange,

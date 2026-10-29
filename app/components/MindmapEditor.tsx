@@ -134,6 +134,7 @@ import type { EditorState, ViewState } from "../application/editorReducer";
 import {
   buildKeymap,
   runKeymap,
+  isImeKey,
   activeNode,
   type KeyBinding,
 } from "../application/editorKeymap";
@@ -484,6 +485,7 @@ export function MindmapEditorView({
     handleCompositionEnd,
     handleSelect,
     handleUrlChange,
+    syncInputNow,
   } = useTextInputHandlers(engine);
 
   // Custom nodes (image / link) keep their rendered preview while editing and
@@ -1062,10 +1064,17 @@ export function MindmapEditorView({
   const handleCut = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const st = stateRef.current;
-      // Cutting a cross-node range (deleting across nodes) is not supported
-      // yet; never let the textarea cut just the anchor's part.
-      if (st.view.textRange) {
+      // A cross-node range: its text goes to the clipboard and the range
+      // out of the document — never just the anchor's part, which is all the
+      // textarea holds.
+      const range = st.view.textRange;
+      if (range) {
         e.preventDefault();
+        if (readOnly) return;
+        const textOf = rangeTextOf(st.document.model, st.view.activeNodeId, st.view.editingText);
+        e.clipboardData.setData("text/plain", rangeToPlainText(st.document.model, range, textOf));
+        const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
+        if (noteId && next.document.model !== st.document.model) saveNote(next.document.model);
         return;
       }
       if (st.view.editing && hasTextRange(st)) return; // native text cut
@@ -1082,15 +1091,22 @@ export function MindmapEditorView({
       if (noteId && next.document.model !== st.document.model)
         saveNote(next.document.model);
     },
-    [dispatch, noteId, saveNote]
+    [dispatch, noteId, saveNote, readOnly]
   );
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      // Replacing a cross-node range is not supported yet (see handleCut).
-      if (readOnly || stateRef.current.view.textRange) {
+      if (readOnly) {
         e.preventDefault();
         return;
+      }
+      // Pasting over a cross-node range: the range goes first, then this is
+      // an ordinary paste at the caret it leaves (the textarea must already
+      // hold the joined text for the native paste to land in it).
+      if (stateRef.current.view.textRange) {
+        const next = dispatch({ type: "replaceTextRange", text: "" }, "replace-range");
+        syncInputNow(next.view);
+        if (noteId) saveNote(next.document.model);
       }
       // Pasting an image file into an empty node uploads it and turns the node
       // into an image. (Non-empty nodes fall through to normal text paste.)
@@ -1152,7 +1168,7 @@ export function MindmapEditorView({
       }
       return assertNever(plan);
     },
-    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage]
+    [runPaste, pasteTextAsNodes, readOnly, uploadAndSetImage, dispatch, syncInputNow, noteId, saveNote]
   );
 
   // Resolve the Markdown paste dialog with one of the three strategies.
@@ -1715,10 +1731,13 @@ export function MindmapEditorView({
         },
         prefs
       );
-      if (outcome.result === "handled") e.preventDefault();
-      applyKeyEffects(outcome.effects, state, keyDeps);
+      const ime = isImeKey(e);
+      if (outcome.result === "handled" && !ime) e.preventDefault();
+      const next = applyKeyEffects(outcome.effects, state, keyDeps);
+      // The composition starts in the textarea right after this handler.
+      if (ime && next !== state) syncInputNow(next.view);
     },
-    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs]
+    [isComposing, keymap, keyDeps, helpOpen, settingsOpen, prefs, syncInputNow]
   );
 
   // --- Guest mode: hand the current document off to be saved to an account ---

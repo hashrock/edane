@@ -172,6 +172,7 @@ const KINDS = {
   typeText: true,
   setSelection: true,
   setTextRange: true,
+  replaceTextRange: true,
   copyBranch: true,
   cutBranch: true,
   pasteBranch: true,
@@ -324,6 +325,8 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       };
     case "setSelection":
       return { type: kind, cursorPos: pos(a), selectionEnd: pos(b) };
+    case "replaceTextRange":
+      return { type: kind, text: flag ? "" : text };
     case "setTextRange": {
       // What Shift+arrows produce: anchored on the active node, the focus in
       // any visible node. Usually a no-op outside editing, as in the app.

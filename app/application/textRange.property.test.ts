@@ -7,12 +7,20 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { getFlatOrder, type MindMapDocument, type MindMapModel } from "../domain/model";
-import { modelArb, pick, sequentialIds, uncollapsedDocument } from "../domain/model.arb";
+import { expectUniqueIds, modelArb, pick, sequentialIds, uncollapsedDocument } from "../domain/model.arb";
 import { textToNodes } from "./persistence";
 import { activeNode, runKeymap, type KeymapKeyEvent } from "./editorKeymap";
 import { editorReducer } from "./editorReducer";
 import { editorStateAt, keymapFor, layoutArb, prefsArb } from "./editorState.arb";
-import { rangeTextOf, rangeToPlainText, stepPoint, type VerticalMove } from "./textRange";
+import {
+  orderedRange,
+  rangeTextOf,
+  rangeToPlainText,
+  replaceRange,
+  stepPoint,
+  type TextPoint,
+  type VerticalMove,
+} from "./textRange";
 
 const lines: VerticalMove = (text, pos, dir) => {
   const parts = text.split("\n");
@@ -91,6 +99,68 @@ describe("the plain-text reading", () => {
         );
         expect(textToNodes(text, sequentialIds()).map(shape)).toEqual(model.roots.map(shape));
       })
+    );
+  });
+});
+
+/** The whole document as text (hidden subtrees too) and where each node's text starts in it. */
+function fullText(doc: MindMapDocument): { text: string; startOf: Map<string, number> } {
+  const lines: string[] = [];
+  const startOf = new Map<string, number>();
+  let at = 0;
+  const walk = (n: MindMapModel, depth: number) => {
+    const indent = "  ".repeat(depth);
+    startOf.set(n.id, at + indent.length);
+    lines.push(indent + n.text);
+    at += indent.length + n.text.length + 1;
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  doc.roots.forEach((r) => walk(r, 0));
+  return { text: lines.join("\n"), startOf };
+}
+
+describe("replacing a range is editing the plain text", () => {
+  it("replaceRange ≡ replacing the same characters in the outline text and reading it back", () => {
+    fc.assert(
+      fc.property(
+        modelArb,
+        fc.nat(),
+        fc.nat(),
+        fc.nat(),
+        fc.nat(),
+        fc.stringMatching(/^[a-z]{0,3}$/),
+        (generated, n1, o1, n2, o2, insert) => {
+          const model = asPlainLines(generated);
+          const order = getFlatOrder(model);
+          const t = textOf(model);
+          const point = (n: number, o: number): TextPoint => {
+            const id = pick(order, n);
+            return { id, offset: o % (t(id).length + 1) };
+          };
+          const range = { anchor: point(n1, o1), focus: point(n2, o2) };
+          const { start, end } = orderedRange(model, range);
+          const joined = t(start.id).slice(0, start.offset) + insert + t(end.id).slice(end.offset);
+          fc.pre(joined !== ""); // a blank line reads back as no node at all
+
+          const { doc, caret } = replaceRange(model, range, t, insert);
+          const { text, startOf } = fullText(model);
+          const a = startOf.get(start.id)! + start.offset;
+          const b = startOf.get(end.id)! + end.offset;
+          const edited = text.slice(0, a) + insert + text.slice(b);
+          expect(doc.roots.map(shape)).toEqual(textToNodes(edited, sequentialIds()).map(shape));
+
+          // Still a well-formed document; the caret sits after the insert.
+          expectUniqueIds(doc);
+          const nested = (n: MindMapModel): void =>
+            n.children.forEach((c) => {
+              expect(c.position).toBeUndefined();
+              nested(c);
+            });
+          doc.roots.forEach(nested);
+          expect(caret).toEqual({ id: start.id, offset: start.offset + insert.length });
+          expect(getFlatOrder(doc)).toContain(start.id);
+        }
+      )
     );
   });
 });
