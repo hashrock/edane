@@ -209,11 +209,12 @@ export type EditorAction =
   // --- branch clipboard ---
   | { type: "copyBranch" }
   | { type: "cutBranch" }
-  // Paste a branch as a child of the active node. Without `node`, the internal
-  // clipboard (set by copyBranch/cutBranch) is used; with `node`, that explicit
-  // subtree is pasted instead (an external branch decoded from the system
-  // clipboard) and the internal clipboard is left untouched.
-  | { type: "pasteBranch"; node?: MindMapModel }
+  // Paste branches as the last children of the active node, in order. Without
+  // `nodes`, the internal clipboard (set by copyBranch/cutBranch) is used;
+  // with `nodes`, those explicit subtrees are pasted instead (branches decoded
+  // from the system clipboard — several when a multi-selection was copied)
+  // and the internal clipboard is left untouched.
+  | { type: "pasteBranch"; nodes?: MindMapModel[] }
   // --- pointer ---
   | {
       type: "activateNode";
@@ -503,20 +504,24 @@ function documentReducer(
 
     case "pasteBranch": {
       const { model, clipboard } = document;
-      // An explicit `node` (external clipboard) takes priority; otherwise fall
+      // Explicit `nodes` (external clipboard) take priority; otherwise fall
       // back to the internal branch clipboard.
-      const source = action.node ?? clipboard;
-      if (!activeNodeId || !source) return { document };
-      const target = findNode(model, activeNodeId);
-      if (!target) return { document };
-      const fresh = cloneWithNewIds(source, nextId);
+      const sources = action.nodes ?? (clipboard ? [clipboard] : []);
+      if (!activeNodeId || sources.length === 0) return { document };
+      if (!findNode(model, activeNodeId)) return { document };
       // addChildToNode expands the target (see nestUnder), so the pasted
-      // child is visible.
-      const newModel = addChildToNode(model, activeNodeId, fresh);
+      // children are visible. The last one takes the focus.
+      let newModel = model;
+      let focusId = activeNodeId;
+      for (const source of sources) {
+        const fresh = cloneWithNewIds(source, nextId);
+        newModel = addChildToNode(newModel, activeNodeId, fresh);
+        focusId = fresh.id;
+      }
       // Keep the clipboard so the branch can be pasted again.
       return {
         document: { model: newModel, clipboard },
-        focusId: fresh.id,
+        focusId,
       };
     }
 

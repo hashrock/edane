@@ -35,10 +35,11 @@ export type PasteSource =
   /** External Markdown, with the strategy chosen in the paste dialog. */
   | { kind: "markdown"; text: string; mode: "decompose" | "node" | "plain" }
   /**
-   * An edane branch: the clipboard's own subtree, or (absent) the internal
-   * branch clipboard filled by copyBranch / cutBranch.
+   * edane branches: the clipboard's own subtrees (several when a
+   * multi-selection was copied), or (absent) the internal branch clipboard
+   * filled by copyBranch / cutBranch.
    */
-  | { kind: "branch"; node?: MindMapModel };
+  | { kind: "branch"; nodes?: MindMapModel[] };
 
 interface PasteOptions {
   /** Node the paste lands on (default: the active node, else the first). */
@@ -76,13 +77,12 @@ export function pasteCommand(
   const targetId = opts.targetId ?? pasteTarget(state);
 
   if (source.kind === "branch") {
-    const node = source.node ?? state.document.clipboard;
-    if (!node) return null;
+    if (source.nodes ? source.nodes.length === 0 : !state.document.clipboard) return null;
     return [
-      // `node` present = the clipboard's own subtree; absent = the internal
+      // `nodes` present = the clipboard's own subtrees; absent = the internal
       // branch clipboard (the reducer reads it and clones with fresh ids), so
-      // the pasted node's id is only known afterwards: flash the active one.
-      { kind: "dispatch", action: { type: "pasteBranch", node: source.node }, undoType: "paste-branch" },
+      // the pasted ids are only known afterwards: flash the active node.
+      { kind: "dispatch", action: { type: "pasteBranch", nodes: source.nodes }, undoType: "paste-branch" },
       { kind: "flash", ids: "active" },
       { kind: "save" },
     ];

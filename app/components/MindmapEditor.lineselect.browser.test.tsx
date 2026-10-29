@@ -36,8 +36,7 @@ async function waitFor<T>(fn: () => T | null | undefined | false): Promise<T> {
 
 const input = () => document.querySelector<HTMLTextAreaElement>('textarea[style*="caret-color"]')!;
 
-function clipboardEvent(type: "copy" | "cut"): DataTransfer {
-  const dt = new DataTransfer();
+function clipboardEvent(type: "copy" | "cut" | "paste", dt = new DataTransfer()): DataTransfer {
   input().dispatchEvent(new ClipboardEvent(type, { clipboardData: dt, bubbles: true, cancelable: true }));
   return dt;
 }
@@ -89,5 +88,28 @@ describe("selecting whole nodes with Shift+↑/↓", () => {
     await userEvent.keyboard("{Delete}");
     // The last root can't go: a blank one takes its place.
     await waitFor(() => api().getModel().roots.length === 1 && api().getModel().roots[0].text === "");
+  });
+
+  it("pasting a copied selection brings every branch, not an earlier single copy", async () => {
+    render(<MindmapEditor initialContent={JSON.stringify({ version: 2, roots: ROOTS })} initialTitle="T" />);
+    await waitFor(() => api().getActiveNodeId() === "a");
+    await waitFor(() => api().getRedrawStats().redrawCount > 0);
+    input().focus();
+    // An earlier single copy leaves "a" in the internal branch clipboard.
+    clipboardEvent("copy");
+
+    // Select a … b (outermost branches: a with its child, and b) and copy.
+    await userEvent.keyboard("{Shift>}{ArrowDown}{ArrowDown}{/Shift}");
+    await waitFor(() => api().getSelection().selectedIds.length === 3);
+    const copied = clipboardEvent("copy");
+
+    // Onto b (↓ ends the selection), paste: both branches land under it.
+    await userEvent.keyboard("{ArrowDown}");
+    await waitFor(() => api().getActiveNodeId() === "b");
+    clipboardEvent("paste", copied);
+    const b = () => api().getModel().roots.find((r) => r.id === "b")!;
+    await waitFor(() => b().children.length === 2);
+    expect(b().children.map((c) => c.text)).toEqual(["Alpha", "Bravo"]);
+    expect(b().children[0].children.map((c) => c.text)).toEqual(["One"]);
   });
 });

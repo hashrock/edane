@@ -40,7 +40,9 @@ import type { EditorLayout } from "./editSurface";
  */
 export const branchPasteSourceArb: fc.Arbitrary<
   Extract<PasteSource, { kind: "branch" }>
-> = fc.option(nodeArb, { nil: undefined }).map((node) => ({ kind: "branch", node }));
+> = fc
+  .option(fc.array(nodeArb, { minLength: 1, maxLength: 2 }), { nil: undefined })
+  .map((nodes) => ({ kind: "branch", nodes }));
 
 /**
  * An editor state with `nodeId` active. `pos` may be any natural (an
@@ -324,7 +326,7 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
     case "setSelection":
       return { type: kind, cursorPos: pos(a), selectionEnd: pos(b) };
     case "pasteBranch":
-      return flag ? { type: kind } : { type: kind, node: cloneWithNewIds(step.branch, mint) };
+      return flag ? { type: kind } : { type: kind, nodes: [cloneWithNewIds(step.branch, mint)] };
     case "activateNode": {
       const nodeId = vis(a);
       const t = textOf(nodeId);

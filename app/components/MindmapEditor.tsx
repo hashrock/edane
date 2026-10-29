@@ -24,6 +24,7 @@ import {
 import {
   checkboxMenuTargets,
   nextMultiSelection,
+  outermostBranches,
   planGroupCheckToggle,
   planGroupCollapse,
   selectionToText,
@@ -35,8 +36,8 @@ import { assertNever } from "../lib/assertNever";
 import { markdownTitle, markdownLineCount } from "../application/markdownCard";
 import {
   BRANCH_MIME,
-  serializeBranch,
-  parseBranch,
+  serializeBranches,
+  parseBranches,
 } from "../application/branchClipboard";
 import ViewControls, { type PageModeToggle } from "./ViewControls";
 import { pageMarkColor, type PageMarks } from "./pageMarks";
@@ -332,16 +333,23 @@ export interface RedrawStats {
 }
 
 /**
- * Copy / cut of a multi-selection: its text, one indented block per selected
- * branch (selectionToText, as the context menu's copy), goes to the
- * clipboard. Returns the selected ids (the cut deletes them), or null when
- * there is no multi-selection and the event is someone else's.
+ * Copy / cut of a multi-selection, as for one branch: text for other apps —
+ * one indented block per selected branch (selectionToText, as the context
+ * menu's copy) — plus every selected branch as full-fidelity JSON, so a paste
+ * back into edane brings them all (it wins over the internal clipboard, which
+ * holds a single branch). Returns the selected ids (the cut deletes them), or
+ * null when there is no multi-selection and the event is someone else's.
  */
 function copySelection(e: React.ClipboardEvent, st: EditorState): string[] | null {
   const ids = st.view.selectedIds;
   if (!ids || ids.length < 2) return null;
   e.preventDefault();
-  e.clipboardData.setData("text/plain", selectionToText(st.document.model, ids));
+  const { model } = st.document;
+  const branches = outermostBranches(model, ids)
+    .map((id) => findNode(model, id))
+    .filter((n) => n !== null);
+  e.clipboardData.setData("text/plain", selectionToText(model, ids));
+  e.clipboardData.setData(BRANCH_MIME, serializeBranches(branches));
   return ids;
 }
 
@@ -1056,7 +1064,7 @@ export function MindmapEditorView({
       : null;
     if (node) {
       e.clipboardData.setData("text/plain", modelToMarkdown(node));
-      e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+      e.clipboardData.setData(BRANCH_MIME, serializeBranches([node]));
     }
   }, [dispatch]);
 
@@ -1077,7 +1085,7 @@ export function MindmapEditorView({
         : null;
       if (node) {
         e.clipboardData.setData("text/plain", modelToMarkdown(node));
-        e.clipboardData.setData(BRANCH_MIME, serializeBranch(node));
+        e.clipboardData.setData(BRANCH_MIME, serializeBranches([node]));
       }
       const next = dispatch({ type: "cutBranch" }, "cut-branch");
       if (noteId && next.document.model !== st.document.model)
@@ -1112,14 +1120,14 @@ export function MindmapEditorView({
       // An edane branch on the system clipboard carries full-fidelity JSON in a
       // custom MIME alongside its Markdown text/plain, so the JSON's presence
       // means "this is our own branch" (even across tabs).
-      const jsonBranch = parseBranch(e.clipboardData.getData(BRANCH_MIME));
+      const jsonBranches = parseBranches(e.clipboardData.getData(BRANCH_MIME));
 
       // Which of the paste flavours applies is a pure decision — including the
       // rule that editing mode always means a plain text paste at the caret.
       const plan = planPaste({
         editing: st.view.editing,
         text,
-        hasBranchJson: !!jsonBranch,
+        hasBranchJson: !!jsonBranches,
         hasInternalClipboard: !!st.document.clipboard,
       });
 
@@ -1129,11 +1137,11 @@ export function MindmapEditorView({
       e.preventDefault();
 
       if (plan === "branch-json" || plan === "branch-clipboard") {
-        // `node` present = the clipboard's own subtree; absent = the internal
-        // branch clipboard (see the reducer's pasteBranch).
+        // `nodes` present = the clipboard's own subtrees; absent = the
+        // internal branch clipboard (see the reducer's pasteBranch).
         runPaste({
           kind: "branch",
-          node: plan === "branch-json" ? (jsonBranch ?? undefined) : undefined,
+          nodes: plan === "branch-json" ? (jsonBranches ?? undefined) : undefined,
         });
         return;
       }
