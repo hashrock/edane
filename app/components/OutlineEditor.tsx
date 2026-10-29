@@ -13,10 +13,6 @@ import type { UndoType } from "../application/editorReducer";
 import { pasteCommand } from "../application/editorCommands";
 import { serializeDocument } from "../application/persistence";
 import { outlineRows, verticalMoveInText } from "../application/outline";
-import {
-  rangeSegments,
-  rangeTextOf,
-} from "../application/textRange";
 import { supportsCheckbox } from "../application/nodeUtils";
 import {
   buildKeymap,
@@ -67,9 +63,6 @@ interface Props {
   pageMarks?: PageMarks;
 }
 
-// Background of the part of a row a cross-node selection covers.
-const RANGE_HIGHLIGHT = "bg-sky-200/70";
-
 // Indent per outline level (px). Kept modest so deep trees stay readable on a
 // narrow screen.
 const INDENT = 18;
@@ -119,17 +112,10 @@ export default function OutlineEditor({
   } = engine;
 
   const {
-    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd, textRange },
+    view: { activeNodeId, editing, editingText, cursorPos, selectionEnd },
   } = state;
 
   const rows = useMemo(() => outlineRows(model), [model]);
-  // The rows a cross-node selection covers, with the covered part of each
-  // (the anchor row's part is the textarea's own selection).
-  const rangeView = useMemo(() => {
-    if (!textRange) return null;
-    const texts = rangeTextOf(model, activeNodeId, editingText);
-    return { texts, segments: rangeSegments(model, textRange, texts) };
-  }, [model, textRange, activeNodeId, editingText]);
   // The root is the note title (edited in the header); it is not an outline
   // row — the rows start at the top-level nodes. See outlineRows().
   const title = model.title;
@@ -152,8 +138,6 @@ export default function OutlineEditor({
     handleCompositionEnd,
     handleSelect,
     handleUrlChange,
-    syncInputNow,
-    handleRangeClipboard,
   } = useTextInputHandlers(engine);
 
   // --- Refs ---
@@ -184,9 +168,8 @@ export default function OutlineEditor({
       present: onPresent,
       undo,
       redo,
-      syncInput: syncInputNow,
     }),
-    [dispatch, saveNote, undo, redo, onPresent, syncInputNow]
+    [dispatch, saveNote, undo, redo, onPresent]
   );
 
   const handleKeyDown = useCallback(
@@ -199,7 +182,6 @@ export default function OutlineEditor({
         node: activeNode(st),
         pos: inputRef.current?.selectionStart || 0,
         selEnd: inputRef.current?.selectionEnd || 0,
-        backward: inputRef.current?.selectionDirection === "backward",
       });
       if (outcome.result === "handled") e.preventDefault();
       applyKeyEffects(outcome.effects, st, keyDeps);
@@ -208,14 +190,11 @@ export default function OutlineEditor({
   );
 
   // Paste of multi-line (indented) text becomes fresh nodes; single-line text
-  // is left to the native textarea. Over a selection across nodes, the paste
-  // replaces it (handleRangeClipboard, which also takes copy / cut).
+  // is left to the native textarea.
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const text = e.clipboardData.getData("text");
-      const asNodes = !!text && text.includes("\n");
-      if (handleRangeClipboard(e, { pasteAsNodes: asNodes })) return;
-      if (!asNodes) return;
+      if (!text || !text.includes("\n")) return;
       e.preventDefault();
       const st = stateRef.current;
       // Same effects as the canvas (application/editorCommands.ts): insert,
@@ -223,7 +202,7 @@ export default function OutlineEditor({
       const effects = pasteCommand(st, { kind: "text", text });
       if (effects) applyKeyEffects(effects, st, keyDeps);
     },
-    [keyDeps, stateRef, handleRangeClipboard]
+    [keyDeps, stateRef]
   );
 
   // --- Row activation ---
@@ -269,7 +248,8 @@ export default function OutlineEditor({
   useEffect(() => {
     const el = inputRef.current;
     if (!el || !bodyActive || isComposingRef.current) return;
-    syncInputNow({ editingText, cursorPos, selectionEnd });
+    if (el.value !== editingText) el.value = editingText;
+    el.setSelectionRange(cursorPos, selectionEnd);
     el.focus();
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
@@ -456,12 +436,6 @@ export default function OutlineEditor({
                 node.checked !== undefined && supportsCheckbox(type);
               const isDone = node.checked === true;
               const displayText = isEditingThis ? editingText : node.text;
-              // The anchor row's part shows as the textarea's own selection.
-              const rangeSeg = isEditingThis ? undefined : rangeView?.segments.get(node.id);
-              // A row the range takes whole (image, link, markdown) has no
-              // characters to mark: the range covers all of it, or none.
-              const rangeWhole =
-                !!rangeSeg && rangeView!.texts.atomic(node.id) && rangeSeg.to > rangeSeg.from;
               // The slide this row went to, tinted in its colour for a moment
               // after its branch's split choice changes (see pageMarks).
               const mark = pageMarks?.get(node.id);
@@ -558,9 +532,7 @@ export default function OutlineEditor({
                     <div
                       ref={isEditingThis ? activeRowRef : null}
                       onClick={() => activateRow(node.id)}
-                      className={`min-w-0 flex-1 cursor-text py-0.5 ${
-                        rangeWhole ? `rounded-lg ${RANGE_HIGHLIGHT}` : ""
-                      }`}
+                      className="min-w-0 flex-1 cursor-text py-0.5"
                     >
                       {type === "markdown" && !isEditingThis && node.text.trim() !== "" ? (
                         // A markdown node shows its rendered document, as the
@@ -605,20 +577,7 @@ export default function OutlineEditor({
                             ? node.linkTitle || node.text || "empty"
                             : isEmpty
                               ? t("emptyItem")
-                              : rangeSeg && !rangeWhole && rangeSeg.to > rangeSeg.from
-                                ? <>
-                                    {displayText.slice(0, rangeSeg.from)}
-                                    <span data-testid="range-highlight" className={RANGE_HIGHLIGHT}>
-                                      {displayText.slice(rangeSeg.from, rangeSeg.to)}
-                                    </span>
-                                    {displayText.slice(rangeSeg.to)}
-                                  </>
-                                : displayText}
-                          {/* The range runs on past this row: mark its line
-                              break, so empty rows and line ends show too. */}
-                          {rangeSeg?.breaks && (
-                            <span className={`${RANGE_HIGHLIGHT} inline-block w-1.5`}>&#8203;</span>
-                          )}
+                              : displayText}
                         </span>
                       )}
                       {collapsed && hasChildren && (
@@ -682,15 +641,10 @@ export default function OutlineEditor({
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
-            onCopy={handleRangeClipboard}
-            onCut={handleRangeClipboard}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
-            className={`absolute resize-none overflow-hidden border-0 bg-transparent py-0.5 leading-6 text-slate-900 outline-none ${
-              // The anchor's part of a range in the same colour as the rest.
-              textRange ? "selection:bg-sky-200/70 selection:text-slate-900" : ""
-            }`}
+            className="absolute resize-none overflow-hidden border-0 bg-transparent py-0.5 leading-6 text-slate-900 outline-none"
             style={{
               top: overlay.top,
               left: overlay.left,

@@ -20,15 +20,8 @@ import {
 } from "../domain/model";
 import { modelArb, nodeArb, nodeIds, pick } from "../domain/model.arb";
 import { assertNever } from "../lib/assertNever";
-import { editorReducer, freshEditorState, type EditorAction, type EditorState } from "./editorReducer";
-import {
-  activeNode,
-  buildKeymap,
-  runKeymap,
-  type KeyBinding,
-  type KeymapKeyEvent,
-  type KeyOutcome,
-} from "./editorKeymap";
+import { freshEditorState, type EditorAction, type EditorState } from "./editorReducer";
+import { buildKeymap, type KeyBinding } from "./editorKeymap";
 import type { PasteSource } from "./editorCommands";
 import {
   ARROW_BEHAVIORS,
@@ -147,28 +140,6 @@ export function keymapFor(prefs: EditorPreferences, layout: EditorLayout): KeyBi
   return bindings;
 }
 
-/**
- * Press one key the way the views do: run the keymap with the textarea's
- * selection mirroring the view, then feed its dispatches to the reducer.
- */
-export function pressKey(
-  bindings: KeyBinding[],
-  state: EditorState,
-  e: KeymapKeyEvent,
-  prefs?: EditorPreferences
-): { state: EditorState; outcome: KeyOutcome } {
-  const outcome = runKeymap(
-    bindings,
-    { e, state, node: activeNode(state), pos: state.view.cursorPos, selEnd: state.view.selectionEnd },
-    prefs
-  );
-  let next = state;
-  for (const f of outcome.effects) {
-    if (f.kind === "dispatch") next = editorReducer(next, f.action);
-  }
-  return { state: next, outcome };
-}
-
 // --- Random action sequences ---
 
 /**
@@ -200,8 +171,6 @@ const KINDS = {
   moveToChild: true,
   typeText: true,
   setSelection: true,
-  setTextRange: true,
-  replaceTextRange: true,
   copyBranch: true,
   cutBranch: true,
   pasteBranch: true,
@@ -354,21 +323,6 @@ export function resolveStep(step: ActionStep, state: EditorState, mint: IdSource
       };
     case "setSelection":
       return { type: kind, cursorPos: pos(a), selectionEnd: pos(b) };
-    case "replaceTextRange":
-      return { type: kind, text: flag ? "" : text };
-    case "setTextRange": {
-      // What Shift+arrows produce: anchored on the active node, the focus in
-      // any visible node. Usually a no-op outside editing, as in the app.
-      const anchorId = state.view.activeNodeId ?? vis(a);
-      const focusId = vis(b);
-      return {
-        type: kind,
-        range: {
-          anchor: { id: anchorId, offset: pos(a) },
-          focus: { id: focusId, offset: pos(c, textOf(focusId)) },
-        },
-      };
-    }
     case "pasteBranch":
       return flag ? { type: kind } : { type: kind, node: cloneWithNewIds(step.branch, mint) };
     case "activateNode": {

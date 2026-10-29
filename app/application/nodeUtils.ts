@@ -72,26 +72,6 @@ export function supportsCheckbox(type: NodeType): boolean {
 }
 
 /**
- * Whether a kind is drawn as its own raw `text`, so a text selection can
- * address its characters one by one. An image or link node draws a picture /
- * title for a URL, a markdown node a rendered card: a selection takes those
- * whole or not at all (application/textRange.ts), and the views mark the
- * whole box. Exhaustive over `NodeType`, like {@link supportsCheckbox}.
- */
-export function drawsOwnText(type: NodeType): boolean {
-  switch (type) {
-    case "text":
-      return true;
-    case "image":
-    case "link":
-    case "markdown":
-      return false;
-    default:
-      return assertNever(type);
-  }
-}
-
-/**
  * Width the checkbox takes out of a node's content column (0 when the node
  * isn't a task, or is a kind that shows no box). Like {@link FAVICON_SIZE}'s
  * column it is chrome drawn INSIDE the box, so the cap subtracts it and the

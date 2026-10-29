@@ -70,7 +70,6 @@ import {
 } from "../domain/model";
 import type { PageTheme } from "../domain/pageTheme";
 import { assertNever } from "../lib/assertNever";
-import { anchorSegment, clampPoint, rangeTextOf, replaceRange, type TextRange } from "./textRange";
 
 export interface DocumentState {
   model: MindMapDocument;
@@ -120,20 +119,6 @@ export interface ViewState {
    * `setSelection`, which is only the textarea reporting its own caret.
    */
   selectedIds?: string[];
-  /**
-   * A text selection that crosses node boundaries (Shift+arrows past a
-   * node's edge — see application/textRange.ts). Absent means the selection
-   * is just `cursorPos`/`selectionEnd` inside the active node. While present,
-   * `range.anchor.id` is the active node being edited and `cursorPos`/
-   * `selectionEnd` hold the anchor's covered segment, so the textarea draws
-   * its own part of the range.
-   *
-   * Only `setTextRange` sets it, and every other action clears it (once, at
-   * the tail of {@link editorReducer}, like `selectedIds`) — except a
-   * `setSelection` that only echoes the segment back, which is the textarea
-   * reporting the selection we just gave it.
-   */
-  textRange?: TextRange;
 }
 
 export interface EditorState {
@@ -158,7 +143,6 @@ export type UndoType =
   | "insert-sibling"
   | "indent"
   | "backspace"
-  | "replace-range"
   | "enter"
   | "image-upload"
   | "style"
@@ -222,13 +206,6 @@ export type EditorAction =
       commitModel: boolean;
     }
   | { type: "setSelection"; cursorPos: number; selectionEnd: number }
-  // Shift+arrows across a node boundary: the new cross-node selection. The
-  // anchor must be the node being edited; otherwise this is a no-op.
-  | { type: "setTextRange"; range: TextRange }
-  // Replace the live cross-node range with `text` ("" deletes it): typing,
-  // Backspace / Delete, cut and paste over a range (textRange.replaceRange).
-  // A no-op without a range.
-  | { type: "replaceTextRange"; text: string }
   // --- branch clipboard ---
   | { type: "copyBranch" }
   | { type: "cutBranch" }
@@ -350,7 +327,7 @@ function documentReducer(
   action: EditorAction,
   // The view facts a document edit may depend on (which node, and whether it
   // is being edited) — one context rather than a positional flag per fact.
-  view: Pick<ViewState, "activeNodeId" | "editing" | "editingText" | "textRange">,
+  view: Pick<ViewState, "activeNodeId" | "editing">,
   nextId: IdSource
 ): DocumentResult {
   const { activeNodeId, editing } = view;
@@ -395,18 +372,6 @@ function documentReducer(
         focusId: result.newNodeId,
         focusCursorPos: 0,
         focusSelectionEnd: 0,
-      };
-    }
-
-    case "replaceTextRange": {
-      if (!view.textRange) return { document };
-      const textOf = rangeTextOf(document.model, activeNodeId, view.editingText);
-      const { doc, caret } = replaceRange(document.model, view.textRange, textOf, action.text);
-      return {
-        document: { ...document, model: doc },
-        focusId: caret.id,
-        focusCursorPos: caret.offset,
-        focusSelectionEnd: caret.offset,
       };
     }
 
@@ -818,7 +783,6 @@ function documentReducer(
     case "arrowLeftEdge":
     case "arrowRightEdge":
     case "setSelection":
-    case "setTextRange":
     case "activateNode":
     case "startEditing":
     case "selectAllInNode":
@@ -926,11 +890,6 @@ function keepsSelection(type: EditorAction["type"]): boolean {
   );
 }
 
-/** Identity-preserving: only allocates when there was a range to drop. */
-function withoutTextRange(view: ViewState): ViewState {
-  return view.textRange === undefined ? view : { ...view, textRange: undefined };
-}
-
 function withCaretInBuffer(view: ViewState): ViewState {
   const len = view.editingText.length;
   const cursorPos = Math.min(Math.max(view.cursorPos, 0), len);
@@ -1008,7 +967,6 @@ function viewReducer(
     case "enter":
     case "backspaceAtStart":
     case "deleteAtEnd":
-    case "replaceTextRange":
     case "cutBranch":
     case "pasteBranch":
     case "toggleCollapse":
@@ -1233,17 +1191,6 @@ function viewReducer(
       };
     }
 
-    case "setTextRange": {
-      const { anchor, focus } = action.range;
-      if (!view.editing || view.activeNodeId !== anchor.id) return view;
-      const visible = getFlatOrder(model);
-      if (!visible.includes(focus.id)) return view;
-      const texts = rangeTextOf(model, view.activeNodeId, view.editingText);
-      const range = { anchor: clampPoint(anchor, texts), focus: clampPoint(focus, texts) };
-      const [cursorPos, selectionEnd] = anchorSegment(model, range, texts);
-      return { ...view, textRange: range, cursorPos, selectionEnd };
-    }
-
     case "activateNode": {
       const node = findNode(model, action.nodeId);
       if (!node) return view;
@@ -1463,19 +1410,6 @@ export function freshEditorState(model: MindMapDocument, activeNodeId: string): 
   };
 }
 
-/**
- * What the textarea put in place of its selection, given its new value: the
- * part between the untouched head and tail. null when the value doesn't keep
- * them (it changed somewhere else).
- */
-function insertedOver(view: ViewState, value: string): string | null {
-  const head = view.editingText.slice(0, view.cursorPos);
-  const tail = view.editingText.slice(view.selectionEnd);
-  if (value.length < head.length + tail.length) return null;
-  if (!value.startsWith(head) || !value.endsWith(tail)) return null;
-  return value.slice(head.length, value.length - tail.length);
-}
-
 // --- Reducer ---
 
 export function editorReducer(
@@ -1494,22 +1428,9 @@ export function editorReducer(
       action.state.document,
       state.document
     );
-    const view = withoutTextRange(
-      keepsSelection(action.type) ? reconciled : withoutSelection(reconciled)
-    );
+    const view = keepsSelection(action.type) ? reconciled : withoutSelection(reconciled);
     if (view === action.state.view) return action.state;
     return { document: action.state.document, view };
-  }
-
-  // Text that reaches the textarea without a key the keymap saw (dictation,
-  // autocorrect, a soft keyboard's insertText) still lands over a live range
-  // as the textarea's edit of the anchor's part. Read it as replacing the
-  // whole range, so no path can edit that part alone.
-  if (action.type === "typeText" && action.commitModel && state.view.textRange) {
-    const inserted = insertedOver(state.view, action.text);
-    if (inserted !== null) {
-      return editorReducer(state, { type: "replaceTextRange", text: inserted }, nextId);
-    }
   }
 
   const docResult = documentReducer(
@@ -1543,15 +1464,6 @@ export function editorReducer(
   if (!keepsSelection(action.type)) {
     nextView = withoutSelection(nextView);
   }
-  // Likewise the cross-node range: only setTextRange makes one, and only the
-  // textarea echoing its segment back (a setSelection that changed nothing)
-  // leaves it alone. Any other edit, move or click ends it.
-  const keepsRange =
-    action.type === "setTextRange" ||
-    (action.type === "setSelection" &&
-      nextView.cursorPos === state.view.cursorPos &&
-      nextView.selectionEnd === state.view.selectionEnd);
-  if (!keepsRange) nextView = withoutTextRange(nextView);
 
   if (docResult.document === state.document && nextView === state.view) {
     return state;

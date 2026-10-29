@@ -41,30 +41,16 @@ import type { MessageKey } from "./messages";
 import type { MindMapModel } from "../domain/model";
 import { findNode, hasStructuralSuccessor, nextCheckedState } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
-import { planGroupCheckToggle } from "./selection";
+import { extendSelection, planGroupCheckToggle } from "./selection";
 import {
   DEFAULT_PREFERENCES,
   type EditorPreferences,
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
 import { verticalMove as measuredVerticalMove } from "../lib/textGeometry";
-import {
-  beginRange,
-  orderedRange,
-  rangeTextOf,
-  stepPoint,
-  type RangeDir,
-  type TextPoint,
-} from "./textRange";
 
 export type KeyMode = "selection" | "editing";
-/**
- * "handled": the caller prevents the default. "pass": the browser handles the
- * key (no effects). "native": both — the effects run AND the browser's default
- * follows, for a key whose default can't be cancelled without losing it (an
- * IME's first key); a `syncInput` effect then readies the textarea for it.
- */
-export type KeyResult = "handled" | "pass" | "native";
+export type KeyResult = "handled" | "pass";
 
 /**
  * What a key asks the editor to do. A binding returns a list of these instead
@@ -86,12 +72,7 @@ export type KeyEffect =
   /** Start the slideshow (application/slides.ts) from the active node. */
   | { kind: "present" }
   | { kind: "undo" }
-  | { kind: "redo" }
-  /**
-   * Write the edit buffer and caret into the textarea now, not on the next
-   * render: the key's native action (a "native" outcome) runs right after.
-   */
-  | { kind: "syncInput" };
+  | { kind: "redo" };
 
 export interface KeyOutcome {
   result: KeyResult;
@@ -110,8 +91,6 @@ export interface KeymapKeyEvent {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
-  /** 229 while an IME is taking the key (its first keydown says "Process" in Chrome only). */
-  keyCode?: number;
 }
 
 /**
@@ -129,11 +108,6 @@ export interface KeyContext {
   /** Caret start / end read from the live textarea. */
   pos: number;
   selEnd: number;
-  /**
-   * The textarea's selectionDirection is "backward": `pos` is the moving end.
-   * Only Shift+arrows read it (to know where a cross-node range starts).
-   */
-  backward?: boolean;
 }
 
 export interface KeyBinding {
@@ -148,12 +122,6 @@ export interface KeyBinding {
   keys: string;
   when: "global" | "selection" | "editing" | "both";
   match: (e: KeymapKeyEvent) => boolean;
-  /**
-   * Further restricts the binding to some states (absent = always). A binding
-   * whose `active` is false is skipped as if it didn't match, so a later one
-   * can take the key.
-   */
-  active?: (ctx: KeyContext) => boolean;
   run: (ctx: KeyContext) => KeyOutcome;
 }
 
@@ -190,55 +158,15 @@ const insertChild = (nodeId: string): KeyEffect[] => [
 // Treat Cmd (mac) and Ctrl (win/linux) as the same "primary" modifier.
 const mod = (e: KeymapKeyEvent) => e.metaKey || e.ctrlKey;
 
-const ARROW_DIRS: Record<string, RangeDir> = {
-  ArrowLeft: "left",
-  ArrowRight: "right",
-  ArrowUp: "up",
-  ArrowDown: "down",
-};
-/**
- * Which way a Shift+key moves the range's focus (null = not a selection key).
- * Arrows go a character / line; Home / End and ⌘/Ctrl+←/→ to the ends of the
- * line; ⌘/Ctrl+↑/↓ to the ends of the document — the keys a textarea extends
- * its selection with, read across nodes.
- */
-function selectionDir(e: KeymapKeyEvent): RangeDir | null {
-  if (!e.shiftKey || e.altKey) return null;
-  if (!mod(e)) {
-    if (e.key === "Home") return "lineStart";
-    if (e.key === "End") return "lineEnd";
-    return ARROW_DIRS[e.key] ?? null;
-  }
-  switch (e.key) {
-    case "ArrowLeft":
-      return "lineStart";
-    case "ArrowRight":
-      return "lineEnd";
-    case "ArrowUp":
-      return "docStart";
-    case "ArrowDown":
-      return "docEnd";
-    default:
-      return null;
-  }
-}
-/** Line-wise directions never leave the node, so they only matter in a range. */
-const LINE_DIRS: ReadonlySet<RangeDir> = new Set(["lineStart", "lineEnd"]);
-/** Keys that are only a modifier going down: never end a range. */
-const MODIFIER_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "AltGraph", "CapsLock"]);
-/** The key is going to an IME (its first keydown, before compositionstart). */
-const isImeKey = (e: KeymapKeyEvent) => e.key === "Process" || e.keyCode === 229;
-/** A cross-node range is live (see ViewState.textRange). */
-const inRange = (ctx: KeyContext) => ctx.state.view.textRange !== undefined;
-/** Put the caret at a point, ending the range: edit that node there. */
-const caretAt = (p: TextPoint): KeyEffect =>
-  dispatch({
-    type: "activateNode",
-    nodeId: p.id,
-    cursorPos: p.offset,
-    selectionEnd: p.offset,
-    editing: true,
-  });
+/** Shift+↑ = -1, Shift+↓ = +1 (no other modifier); otherwise null. */
+const shiftVertical = (e: KeymapKeyEvent): -1 | 1 | null =>
+  !e.shiftKey || mod(e) || e.altKey
+    ? null
+    : e.key === "ArrowUp"
+      ? -1
+      : e.key === "ArrowDown"
+        ? 1
+        : null;
 
 export function buildKeymap(
   prefs: EditorPreferences = DEFAULT_PREFERENCES,
@@ -325,6 +253,22 @@ export function buildKeymap(
   // wants the adjacent node, not the adjacent sibling — see editSurface.ts).
   const siblingArrows = layout === "canvas";
   const selectionBindings: KeyBinding[] = [
+    {
+      // Select whole lines from the keyboard: the shift-click range, grown or
+      // shrunk one node at a time in flat order. Must precede sel-up/down,
+      // which take any ↑/↓.
+      id: "sel-extend",
+      label: "kmExtendSelection",
+      keys: "Shift + ↑ / ↓",
+      when: "selection",
+      match: (e) => shiftVertical(e) !== null,
+      run: (ctx) => {
+        const { activeNodeId, selectedIds } = ctx.state.view;
+        if (!activeNodeId) return handled();
+        const ids = extendSelection(ctx.state.document.model, activeNodeId, selectedIds ?? [], shiftVertical(ctx.e)!);
+        return handled(dispatch({ type: "setSelectedIds", ids }));
+      },
+    },
     {
       id: "sel-insert-sibling",
       label: "kmInsertSibling",
@@ -459,6 +403,12 @@ export function buildKeymap(
       when: "selection",
       match: (e) => e.key === "Backspace" || e.key === "Delete",
       run: (ctx) => {
+        // A multi-selection goes as a whole: every selected branch, one undo
+        // entry (the context menu's bulk delete).
+        const selected = ctx.state.view.selectedIds;
+        if (selected && selected.length > 1) {
+          return handled(dispatch({ type: "deleteNodes", nodeIds: selected }, "delete-node"));
+        }
         if (!ctx.node) return handled();
         return handled(deleteBranch(ctx.node.id));
       },
@@ -492,6 +442,38 @@ export function buildKeymap(
   ];
 
   const editIndentBindings = tabBindings("editing", "edit");
+
+  // Shift+↑/↓ past the first / last line leaves the text for a selection of
+  // whole nodes (sel-extend takes it from there). Inside the node the
+  // textarea extends its own selection. Canvas only: the outline has no
+  // keyboard host in selection mode, so leaving editing there would strand
+  // the keyboard. Needs selection mode, which is where a node selection
+  // lives.
+  const editExtend: KeyBinding[] =
+    layout === "canvas" && prefs.selectionMode
+      ? [
+          {
+            id: "edit-extend",
+            label: "",
+            keys: "Shift + ↑ / ↓",
+            when: "editing",
+            match: (e) => shiftVertical(e) !== null,
+            run: (ctx) => {
+              const { activeNodeId, editingText } = ctx.state.view;
+              const dir = shiftVertical(ctx.e)!;
+              const atEdge = verticalMove(editingText, dir === -1 ? ctx.pos : ctx.selEnd, dir) === null;
+              // A blank node would be deleted on leaving editing (exitEditing).
+              if (!activeNodeId || !atEdge || editingText.trim() === "") return PASS;
+              const ids = extendSelection(ctx.state.document.model, activeNodeId, [], dir);
+              if (ids.length === 0) return PASS; // the document's first / last node
+              return handled(
+                dispatch({ type: "exitEditing" }),
+                dispatch({ type: "setSelectedIds", ids })
+              );
+            },
+          },
+        ]
+      : [];
 
   // Escape returns from editing to selection mode; with selection mode
   // disabled there is nowhere to return to, so the binding is dropped and
@@ -653,111 +635,7 @@ export function buildKeymap(
     ...(prefs.selectionMode ? selectionBindings : alwaysEditBindings),
 
     // ---- Editing mode ----
-    // Cross-node text selection (application/textRange.ts). Shift+arrows that
-    // would leave the node start a range instead of stopping at the edge; once
-    // one is live these bindings own every key, so nothing reaches the
-    // textarea that could edit only the anchor's part of it.
-    {
-      id: "edit-range-extend",
-      label: "kmExtendSelection",
-      keys: "Shift + ←→↑↓ / Home / End",
-      when: "editing",
-      match: (e) => selectionDir(e) !== null,
-      // Outside a range, Shift+Home / End and ⌘/Ctrl+Shift+←/→ stay the
-      // textarea's own (or edit-cmd-shift-*'s) in-node selection.
-      active: (ctx) => inRange(ctx) || !LINE_DIRS.has(selectionDir(ctx.e)!),
-      run: (ctx) => {
-        const { view, document } = ctx.state;
-        const model = document.model;
-        if (!view.activeNodeId) return PASS;
-        const dir = selectionDir(ctx.e)!;
-        const textOf = rangeTextOf(model, view.activeNodeId, view.editingText);
-        const range = view.textRange
-          ? {
-              anchor: view.textRange.anchor,
-              focus: stepPoint(model, view.textRange.focus, dir, textOf, verticalMove),
-            }
-          : beginRange(
-              model,
-              view.activeNodeId,
-              textOf,
-              { pos: ctx.pos, selEnd: ctx.selEnd, backward: !!ctx.backward },
-              dir,
-              verticalMove
-            );
-        // Still inside the node: the textarea extends its own selection.
-        if (!range) return PASS;
-        return handled(dispatch({ type: "setTextRange", range }));
-      },
-    },
-    {
-      // Plain arrows end the range the way a textarea collapses its selection:
-      // ←/→ to its start/end, ↑/↓ one line on from the moving end. Either way
-      // the caret moves, keeping the keyboard-escape invariant.
-      id: "edit-range-collapse",
-      label: "",
-      keys: "←→↑↓",
-      when: "editing",
-      match: (e) => !e.shiftKey && !mod(e) && !e.altKey && e.key in ARROW_DIRS,
-      active: inRange,
-      run: (ctx) => {
-        const range = ctx.state.view.textRange!;
-        const model = ctx.state.document.model;
-        const dir = ARROW_DIRS[ctx.e.key];
-        if (dir === "left") return handled(caretAt(orderedRange(model, range).start));
-        if (dir === "right") return handled(caretAt(orderedRange(model, range).end));
-        const { focus } = range;
-        const text = rangeTextOf(model, ctx.state.view.activeNodeId, ctx.state.view.editingText).text(focus.id);
-        const moved = verticalMove(text, focus.offset, dir === "up" ? -1 : 1);
-        return handled(
-          caretAt(focus),
-          moved !== null
-            ? dispatch({ type: "setSelection", cursorPos: moved, selectionEnd: moved })
-            : dispatch({ type: dir === "up" ? "moveUp" : "moveDown" })
-        );
-      },
-    },
-    {
-      // Every other key acts on the WHOLE range, never on the anchor's part
-      // alone. Backspace / Delete replace it with nothing (textRange's
-      // replaceRange), Enter replaces it and then splits there, an IME's
-      // first key empties it for the composition to land in. Characters pass
-      // to the textarea: whatever it inserts over its selection reaches the
-      // reducer as typeText, which reads it as replacing the range — the one
-      // path for text from keys, dictation and soft keyboards alike. Copy /
-      // cut / paste / select-all chords pass through to their clipboard
-      // events (the views handle the range there), and a modifier going down
-      // must not end the range it is about to extend. Anything else (Tab,
-      // Escape, F-keys) ends the range at its moving end.
-      id: "edit-range-guard",
-      label: "",
-      keys: "",
-      when: "editing",
-      match: () => true,
-      active: inRange,
-      run: (ctx) => {
-        const { e } = ctx;
-        const range = ctx.state.view.textRange!;
-        const replace = (text: string): KeyEffect =>
-          dispatch({ type: "replaceTextRange", text }, "replace-range");
-        if (MODIFIER_KEYS.has(e.key)) return PASS;
-        if (mod(e) && ["c", "x", "v", "a"].includes(e.key.toLowerCase())) return PASS;
-        if (isImeKey(e)) {
-          return { result: "native", effects: [replace(""), SAVE, { kind: "syncInput" }] };
-        }
-        if (!mod(e)) {
-          if (e.key === "Backspace" || e.key === "Delete") return handled(replace(""), SAVE);
-          if (e.key === "Enter") {
-            if (e.shiftKey) return handled(replace("\n"), SAVE);
-            const { start } = orderedRange(ctx.state.document.model, range);
-            return handled(replace(""), dispatch({ type: "enter", pos: start.offset }, "enter"), SAVE);
-          }
-          // A character (one code point; Alt may compose it): the textarea's.
-          if ([...e.key].length === 1) return PASS;
-        }
-        return handled(caretAt(range.focus));
-      },
-    },
+    ...editExtend,
     {
       id: "edit-newline",
       label: "kmNewline",
@@ -860,6 +738,14 @@ export function buildKeymap(
       },
     },
     {
+      id: "edit-shift-left",
+      label: "",
+      keys: "Shift + ←",
+      when: "editing",
+      match: (e) => e.key === "ArrowLeft" && e.shiftKey,
+      run: () => PASS, // native selection extension
+    },
+    {
       id: "edit-left",
       label: "",
       keys: "←",
@@ -891,6 +777,14 @@ export function buildKeymap(
       run: (ctx) => {
         return handled(dispatch({ type: "cmdRight", pos: ctx.pos }));
       },
+    },
+    {
+      id: "edit-shift-right",
+      label: "",
+      keys: "Shift + →",
+      when: "editing",
+      match: (e) => e.key === "ArrowRight" && e.shiftKey,
+      run: () => PASS, // native selection extension
     },
     {
       id: "edit-right",
@@ -936,7 +830,6 @@ export function runKeymap(
       if (b.when !== "both" && b.when !== mode) continue;
       if (!b.match(ctx.e)) continue;
     }
-    if (b.active && !b.active(ctx)) continue;
     return b.run(ctx);
   }
   return PASS;

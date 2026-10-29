@@ -3,7 +3,9 @@ import type { MindMapDocument, MindMapModel } from "../domain/model";
 import {
   checkboxMenuTargets,
   nextMultiSelection,
+  extendSelection,
   outermostBranches,
+  selectionToText,
   planGroupCheckToggle,
   planGroupCollapse,
 } from "./selection";
@@ -197,5 +199,28 @@ describe("outermostBranches", () => {
 
   it("ignores ids that no longer exist", () => {
     expect(outermostBranches(treeDoc(), ["ghost", "c"])).toEqual(["c"]);
+  });
+});
+
+describe("extendSelection", () => {
+  // Flat order (b is folded): a, a1, a1x, b, c.
+  it("starts at the anchor and moves the far end", () => {
+    expect(extendSelection(treeDoc(), "a1", [], 1)).toEqual(["a1", "a1x"]);
+    expect(extendSelection(treeDoc(), "a1", ["a1", "a1x"], 1)).toEqual(["a1", "a1x", "b"]);
+    expect(extendSelection(treeDoc(), "a1", [], -1)).toEqual(["a", "a1"]);
+  });
+  it("shrinks back toward the anchor, and empties at it", () => {
+    expect(extendSelection(treeDoc(), "a1", ["a1", "a1x", "b"], -1)).toEqual(["a1", "a1x"]);
+    expect(extendSelection(treeDoc(), "a1", ["a1", "a1x"], -1)).toEqual([]);
+  });
+  it("stops at the document's ends", () => {
+    expect(extendSelection(treeDoc(), "c", [], 1)).toEqual([]);
+    expect(extendSelection(treeDoc(), "b", ["b", "c"], 1)).toEqual(["b", "c"]);
+  });
+});
+
+describe("selectionToText", () => {
+  it("is one indented block per outermost branch, hidden children included", () => {
+    expect(selectionToText(treeDoc(), ["a1", "a1x", "b"])).toBe("A1\n  A1x\nB\n  B1");
   });
 });

@@ -9,6 +9,8 @@
  *  - ctrl/cmd-click: toggle the clicked node in/out of the selection.
  *  - shift-click: select the flat-order range between the active node (the
  *    anchor) and the clicked one, inclusive, replacing any existing set.
+ *  - Shift+↑/↓ (canvas): grow or shrink that same range one node at a time
+ *    ({@link extendSelection}) — the keyboard's way to select whole lines.
  *
  * Pure and DOM-free — takes the document and plain booleans, returns plain
  * ids — so it can be exercised the same way as every other tree-shaped
@@ -23,6 +25,7 @@ import {
   type MindMapDocument,
 } from "../domain/model";
 import { supportsCheckbox } from "./nodeUtils";
+import { modelToText } from "./persistence";
 
 export interface SelectionModifiers {
   shiftKey: boolean;
@@ -187,4 +190,46 @@ export function outermostBranches(
   };
   const order = doc.roots.flatMap(subtreeIds);
   return order.filter((id) => selected.has(id) && !insideAnother(id));
+}
+
+/**
+ * Shift+↑/↓: move the far end of the flat-order range that runs from the
+ * active node (the anchor, as for shift-click) one node up or down, and
+ * return the new range — or `[]` once it is back to the anchor alone (no
+ * multi-selection). The far end is whichever end of the current selection
+ * is not the anchor; with no selection yet, the range starts at the anchor.
+ * Stops at the document's first / last node.
+ */
+export function extendSelection(
+  doc: MindMapDocument,
+  activeId: string,
+  current: readonly string[],
+  dir: -1 | 1
+): string[] {
+  const order = getFlatOrder(doc);
+  const anchor = order.indexOf(activeId);
+  if (anchor === -1) return [...current];
+  const indices = [anchor, ...current.map((id) => order.indexOf(id)).filter((i) => i !== -1)];
+  const lo = Math.min(...indices);
+  const hi = Math.max(...indices);
+  const far = anchor === lo ? hi : lo;
+  const next = Math.min(Math.max(far + dir, 0), order.length - 1);
+  if (next === anchor) return [];
+  return order.slice(Math.min(anchor, next), Math.max(anchor, next) + 1);
+}
+
+/**
+ * The selected branches as indented plain text, one block per branch in
+ * document order (a node inside another selected branch is already in that
+ * block — see {@link outermostBranches}). What copying a multi-selection puts
+ * on the clipboard, from the keyboard or the context menu.
+ */
+export function selectionToText(doc: MindMapDocument, ids: readonly string[]): string {
+  return outermostBranches(doc, ids)
+    .map((id) => findNode(doc, id))
+    .filter((n) => n !== null)
+    // Not `.map(modelToText)`: its second parameter is the indent depth, and
+    // map would hand it the array index.
+    .map((branch) => modelToText(branch))
+    .join("\n");
 }
