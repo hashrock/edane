@@ -240,7 +240,10 @@ export function rangeToPlainText(
     const node = findNode(doc, id);
     if (node?.collapsed && i < ids.length - 1) hidden(node);
   });
-  const base = Math.min(...entries.map((e) => e.depth));
+  // An empty covered part (a range ending at a node's start, an empty node)
+  // prints as a bare line break, so it must not set the indentation either.
+  const printed = entries.filter((e) => e.text !== "");
+  const base = Math.min(...(printed.length > 0 ? printed : entries).map((e) => e.depth));
   return entries
     .flatMap(({ depth, text }) =>
       text.split("\n").map((line) => (line === "" ? "" : "  ".repeat(depth - base) + line))

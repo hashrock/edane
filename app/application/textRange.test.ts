@@ -122,6 +122,14 @@ describe("rangeToPlainText", () => {
       ["  one", "    grand", "  two", "  lines", "la"].join("\n")
     );
   });
+  it("an empty end part does not set the indentation", () => {
+    // Ending at the start of the (shallower) root "last" adds a bare line
+    // break, not a level the copied lines are indented against.
+    const d = doc();
+    expect(rangeToPlainText(d, range(["g", 0], ["last", 0]), textOf(d))).toBe(
+      ["  grand", "two", "lines", ""].join("\n")
+    );
+  });
   it("leaves an empty covered part as a bare line break", () => {
     const d = doc();
     expect(rangeToPlainText(d, range(["r", 11], ["c1", 0]), textOf(d))).toBe("\n");

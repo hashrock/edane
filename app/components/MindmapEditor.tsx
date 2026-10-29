@@ -3514,8 +3514,26 @@ export function MindmapEditorView({
         const ids = [...segments.keys()];
         ids.forEach((id, i) => {
           const n = nodes.find((m) => m.id === id);
+          if (!n) return; // culled off-screen
+          // An image / link / markdown card draws something other than its
+          // raw text (a picture, a title, a preview), so no character offsets
+          // line up with it: the range covers the whole box.
+          if (n.type !== "text") {
+            cursorLayer.add(
+              new Konva.Rect({
+                x: n.x,
+                y: n.y - nodeBoxHeight(n.height) / 2,
+                width: nodeBoxWidth(n.width, n.depth === 0),
+                height: nodeBoxHeight(n.height),
+                cornerRadius: 12,
+                fill: withAlpha(getAccent(), 0.18),
+                listening: false,
+              })
+            );
+            return;
+          }
           const nodeData = lineDataRef.current.get(id);
-          if (!n || !nodeData) return; // culled off-screen
+          if (!nodeData) return;
           const [a, b] = segments.get(id)!;
           drawSegment(n, nodeData, a, b, i < ids.length - 1);
         });

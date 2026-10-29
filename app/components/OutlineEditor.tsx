@@ -578,7 +578,11 @@ export default function OutlineEditor({
                     <div
                       ref={isEditingThis ? activeRowRef : null}
                       onClick={() => activateRow(node.id)}
-                      className="min-w-0 flex-1 cursor-text py-0.5"
+                      className={`min-w-0 flex-1 cursor-text py-0.5 ${
+                        // A non-text row (image, link, markdown) has no
+                        // characters to mark: the range covers all of it.
+                        rangeSeg && type !== "text" ? `rounded-lg ${RANGE_HIGHLIGHT}` : ""
+                      }`}
                     >
                       {type === "markdown" && !isEditingThis && node.text.trim() !== "" ? (
                         // A markdown node shows its rendered document, as the
