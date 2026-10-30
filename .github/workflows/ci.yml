@@ -35,6 +35,11 @@ jobs:
       - name: Build & typecheck
         run: pnpm run typecheck
 
+      # Module graph checks app/architecture.test.ts can't do (transitive
+      # framework reach, runtime cycles, dead modules): .dependency-cruiser.cjs.
+      - name: Check dependencies
+        run: pnpm run lint:deps
+
       # Node (framework-agnostic) tests.
       - name: Run node tests
         run: pnpm run test
