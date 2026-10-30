@@ -65,7 +65,8 @@ module.exports = {
       from: { path: ENTRY_POINTS },
       to: {
         path: "^app/",
-        pathNot: [TEST_SUPPORT, "\\.d\\.ts$", "\\.css$", ...ENTRY_POINTS],
+        // pages.gen.ts: build output (gitignored) that only augments types.
+        pathNot: [TEST_SUPPORT, "\\.d\\.ts$", "\\.css$", "^app/pages\\.gen\\.ts$", ...ENTRY_POINTS],
         reachable: false,
       },
     },
