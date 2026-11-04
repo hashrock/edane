@@ -638,7 +638,7 @@ export default function OutlineEditor({
             ref={inputRef}
             defaultValue={editingText}
             rows={1}
-            onChange={handleInputChange}
+            onInput={handleInputChange}
             onKeyDown={handleKeyDown}
             onSelect={handleSelect}
             onPaste={handlePaste}
