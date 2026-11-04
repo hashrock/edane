@@ -21,9 +21,13 @@ const stepArb = fc.record({
   velocity: fc.double({ min: -3, max: 3, noNaN: true }),
   pointer: pointerArb,
 });
+// Each property steps a whole grid simulation many times: ~1s locally, but a
+// shared CI runner has been ~6x slower and tripped vitest's 5s default.
+const SIM_TIMEOUT_MS = 30_000;
+
 const aspectArb = fc.double({ min: 0.4, max: 3, noNaN: true });
 
-describe("dust", () => {
+describe("dust", { timeout: SIM_TIMEOUT_MS }, () => {
   it("keeps every mote finite and around the screen, however the air is stirred", () => {
     fc.assert(
       fc.property(aspectArb, fc.integer(), fc.array(stepArb, { minLength: 1, maxLength: 10 }), (aspect, seed, steps) => {
@@ -48,7 +52,7 @@ describe("dust", () => {
   });
 });
 
-describe("fog", () => {
+describe("fog", { timeout: SIM_TIMEOUT_MS }, () => {
   it("stays finite with densities in range, and lights the top fully", () => {
     fc.assert(
       fc.property(aspectArb, fc.array(stepArb, { minLength: 1, maxLength: 8 }), (aspect, steps) => {
@@ -88,7 +92,7 @@ describe("fog", () => {
   });
 });
 
-describe("cloth", () => {
+describe("cloth", { timeout: SIM_TIMEOUT_MS }, () => {
   it("stays finite, hangs from its rod and keeps roughly its length, however it is pushed", () => {
     fc.assert(
       fc.property(aspectArb, fc.array(stepArb, { minLength: 1, maxLength: 20 }), (aspect, steps) => {
@@ -115,7 +119,7 @@ describe("cloth", () => {
   });
 });
 
-describe("shore", () => {
+describe("shore", { timeout: SIM_TIMEOUT_MS }, () => {
   it("never drains a cell below empty, keeps every field in range, and roughly keeps its water", () => {
     fc.assert(
       fc.property(aspectArb, fc.array(stepArb, { minLength: 1, maxLength: 12 }), (aspect, steps) => {
