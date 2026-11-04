@@ -1,0 +1,75 @@
+name: Nightly graph e2e
+
+# Long random walks of the graph-based e2e test
+# (app/components/MindmapEditor.graph.browser.test.tsx). The PR gate runs the
+# fixed seeds 1–3 × 150 steps as a regression check; the bugs that test found
+# only showed up after ~1500 steps, so the search for NEW divergences runs
+# here, with fresh seeds every night. A failure prints the seed and the event
+# trace; the job summary has the one-line command to reproduce it locally.
+on:
+  schedule:
+    - cron: "0 18 * * *" # 03:00 JST
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Base seed (blank = derive from the run id)"
+        required: false
+      steps:
+        description: "Steps per seed"
+        required: false
+        default: "2000"
+
+permissions:
+  contents: read
+
+jobs:
+  walk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Pick seed
+        id: seed
+        env:
+          BASE_SEED: ${{ inputs.seed }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          BASE="${BASE_SEED:-$GITHUB_RUN_ID}"
+          echo "value=$(( (BASE * 3 + SHARD) % 2147483647 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Random walk
+        env:
+          VITE_GRAPH_SEED: ${{ steps.seed.outputs.value }}
+          VITE_GRAPH_STEPS: ${{ inputs.steps || '2000' }}
+        run: pnpm vitest run --project browser app/components/MindmapEditor.graph.browser.test.tsx
+
+      - name: Reproduction command
+        if: always()
+        env:
+          SEED: ${{ steps.seed.outputs.value }}
+          STEPS: ${{ inputs.steps || '2000' }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### seed $SEED × $STEPS steps: $OUTCOME"
+            echo '```sh'
+            echo "VITE_GRAPH_SEED=$SEED VITE_GRAPH_STEPS=$STEPS pnpm vitest run --project browser app/components/MindmapEditor.graph.browser.test.tsx"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
