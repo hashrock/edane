@@ -353,6 +353,8 @@ function copySelection(e: React.ClipboardEvent, st: EditorState): string[] | nul
   return ids;
 }
 
+const noopChange = () => {};
+
 export interface MindmapTestApi {
   getModel: () => MindMapDocument;
   getActiveNodeId: () => string | null;
@@ -4128,7 +4130,10 @@ export function MindmapEditorView({
           value={editingText}
           rows={1}
           wrap="off"
-          onChange={handleInputChange}
+          onInput={handleInputChange}
+          // Controlled textarea: React requires onChange alongside `value`;
+          // the input is handled by onInput (see handleInputChange).
+          onChange={noopChange}
           onKeyDown={handleKeyDown}
           onSelect={handleSelect}
           onCopy={handleCopy}

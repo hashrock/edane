@@ -897,6 +897,16 @@ function keepsSelection(type: EditorAction["type"]): boolean {
 
 function withCaretInBuffer(view: ViewState): ViewState {
   const len = view.editingText.length;
+  // Selection mode always has the WHOLE text selected, however the focus got
+  // there (click, ↑↓←→, Esc, a deletion landing on a neighbour, undo): the
+  // hidden textarea mirrors this range, so a follow-up keystroke replaces the
+  // text — never appends or prepends depending on the route taken. A caret
+  // position only means something while editing.
+  if (!view.editing) {
+    return view.cursorPos === 0 && view.selectionEnd === len
+      ? view
+      : { ...view, cursorPos: 0, selectionEnd: len };
+  }
   const cursorPos = Math.min(Math.max(view.cursorPos, 0), len);
   const selectionEnd = Math.min(Math.max(view.selectionEnd, 0), len);
   if (cursorPos === view.cursorPos && selectionEnd === view.selectionEnd)
@@ -1348,12 +1358,8 @@ export function reconcileView(
     view.activeNodeId && findNode(document.model, view.activeNodeId)
       ? nearestVisibleAncestor(document.model, view.activeNodeId, visible)
       : findNearestSurvivor(view.activeNodeId, document, prevDocument);
-  return focusView(
-    { ...view, editing: false },
-    document.model,
-    landId,
-    0,
-    0
+  return withCaretInBuffer(
+    focusView({ ...view, editing: false }, document.model, landId)
   );
 }
 
@@ -1408,8 +1414,9 @@ export function freshEditorState(model: MindMapDocument, activeNodeId: string): 
       activeNodeId,
       editing: false,
       editingText: findNode(model, activeNodeId)?.text ?? "",
+      // Selection mode: whole text selected (see withCaretInBuffer).
       cursorPos: 0,
-      selectionEnd: 0,
+      selectionEnd: findNode(model, activeNodeId)?.text.length ?? 0,
       lastChildByParent: {},
     },
   };

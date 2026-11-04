@@ -20,7 +20,14 @@ export interface TextInputHandlers {
   isComposing: boolean;
   /** Same signal as a ref, for reads inside effects/handlers without a dep. */
   isComposingRef: React.MutableRefObject<boolean>;
-  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Bind as `onInput`, NOT `onChange`: React's onChange skips an input whose
+   * value equals the last one it saw, so typing "x" over a selected node
+   * whose text is "x" (a replace that leaves the value unchanged) would be
+   * dropped — the node would never enter edit mode and the next key would
+   * replace the text again.
+   */
+  handleInputChange: (e: React.FormEvent<HTMLTextAreaElement>) => void;
   handleCompositionStart: () => void;
   handleCompositionEnd: () => void;
   handleSelect: () => void;
@@ -37,8 +44,8 @@ export function useTextInputHandlers(
   const [isComposing, setIsComposing] = useState(false);
 
   const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const el = e.target;
+    (e: React.FormEvent<HTMLTextAreaElement>) => {
+      const el = e.currentTarget;
       // Snapshot the pre-typing state once per debounce batch.
       undoManagerRef.current.handleTextChange(stateRef.current.document);
       dispatch({
@@ -76,12 +83,22 @@ export function useTextInputHandlers(
   const handleSelect = useCallback(() => {
     const el = inputRef.current;
     if (!el) return;
+    // "select" fires asynchronously, so it can land after a dispatch moved the
+    // focus but before the sync effect rewrote the textarea: the range it
+    // reads then belongs to the PREVIOUS node's text, and writing it back
+    // corrupts the new node's selection (e.g. a deletion landing on a
+    // neighbour kept the deleted node's 0..len, so typing prepended instead of
+    // replacing). Only an event about the text the view holds may update it.
+    // In selection mode the view owns the range outright (whole text
+    // selected); the hidden textarea only mirrors it.
+    const { view } = stateRef.current;
+    if (!view.editing || el.value !== view.editingText) return;
     dispatch({
       type: "setSelection",
       cursorPos: el.selectionStart || 0,
       selectionEnd: el.selectionEnd || 0,
     });
-  }, [dispatch]);
+  }, [dispatch, stateRef]);
 
   // Inline URL box (image / link nodes): edits the node's `text` (its URL)
   // while the view keeps drawing the preview. Persists on change so the preview

@@ -89,13 +89,14 @@ describe("orphaned activeNodeId — defensive !currentNode/!node guards", () => 
     expect(editorReducer(s, { type: "startEditing" })).toBe(s);
   });
 
-  it("exitEditing with stale activeNodeId exits edit mode with selectionEnd 0", () => {
+  it("exitEditing with stale activeNodeId exits edit mode selecting the whole buffer", () => {
     const s = orphanState(sampleModel());
     const next = editorReducer(s, { type: "exitEditing" });
     expect(next.view.editing).toBe(false);
-    // node not found → text length defaults to 0 → selectionEnd = 0
+    // Selection mode selects the whole text the textarea holds (the stale
+    // buffer "ghost"), the same range as for a live node.
     expect(next.view.cursorPos).toBe(0);
-    expect(next.view.selectionEnd).toBe(0);
+    expect(next.view.selectionEnd).toBe("ghost".length);
   });
 });
 

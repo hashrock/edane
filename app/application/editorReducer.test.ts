@@ -797,7 +797,7 @@ describe("activateNode", () => {
 describe("startEditing / exitEditing", () => {
   it("startEditing enters edit mode with cursor defaults", () => {
     const model = sampleModel();
-    const s = withView(stateAt(model, "a"), { editing: false });
+    const s = withView(stateAt(model, "a"), { editing: false, cursorPos: 0 }); // selection mode: whole text selected
     const next = editorReducer(s, { type: "startEditing" });
     expect(next.view.editing).toBe(true);
     expect(next.view.cursorPos).toBe(0);
@@ -833,7 +833,7 @@ describe("startEditing / exitEditing", () => {
 
   it("exitEditing is a no-op when not editing", () => {
     const model = sampleModel();
-    const s = withView(stateAt(model, "a"), { editing: false });
+    const s = withView(stateAt(model, "a"), { editing: false, cursorPos: 0 }); // selection mode: whole text selected
     expect(editorReducer(s, { type: "exitEditing" })).toBe(s);
   });
 
@@ -1106,7 +1106,7 @@ describe("moveBranch", () => {
 
   it("is a no-op (same state) for an invalid move", () => {
     const model = sampleModel();
-    const s = withView(stateAt(model, "a"), { editing: false });
+    const s = withView(stateAt(model, "a"), { editing: false, cursorPos: 0 }); // selection mode: whole text selected
     // Into its own descendant.
     expect(
       editorReducer(s, { type: "moveBranch", nodeId: "a", newParentId: "a1" })
@@ -1664,8 +1664,9 @@ describe("reconcileView", () => {
     expect(reconciled.activeNodeId).toBe(model.roots[0].id);
     expect(reconciled.editing).toBe(false);
     expect(reconciled.editingText).toBe(model.roots[0].text);
+    // Selection mode: the whole text is selected, so typing replaces it.
     expect(reconciled.cursorPos).toBe(0);
-    expect(reconciled.selectionEnd).toBe(0);
+    expect(reconciled.selectionEnd).toBe(model.roots[0].text.length);
   });
 
   it("falls back to the first root when activeNodeId is null", () => {

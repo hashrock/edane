@@ -137,6 +137,35 @@ describe("the edit buffer follows the document", () => {
       { numRuns: 300 }
     );
   });
+
+  // Found by the graph-based e2e test: typing on a selected node replaced its
+  // text after a click but appended (after ↑↓, Esc deleting a blank node) or
+  // prepended (after undo, on first load) depending on the route there.
+  it("selection mode always has the whole text selected, whatever the route there", () => {
+    fc.assert(
+      fc.property(modelArb, fc.array(actionStepArb, { maxLength: 25 }), (model, steps) => {
+        let state = initialEditorState(model);
+        const nextId = sequentialIds();
+        const mint = sequentialIds("p");
+        const trail: string[] = [];
+        const check = () => {
+          if (state.view.editing) return;
+          expect(
+            [state.view.cursorPos, state.view.selectionEnd],
+            `selection after ${trail.join(" → ") || "(initial)"}`
+          ).toEqual([0, state.view.editingText.length]);
+        };
+        check();
+        for (const step of steps) {
+          const action = resolveStep(step, state, mint);
+          trail.push(action.type);
+          state = editorReducer(state, action, nextId);
+          check();
+        }
+      }),
+      { numRuns: 300 }
+    );
+  });
 });
 
 /**

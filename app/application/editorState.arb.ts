@@ -55,8 +55,11 @@ export function editorStateAt(
   opts: { editing?: boolean; pos?: number } = {}
 ): EditorState {
   const state = freshEditorState(model, nodeId);
+  // Selection mode keeps freshEditorState's whole-text selection (the
+  // reducer's invariant); only an editing state has a caret to place.
+  if (!opts.editing) return state;
   const pos = (opts.pos ?? 0) % (state.view.editingText.length + 1);
-  return { ...state, view: { ...state.view, editing: opts.editing ?? false, cursorPos: pos, selectionEnd: pos } };
+  return { ...state, view: { ...state.view, editing: true, cursorPos: pos, selectionEnd: pos } };
 }
 
 /**
