@@ -22,7 +22,7 @@ async function setup(isPublic = false) {
     if (!r.ok) throw new Error(JSON.stringify(r));
   };
   const backups = () =>
-    env.DB.prepare("SELECT id, title, content, version FROM note_backups WHERE note_id = 'n' ORDER BY created_at, id")
+    env.DB.prepare("SELECT id, title, content, version FROM note_backups WHERE note_id = 'n' ORDER BY created_at, version")
       .all<{ id: string; title: string; content: string; version: number }>()
       .then((r) => r.results);
   const text = async () => {
