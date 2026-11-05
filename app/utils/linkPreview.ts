@@ -40,7 +40,9 @@ export function extractLinkPreview(html: string, target: URL): { title: string; 
  * loopback, private / link-local ranges, and internal names. The endpoint is
  * open to guests, so without this it would be a probe into whatever network
  * the server can reach. URL parsing has already normalised IPv4 forms
- * (`2130706433`, `0x7f.1`) to dotted decimal.
+ * (`2130706433`, `0x7f.1`) to dotted decimal. This only looks at the host
+ * text: a public name that resolves to a private address is not caught here
+ * (Workers cannot reach the private network anyway).
  */
 export function isInternalHost(url: URL): boolean {
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
