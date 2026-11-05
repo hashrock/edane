@@ -35,6 +35,37 @@ export function extractLinkPreview(html: string, target: URL): { title: string; 
   return { title, favicon };
 }
 
+/**
+ * Whether a URL's host is somewhere a public link preview must never fetch:
+ * loopback, private / link-local ranges, and internal names. The endpoint is
+ * open to guests, so without this it would be a probe into whatever network
+ * the server can reach. URL parsing has already normalised IPv4 forms
+ * (`2130706433`, `0x7f.1`) to dotted decimal. This only looks at the host
+ * text: a public name that resolves to a private address is not caught here
+ * (Workers cannot reach the private network anyway).
+ */
+export function isInternalHost(url: URL): boolean {
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
+  if (!host.includes(".") && !host.includes(":")) return true;
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  if (host.includes(":")) {
+    // IPv6: only global unicast (2000::/3) is allowed; this also drops ::1, fc00::/7, fe80::/10 and mapped IPv4.
+    return !/^[23]/.test(host);
+  }
+  return false;
+}
+
 /** How much of a page is read looking for <title> / icons (both live in <head>). */
 export const LINK_PREVIEW_MAX_BYTES = 256 * 1024;
 const MAX_REDIRECTS = 3;
@@ -67,7 +98,7 @@ export async function readTextPrefix(res: Response, maxBytes: number): Promise<s
 /**
  * Fetch a page's preview. The endpoint is open (the guest editor uses it), so
  * one call is bounded: http(s) only, at most {@link MAX_REDIRECTS} redirects
- * (each re-checked), {@link TIMEOUT_MS}, and {@link LINK_PREVIEW_MAX_BYTES} read.
+ * (each re-checked, as is the host: no internal addresses), {@link TIMEOUT_MS}, and {@link LINK_PREVIEW_MAX_BYTES} read.
  * Null when the page can't be fetched; the caller says so without details.
  */
 export async function fetchLinkPreview(
@@ -78,6 +109,7 @@ export async function fetchLinkPreview(
   let url = target;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (isInternalHost(url)) return null;
     const res = await fetchImpl(url.toString(), {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; edane-bot/1.0)" },
       redirect: "manual",
