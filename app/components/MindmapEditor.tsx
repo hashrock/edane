@@ -587,12 +587,12 @@ export function MindmapEditorView({
   const canvasRef = useRef<HTMLDivElement>(null);
   const konvaStageRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
-  const cursorLayerRef = useRef<any>(null);
-  const flashLayerRef = useRef<any>(null);
-  // Overlay layer for the collapse/expand morph tween (see the morph effect).
-  const morphLayerRef = useRef<any>(null);
-  // Overlay layer for the branch's page marks (see the page-marks effect).
-  const pageLayerRef = useRef<any>(null);
+  const cursorGroupRef = useRef<any>(null);
+  const flashGroupRef = useRef<any>(null);
+  // Overlay group for the collapse/expand morph tween (see the morph effect).
+  const morphGroupRef = useRef<any>(null);
+  // Overlay group for the branch's page marks (see the page-marks effect).
+  const pageGroupRef = useRef<any>(null);
   const konvaRef = useRef<any>(null);
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
@@ -605,7 +605,7 @@ export function MindmapEditorView({
   const clickEditIntentRef = useRef<{ nodeId: string; charIdx: number } | null>(
     null
   );
-  const dragLayerRef = useRef<any>(null);
+  const dragGroupRef = useRef<any>(null);
   const wasDraggingRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Which node's toggle button the pointer is currently over. Lets the redraw
@@ -1757,37 +1757,36 @@ export function MindmapEditorView({
       stage.add(layer);
       layerRef.current = layer;
 
-      const cursorLayer = new Konva.Layer();
-      stage.add(cursorLayer);
-      cursorLayerRef.current = cursorLayer;
+      // Everything drawn over the nodes lives on ONE non-interactive overlay
+      // layer, as a Group per concern (Konva warns past 3-5 layers: each layer
+      // is its own <canvas>). Each effect owns its group — destroyChildren() on
+      // one (e.g. the caret blink on the cursor group) never touches another's
+      // shapes or tweens; it just redraws the shared overlay canvas, which only
+      // holds a handful of shapes. Group order = z-order, bottom to top.
+      const overlayLayer = new Konva.Layer({ listening: false });
+      stage.add(overlayLayer);
+      const overlayGroup = () => {
+        const g = new Konva.Group({ listening: false });
+        overlayLayer.add(g);
+        return g;
+      };
 
-      // Paste / insert flash layer. Kept separate from the cursor layer so its
-      // soft fade animation isn't torn down and restarted by the caret blink,
-      // which destroyChildren()'s the cursor layer twice a second.
-      const flashLayer = new Konva.Layer({ listening: false });
-      stage.add(flashLayer);
-      flashLayerRef.current = flashLayer;
-
+      // Caret + in-node text selection.
+      cursorGroupRef.current = overlayGroup();
+      // Paste / insert flash.
+      flashGroupRef.current = overlayGroup();
       // Page marks: which slide each node of a branch went to, shown for a
-      // moment after its split choice changes. Non-interactive.
-      const pageLayer = new Konva.Layer({ listening: false });
-      stage.add(pageLayer);
-      pageLayerRef.current = pageLayer;
-
-      // Collapse/expand morph overlay. Sits above the main layer so the morphing
-      // circle covers the freshly-drawn real toggle button underneath, then
-      // clears to reveal it (see the morph effect). Non-interactive.
-      const morphLayer = new Konva.Layer({ listening: false });
-      stage.add(morphLayer);
-      morphLayerRef.current = morphLayer;
-
-      // Drag & drop preview layer. Drawn imperatively on every mousemove of a
-      // move drag — going through React state would re-render per move. It sits
-      // above the cursor layer and is never touched by the React effects (the
-      // cursor layer gets destroyChildren()'d, so the preview can't live there).
-      const dragLayer = new Konva.Layer({ listening: false });
-      stage.add(dragLayer);
-      dragLayerRef.current = dragLayer;
+      // moment after its split choice changes.
+      pageGroupRef.current = overlayGroup();
+      // Collapse/expand morph. Above the main layer so the morphing circle
+      // covers the freshly-drawn real toggle button underneath, then clears to
+      // reveal it (see the morph effect).
+      morphGroupRef.current = overlayGroup();
+      // Drag & drop preview. Drawn imperatively on every mousemove of a move
+      // drag — going through React state would re-render per move. Topmost,
+      // and never touched by the React effects.
+      const dragLayer = overlayGroup();
+      dragGroupRef.current = dragLayer;
 
       // Preview shapes: a ghost of the dragged node following the pointer, and
       // a marker showing where it would land (box highlight = become a child,
@@ -1800,7 +1799,7 @@ export function MindmapEditorView({
         ghost?.destroy();
         marker?.destroy();
         ghost = marker = markerKey = null;
-        dragLayer.batchDraw();
+        dragLayer.getLayer()?.batchDraw();
         stage.container().style.cursor = "";
       };
 
@@ -2082,7 +2081,7 @@ export function MindmapEditorView({
         const cursor = drag.drop || drag.ghostAt ? "grabbing" : "no-drop";
         const el = stage.container();
         if (el.style.cursor !== cursor) el.style.cursor = cursor;
-        dragLayer.batchDraw();
+        dragLayer.getLayer()?.batchDraw();
       };
 
       // --- Edge auto-scroll while a branch is being dragged ---
@@ -2377,11 +2376,11 @@ export function MindmapEditorView({
         konvaStageRef.current.destroy();
         konvaStageRef.current = null;
         layerRef.current = null;
-        cursorLayerRef.current = null;
-        dragLayerRef.current = null;
-        flashLayerRef.current = null;
-        morphLayerRef.current = null;
-        pageLayerRef.current = null;
+        cursorGroupRef.current = null;
+        dragGroupRef.current = null;
+        flashGroupRef.current = null;
+        morphGroupRef.current = null;
+        pageGroupRef.current = null;
       }
     };
   }, [dispatch]);
@@ -3423,14 +3422,14 @@ export function MindmapEditorView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, activeNodeId, editing, editingText, selectedIds, konvaReady, dispatch, readOnly, viewportTick, locale, accent]);
 
-  // --- Cursor layer (lightweight, redraws only on cursor changes) ---
+  // --- Cursor overlay (lightweight, redraws only on cursor changes) ---
   useEffect(() => {
     const Konva = konvaRef.current;
-    const cursorLayer = cursorLayerRef.current;
+    const cursorLayer = cursorGroupRef.current;
     if (!Konva || !cursorLayer || !activeNodeId) {
       if (cursorLayer) {
         cursorLayer.destroyChildren();
-        cursorLayer.draw();
+        cursorLayer.getLayer()?.draw();
       }
       return;
     }
@@ -3515,26 +3514,29 @@ export function MindmapEditorView({
       }
     }
 
-    cursorLayer.draw();
+    cursorLayer.getLayer()?.draw();
   }, [activeNodeId, editing, cursorPos, selectionEnd, cursorVisible, nodes]);
 
   // --- Paste / insert flash ---
   // A soft amber glow that blooms in and gently dissolves around just-inserted
   // nodes, so the destination reads at a glance without the harsh dashed
-  // outline. Runs on its own layer with Konva tweens (see stage setup) so the
+  // outline. Runs in its own overlay group with Konva tweens (see stage setup) so the
   // caret blink can't restart it mid-fade.
   useEffect(() => {
     const Konva = konvaRef.current;
-    const flashLayer = flashLayerRef.current;
+    const flashLayer = flashGroupRef.current;
     if (!Konva || !flashLayer) return;
 
     flashLayer.destroyChildren();
     if (highlightIds.size === 0) {
-      flashLayer.batchDraw();
+      flashLayer.getLayer()?.batchDraw();
       return;
     }
 
     const group = new Konva.Group({ opacity: 0, listening: false });
+    // In the layer before any Tween is built: a Tween resolves its node's layer
+    // at construction and refuses (no animation) when there is none.
+    flashLayer.add(group);
     const bloomTweens: any[] = [];
 
     for (const id of highlightIds) {
@@ -3576,8 +3578,6 @@ export function MindmapEditorView({
       bloomTweens.push(bloom);
     }
 
-    flashLayer.add(group);
-
     let holdTimer: ReturnType<typeof setTimeout> | null = null;
     let fadeOut: any = null;
     const fadeIn = new Konva.Tween({
@@ -3608,7 +3608,7 @@ export function MindmapEditorView({
       fadeOut?.destroy();
       bloomTweens.forEach((t) => t.destroy());
       group.destroy();
-      flashLayer.batchDraw();
+      flashLayer.getLayer()?.batchDraw();
     };
   }, [highlightIds, nodes]);
 
@@ -3620,11 +3620,11 @@ export function MindmapEditorView({
   // seconds after one is chosen); they fade in.
   useEffect(() => {
     const Konva = konvaRef.current;
-    const pageLayer = pageLayerRef.current;
+    const pageLayer = pageGroupRef.current;
     if (!Konva || !pageLayer) return;
     pageLayer.destroyChildren();
     if (!pageMarks || pageMarks.size === 0) {
-      pageLayer.batchDraw();
+      pageLayer.getLayer()?.batchDraw();
       return;
     }
     const group = new Konva.Group({ opacity: 0, listening: false });
@@ -3675,7 +3675,7 @@ export function MindmapEditorView({
     return () => {
       fadeIn.destroy();
       group.destroy();
-      pageLayer.batchDraw();
+      pageLayer.getLayer()?.batchDraw();
     };
   }, [pageMarks, nodes, locale]);
 
@@ -3686,18 +3686,18 @@ export function MindmapEditorView({
   // the count crossfade, then clears to reveal the freshly-drawn real button
   // underneath. The overlay circle shares the button's radius, so it fully hides
   // the real button below it for the whole tween — no double-draw peeking out.
-  // Runs on its own layer (see stage setup) so nothing tears it down mid-morph.
+  // Runs in its own overlay group (see stage setup) so nothing tears it down mid-morph.
   useEffect(() => {
     if (!morphSignal) return;
     const Konva = konvaRef.current;
-    const layer = morphLayerRef.current;
+    const layer = morphGroupRef.current;
     if (!Konva || !layer) return;
 
     const flat = nodesRef.current;
     const node = flat.find((n) => n.id === morphSignal.nodeId);
     layer.destroyChildren();
     if (!node || node.childCount === 0) {
-      layer.batchDraw();
+      layer.getLayer()?.batchDraw();
       return;
     }
 
@@ -3736,7 +3736,7 @@ export function MindmapEditorView({
       listening: false,
     });
     layer.add(circle, minus, count);
-    layer.batchDraw();
+    layer.getLayer()?.batchDraw();
 
     const DUR = 0.2;
     const tweens = [
@@ -3760,7 +3760,7 @@ export function MindmapEditorView({
         easing: Konva.Easings.EaseInOut,
         onFinish: () => {
           layer.destroyChildren();
-          layer.batchDraw();
+          layer.getLayer()?.batchDraw();
         },
       }),
     ];
@@ -3769,7 +3769,7 @@ export function MindmapEditorView({
     return () => {
       tweens.forEach((t) => t.destroy());
       layer.destroyChildren();
-      layer.batchDraw();
+      layer.getLayer()?.batchDraw();
     };
   }, [morphSignal]);
 

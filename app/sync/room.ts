@@ -257,7 +257,7 @@ export class NoteRoom extends DurableObject<Env["Bindings"]> {
     return [
       this.env.DB.prepare("INSERT INTO note_backups (id, note_id, user_id, title, content, version, created_at) SELECT ?, id, user_id, ?, ?, version, ? FROM notes WHERE id = ? AND version = ? AND deleted_at IS NULL")
         .bind(id, snapshot.model.title, content, new Date(now).toISOString(), row.id, row.version),
-      this.env.DB.prepare("DELETE FROM note_backups WHERE note_id = ? AND id NOT IN (SELECT id FROM note_backups WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT ?)")
+      this.env.DB.prepare("DELETE FROM note_backups WHERE note_id = ? AND id NOT IN (SELECT id FROM note_backups WHERE note_id = ? ORDER BY created_at DESC, version DESC LIMIT ?)")
         .bind(row.id, row.id, MAX_BACKUPS_PER_NOTE),
     ];
   }
