@@ -41,19 +41,49 @@ const NODE_MIN_HEIGHT = 40;
  * The curve is deliberately kept short (well under the vertical offset it
  * bridges) for a compact map; a wide fan gets steeper S-curves in exchange.
  */
-const HORIZONTAL_GAP_STEPS: readonly { maxDy: number; gap: number }[] = [
-  { maxDy: 33, gap: 60 },
-  { maxDy: 73, gap: 76 },
-  { maxDy: 120, gap: 88 },
-];
-const HORIZONTAL_GAP_MAX = 100;
+export type BranchSpacing = "compact" | "normal" | "wide";
+
+interface GapSteps {
+  steps: readonly { maxDy: number; gap: number }[];
+  max: number;
+}
+
+/**
+ * How tightly branches are packed, chosen by the user (editor preference
+ * `branchSpacing`). "wide" is the historical fixed 120px gap; the others
+ * shorten the run for children that don't fan out far.
+ */
+export const BRANCH_SPACING_STEPS = {
+  compact: {
+    steps: [
+      { maxDy: 33, gap: 60 },
+      { maxDy: 73, gap: 76 },
+      { maxDy: 120, gap: 88 },
+    ],
+    max: 100,
+  },
+  normal: {
+    steps: [
+      { maxDy: 33, gap: 66 },
+      { maxDy: 73, gap: 90 },
+    ],
+    max: 120,
+  },
+  wide: { steps: [], max: 120 },
+} as const satisfies Record<BranchSpacing, GapSteps>;
+
+export const DEFAULT_BRANCH_SPACING: BranchSpacing = "compact";
 
 /** Gap for a parent whose farthest child centre is `spread` px off its own. */
-export function horizontalGap(spread: number): number {
-  for (const step of HORIZONTAL_GAP_STEPS) {
+export function horizontalGap(
+  spread: number,
+  spacing: BranchSpacing = DEFAULT_BRANCH_SPACING
+): number {
+  const { steps, max }: GapSteps = BRANCH_SPACING_STEPS[spacing];
+  for (const step of steps) {
     if (spread <= step.maxDy) return step.gap;
   }
-  return HORIZONTAL_GAP_MAX;
+  return max;
 }
 // Exported: dragDrop.ts and MindmapEditor.tsx derive their sibling-gap-sized
 // offsets from this so they stay in sync instead of re-typing the gap as an
@@ -135,7 +165,8 @@ export function assignNodePositions(
   nodes: LayoutNode[],
   layoutMap: Map<string, NodeLayout>,
   startX: number = 100,
-  startY: number = 300
+  startY: number = 300,
+  spacing: BranchSpacing = DEFAULT_BRANCH_SPACING
 ): void {
   if (nodes.length === 0) return;
 
@@ -177,7 +208,7 @@ export function assignNodePositions(
       currentY += childLayout.subtreeHeight + VERTICAL_GAP;
     });
     const childX =
-      (parentLayout.x ?? 0) + parentLayout.width + horizontalGap(spread);
+      (parentLayout.x ?? 0) + parentLayout.width + horizontalGap(spread, spacing);
 
     parent.children.forEach((childId) => {
       const childLayout = layoutMap.get(childId);
@@ -234,9 +265,10 @@ export function assignNodePositions(
 }
 
 export function layoutMindMap(
-  nodes: LayoutNode[]
+  nodes: LayoutNode[],
+  spacing: BranchSpacing = DEFAULT_BRANCH_SPACING
 ): Map<string, NodeLayout> {
   const layoutMap = calculateNodeSizes(nodes);
-  assignNodePositions(nodes, layoutMap);
+  assignNodePositions(nodes, layoutMap, undefined, undefined, spacing);
   return layoutMap;
 }

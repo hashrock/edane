@@ -1,12 +1,25 @@
 import { useEffect } from "react";
-import type { EditorPreferences } from "../application/editorPreferences";
+import {
+  BRANCH_SPACINGS,
+  type EditorPreferences,
+} from "../application/editorPreferences";
 import { LOCALE_LABELS, LOCALES, setLocale, t } from "../application/i18n";
+import type { MessageKey } from "../application/messages";
 import {
   DEFAULT_ACCENT,
   setAccent,
 } from "../application/accentColor";
 import { useAccent } from "./useAccent";
 import { useLocale } from "./useLocale";
+
+const BRANCH_SPACING_TEXT = {
+  compact: { label: "branchSpacingCompactLabel", desc: "branchSpacingCompactDesc" },
+  normal: { label: "branchSpacingNormalLabel", desc: "branchSpacingNormalDesc" },
+  wide: { label: "branchSpacingWideLabel", desc: "branchSpacingWideDesc" },
+} as const satisfies Record<
+  EditorPreferences["branchSpacing"],
+  { label: MessageKey; desc: MessageKey }
+>;
 
 interface Props {
   open: boolean;
@@ -250,6 +263,23 @@ export default function EditorSettingsDialog({
                 t("arrowNavigateLabel"),
                 t("arrowNavigateDesc"),
                 () => onChange({ ...prefs, arrowBehavior: "navigate" })
+              )}
+            </div>
+          </section>
+          <section>
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {t("branchSpacingHeading")}
+            </h3>
+            <div className="space-y-1.5">
+              {BRANCH_SPACINGS.map((s) =>
+                radio(
+                  "branchSpacing",
+                  prefs.branchSpacing === s,
+                  false,
+                  t(BRANCH_SPACING_TEXT[s].label),
+                  t(BRANCH_SPACING_TEXT[s].desc),
+                  () => onChange({ ...prefs, branchSpacing: s })
+                )
               )}
             </div>
           </section>

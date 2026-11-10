@@ -173,3 +173,26 @@ describe("layoutMindMap horizontal gap follows the children's fan-out", () => {
     }
   });
 });
+
+describe("layoutMindMap branch spacing setting", () => {
+  const kids = Array.from({ length: 6 }, (_, i) => `c${i}`);
+  const spec = (): LayoutNode[] =>
+    nodes([["root", ["a", ...kids]], ["a", ["a1"]], ["a1", []], ...kids.map((k): [string, string[]] => [k, []])]);
+  const gap = (spacing: "compact" | "normal" | "wide", parent: string, child: string) => {
+    const layout = layoutMindMap(spec(), spacing);
+    const p = layout.get(parent)!;
+    return layout.get(child)!.x! - (p.x! + p.width);
+  };
+
+  it("never packs a looser setting tighter than a tighter one", () => {
+    for (const [parent, child] of [["root", "a"], ["a", "a1"]] as const) {
+      expect(gap("compact", parent, child)).toBeLessThanOrEqual(gap("normal", parent, child));
+      expect(gap("normal", parent, child)).toBeLessThanOrEqual(gap("wide", parent, child));
+    }
+  });
+
+  it("'wide' keeps the historical fixed 120px gap regardless of fan-out", () => {
+    expect(gap("wide", "root", "a")).toBe(120);
+    expect(gap("wide", "a", "a1")).toBe(120);
+  });
+});

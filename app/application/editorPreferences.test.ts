@@ -26,6 +26,7 @@ describe("loadPreferences", () => {
       tabBehavior: "insert-child",
       enterBehavior: "edit",
       arrowBehavior: "navigate",
+      branchSpacing: "wide",
     } as const;
     savePreferences(prefs, storage);
     expect(loadPreferences(storage)).toEqual(prefs);
@@ -40,6 +41,7 @@ describe("loadPreferences", () => {
         tabBehavior: "insert-child",
         enterBehavior: "edit",
         arrowBehavior: "sideways",
+        branchSpacing: "huge",
       })
     );
     expect(loadPreferences(storage)).toEqual({
@@ -47,6 +49,7 @@ describe("loadPreferences", () => {
       tabBehavior: "insert-child",
       enterBehavior: "edit",
       arrowBehavior: DEFAULT_PREFERENCES.arrowBehavior,
+      branchSpacing: DEFAULT_PREFERENCES.branchSpacing,
     });
   });
 
