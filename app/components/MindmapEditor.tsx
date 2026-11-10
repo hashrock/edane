@@ -747,11 +747,11 @@ export function MindmapEditorView({
         : undefined
     );
     if (flat.length > 0) {
-      layoutMindMap(flat);
+      layoutMindMap(flat, prefs.branchSpacing);
     }
     return flat;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, editing, activeNodeId, activeIsCustom, editingText, imageVersion]);
+  }, [model, editing, activeNodeId, activeIsCustom, editingText, imageVersion, prefs.branchSpacing]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 

@@ -198,3 +198,38 @@ describe("settings dialog", () => {
     });
   });
 });
+
+describe("preference: branchSpacing", () => {
+  it("switching to 'wide' in the settings dialog lengthens a short branch on the canvas", async () => {
+    await renderEditor();
+    const gap = () => {
+      const a = api().getNodeRect("a");
+      const a1 = api().getNodeRect("a1");
+      return a && a1 ? a1.x - (a.x + a.width) : null;
+    };
+    const before = await waitFor(gap);
+
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await waitFor(
+      () =>
+        (document.activeElement as HTMLInputElement | null)?.placeholder ===
+        "Search commands..."
+    );
+    await userEvent.keyboard("Editor settings");
+    await userEvent.keyboard("{Enter}");
+    const radios = await waitFor(() => {
+      const els = document.querySelectorAll<HTMLInputElement>(
+        '[aria-label="Editor settings"] input[name="branchSpacing"]'
+      );
+      return els.length === 3 ? els : null;
+    });
+    expect(radios[0].checked).toBe(true); // compact is the default
+    radios[2].click(); // wide
+
+    await waitFor(() => {
+      const raw = localStorage.getItem(PREFERENCES_KEY);
+      return raw !== null && JSON.parse(raw).branchSpacing === "wide";
+    });
+    await waitFor(() => (gap() ?? 0) > before);
+  });
+});

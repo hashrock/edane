@@ -11,6 +11,7 @@
 
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
 import { closedStringSet } from "../domain/isKeyOf";
+import { DEFAULT_BRANCH_SPACING, type BranchSpacing } from "../lib/treeLayout";
 
 export interface EditorPreferences {
   /**
@@ -46,6 +47,13 @@ export interface EditorPreferences {
    *              so focus never lands on a hidden node); folding is ⌘/Ctrl+.
    */
   arrowBehavior: "collapse" | "navigate";
+  /**
+   * How long the canvas branches run from a parent to its children:
+   * "compact" = as short as the children's vertical fan-out allows,
+   * "normal"  = a little roomier, "wide" = the fixed long run (pre-compaction
+   * look). Applies in either mode — it is a display setting.
+   */
+  branchSpacing: BranchSpacing;
 }
 
 export const DEFAULT_PREFERENCES: EditorPreferences = {
@@ -53,6 +61,7 @@ export const DEFAULT_PREFERENCES: EditorPreferences = {
   tabBehavior: "insert-child",
   enterBehavior: "insert-sibling",
   arrowBehavior: "navigate",
+  branchSpacing: DEFAULT_BRANCH_SPACING,
 };
 
 export const PREFERENCES_KEY = "edane:editor-preferences";
@@ -105,6 +114,19 @@ const { is: isArrowBehavior, values: ARROW_BEHAVIORS } =
 /** Every `arrowBehavior` member, derived like {@link TAB_BEHAVIORS}. */
 export { ARROW_BEHAVIORS };
 
+/** Same exhaustiveness trick as {@link TAB_BEHAVIOR_SET}, for `branchSpacing`. */
+const BRANCH_SPACING_SET = {
+  compact: true,
+  normal: true,
+  wide: true,
+} as const satisfies Record<EditorPreferences["branchSpacing"], true>;
+
+const { is: isBranchSpacing, values: BRANCH_SPACINGS } =
+  closedStringSet(BRANCH_SPACING_SET);
+
+/** Every `branchSpacing` member, derived like {@link TAB_BEHAVIORS}. */
+export { BRANCH_SPACINGS };
+
 /**
  * Read preferences from storage. Unknown fields are dropped and invalid
  * or missing values fall back to the defaults, so a stale or hand-edited
@@ -133,6 +155,9 @@ export function loadPreferences(
       arrowBehavior: isArrowBehavior(parsed.arrowBehavior)
         ? parsed.arrowBehavior
         : DEFAULT_PREFERENCES.arrowBehavior,
+      branchSpacing: isBranchSpacing(parsed.branchSpacing)
+        ? parsed.branchSpacing
+        : DEFAULT_PREFERENCES.branchSpacing,
     };
   } catch {
     return { ...DEFAULT_PREFERENCES };

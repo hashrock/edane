@@ -25,6 +25,7 @@ import { buildKeymap, type KeyBinding } from "./editorKeymap";
 import type { PasteSource } from "./editorCommands";
 import {
   ARROW_BEHAVIORS,
+  BRANCH_SPACINGS,
   ENTER_BEHAVIORS,
   TAB_BEHAVIORS,
   type EditorPreferences,
@@ -131,6 +132,7 @@ export const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   tabBehavior: fc.constantFrom(...TAB_BEHAVIORS),
   enterBehavior: fc.constantFrom(...ENTER_BEHAVIORS),
   arrowBehavior: arrowBehaviorArb,
+  branchSpacing: fc.constantFrom(...BRANCH_SPACINGS),
 });
 
 /** buildKeymap is pure in (prefs, layout); build each combination once. */

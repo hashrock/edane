@@ -9,6 +9,7 @@ import fc from "fast-check";
 import { memoryStorage } from "./browserStorage";
 import {
   ARROW_BEHAVIORS,
+  BRANCH_SPACINGS,
   DEFAULT_PREFERENCES,
   ENTER_BEHAVIORS,
   loadPreferences,
@@ -23,6 +24,7 @@ const VALID = {
   tabBehavior: TAB_BEHAVIORS,
   enterBehavior: ENTER_BEHAVIORS,
   arrowBehavior: ARROW_BEHAVIORS,
+  branchSpacing: BRANCH_SPACINGS,
 } as const satisfies Record<keyof EditorPreferences, readonly unknown[]>;
 
 const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
@@ -30,6 +32,7 @@ const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   tabBehavior: fc.constantFrom(...VALID.tabBehavior),
   enterBehavior: fc.constantFrom(...VALID.enterBehavior),
   arrowBehavior: fc.constantFrom(...VALID.arrowBehavior),
+  branchSpacing: fc.constantFrom(...VALID.branchSpacing),
 });
 
 function expectValid(p: EditorPreferences) {
