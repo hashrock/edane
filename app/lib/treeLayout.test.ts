@@ -168,7 +168,7 @@ describe("layoutMindMap horizontal gap follows the children's fan-out", () => {
     for (let s = 0; s <= 500; s += 1) {
       const g = horizontalGap(s);
       expect(g).toBeGreaterThanOrEqual(prev);
-      expect(g).toBeLessThanOrEqual(120);
+      expect(g).toBeLessThanOrEqual(100);
       prev = g;
     }
   });

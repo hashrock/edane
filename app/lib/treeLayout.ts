@@ -37,14 +37,16 @@ const NODE_MIN_HEIGHT = 40;
  *
  * Each step: children whose centre is at most `maxDy` above/below the
  * parent's centre fit in `gap`. The first ~46px of every gap is the collapse
- * toggle plus the connector stub (see MindmapEditor), the rest is the curve,
- * sized at roughly 0.6 × the vertical offset it has to bridge.
+ * toggle plus the connector stub (see MindmapEditor), the rest is the curve.
+ * The curve is deliberately kept short (well under the vertical offset it
+ * bridges) for a compact map; a wide fan gets steeper S-curves in exchange.
  */
 const HORIZONTAL_GAP_STEPS: readonly { maxDy: number; gap: number }[] = [
-  { maxDy: 33, gap: 66 },
-  { maxDy: 73, gap: 90 },
+  { maxDy: 33, gap: 60 },
+  { maxDy: 73, gap: 76 },
+  { maxDy: 120, gap: 88 },
 ];
-const HORIZONTAL_GAP_MAX = 120;
+const HORIZONTAL_GAP_MAX = 100;
 
 /** Gap for a parent whose farthest child centre is `spread` px off its own. */
 export function horizontalGap(spread: number): number {
