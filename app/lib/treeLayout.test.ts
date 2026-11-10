@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { LayoutNode } from "./treeLayout";
-import { layoutMindMap, calculateNodeSizes, assignNodePositions } from "./treeLayout";
+import { layoutMindMap, calculateNodeSizes, assignNodePositions, horizontalGap } from "./treeLayout";
 
 /** Build flat LayoutNode[] (id + children-ids) from a compact spec. */
 function nodes(
@@ -124,5 +124,52 @@ describe("multi-root layout", () => {
     // r1 は配置済みツリーと同じ位置に重なったままでよい。
     expect([m.r1.x, m.r1.y]).toEqual([100, 300]);
     expect(m.r2.y).toBeGreaterThan(m.r1.y + 32);
+  });
+});
+
+describe("layoutMindMap horizontal gap follows the children's fan-out", () => {
+  const gapOf = (ns: LayoutNode[], parent: string, child: string) => {
+    const layout = layoutMindMap(ns);
+    const p = layout.get(parent)!;
+    return layout.get(child)!.x! - (p.x! + p.width);
+  };
+
+  it("keeps a single level child close (short, straight connector)", () => {
+    const ns = nodes([
+      ["root", ["c1"]],
+      ["c1", []],
+    ]);
+    expect(gapOf(ns, "root", "c1")).toBe(horizontalGap(0));
+  });
+
+  it("gives a widely fanned parent the full gap", () => {
+    const kids = Array.from({ length: 6 }, (_, i) => `c${i}`);
+    const ns = nodes([["root", kids], ...kids.map((k): [string, string[]] => [k, []])]);
+    expect(gapOf(ns, "root", "c0")).toBe(horizontalGap(1000));
+  });
+
+  it("sizes the gap per parent: siblings share a column, a narrow branch stays short", () => {
+    const ns = nodes([
+      ["root", ["a", "b", "c", "d"]],
+      ["a", ["a1"]],
+      ["a1", []],
+      ["b", []],
+      ["c", []],
+      ["d", []],
+    ]);
+    const layout = layoutMindMap(ns);
+    const xs = new Set(["a", "b", "c", "d"].map((id) => layout.get(id)!.x));
+    expect(xs.size).toBe(1);
+    expect(gapOf(ns, "a", "a1")).toBeLessThan(gapOf(ns, "root", "a"));
+  });
+
+  it("is monotone and bounded in the spread", () => {
+    let prev = horizontalGap(0);
+    for (let s = 0; s <= 500; s += 1) {
+      const g = horizontalGap(s);
+      expect(g).toBeGreaterThanOrEqual(prev);
+      expect(g).toBeLessThanOrEqual(120);
+      prev = g;
+    }
   });
 });

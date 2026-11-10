@@ -26,7 +26,33 @@ interface NodeLayout {
 
 // Slot floor so single-line nodes keep their original vertical rhythm.
 const NODE_MIN_HEIGHT = 40;
-const HORIZONTAL_GAP = 120;
+/**
+ * Horizontal gap between a parent's box and its children's column, chosen per
+ * parent from how far its children fan out vertically. A connector only needs
+ * horizontal room to bend: a child level with its parent is nearly a straight
+ * line, a widely fanned set needs the long run so the S-curves don't go steep.
+ * The gap is quantized to a few steps (rather than a continuous function of
+ * the spread) so adding a sibling only rarely shifts the whole branch
+ * sideways.
+ *
+ * Each step: children whose centre is at most `maxDy` above/below the
+ * parent's centre fit in `gap`. The first ~46px of every gap is the collapse
+ * toggle plus the connector stub (see MindmapEditor), the rest is the curve,
+ * sized at roughly 0.6 × the vertical offset it has to bridge.
+ */
+const HORIZONTAL_GAP_STEPS: readonly { maxDy: number; gap: number }[] = [
+  { maxDy: 33, gap: 66 },
+  { maxDy: 73, gap: 90 },
+];
+const HORIZONTAL_GAP_MAX = 120;
+
+/** Gap for a parent whose farthest child centre is `spread` px off its own. */
+export function horizontalGap(spread: number): number {
+  for (const step of HORIZONTAL_GAP_STEPS) {
+    if (spread <= step.maxDy) return step.gap;
+  }
+  return HORIZONTAL_GAP_MAX;
+}
 // Exported: dragDrop.ts and MindmapEditor.tsx derive their sibling-gap-sized
 // offsets from this so they stay in sync instead of re-typing the gap as an
 // independent constant.
@@ -133,7 +159,23 @@ export function assignNodePositions(
     });
 
     // Top of the children block, centered vertically on the parent.
-    let currentY = parentLayout.y - childrenBlock / 2;
+    const parentY = parentLayout.y;
+    let currentY = parentY - childrenBlock / 2;
+
+    // Children's vertical centres don't depend on x, so place them first and
+    // size the horizontal gap from how far they ended up from the parent.
+    const childYs = new Map<string, number>();
+    let spread = 0;
+    parent.children.forEach((childId) => {
+      const childLayout = layoutMap.get(childId);
+      if (!childLayout) return;
+      const y = currentY + childLayout.subtreeHeight / 2;
+      childYs.set(childId, y);
+      spread = Math.max(spread, Math.abs(y - parentY));
+      currentY += childLayout.subtreeHeight + VERTICAL_GAP;
+    });
+    const childX =
+      (parentLayout.x ?? 0) + parentLayout.width + horizontalGap(spread);
 
     parent.children.forEach((childId) => {
       const childLayout = layoutMap.get(childId);
@@ -141,14 +183,11 @@ export function assignNodePositions(
 
       const child = childLayout.node;
 
-      childLayout.x =
-        (parentLayout.x ?? 0) + parentLayout.width + HORIZONTAL_GAP;
-      childLayout.y = currentY + childLayout.subtreeHeight / 2;
+      childLayout.x = childX;
+      childLayout.y = childYs.get(childId)!;
 
       child.x = childLayout.x;
       child.y = childLayout.y;
-
-      currentY += childLayout.subtreeHeight + VERTICAL_GAP;
 
       positionChildren(childId);
     });
