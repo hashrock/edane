@@ -32,16 +32,18 @@ function isSeparator(item: ContextMenuItem): item is ContextMenuSeparator {
 }
 
 interface Props {
-  /** Viewport (clientX/clientY) coordinates of the click. */
+  /** Viewport (clientX/clientY) coordinates of the click (or right edge when align="right"). */
   x: number;
   y: number;
+  /** Align the menu's left edge (default) or right edge to `x`. */
+  align?: "left" | "right";
   items: ContextMenuItem[];
   onClose: () => void;
 }
 
-export default function ContextMenu({ x, y, items, onClose }: Props) {
+export default function ContextMenu({ x, y, align = "left", items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   // Close on outside click, Escape, scroll, or resize.
   useEffect(() => {
@@ -63,24 +65,28 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
     };
   }, [onClose]);
 
-  // Keep the menu inside the viewport.
+  // Measure at left: 0 (unconstrained by the right edge), then place inside the viewport.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    let nx = x;
+    let nx = align === "right" ? x - rect.width : x;
     let ny = y;
-    if (x + rect.width > window.innerWidth) nx = window.innerWidth - rect.width - 8;
-    if (y + rect.height > window.innerHeight)
+    if (nx + rect.width > window.innerWidth) nx = window.innerWidth - rect.width - 8;
+    if (ny + rect.height > window.innerHeight)
       ny = window.innerHeight - rect.height - 8;
     setPos({ x: Math.max(8, nx), y: Math.max(8, ny) });
-  }, [x, y]);
+  }, [x, y, align]);
 
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
-      style={{ left: pos.x, top: pos.y }}
+      className="fixed z-50 min-w-[180px] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+      style={
+        pos
+          ? { left: pos.x, top: pos.y }
+          : { left: 0, top: 0, visibility: "hidden" }
+      }
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, i) =>
