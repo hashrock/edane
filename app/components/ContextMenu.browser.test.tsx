@@ -91,4 +91,24 @@ describe("ContextMenu disabled items (browser e2e)", () => {
     expect(picks()).toEqual(["編集する"]);
     expect(closes()).toEqual([1]);
   });
+
+  it('aligns the right edge of the menu to x when align="right"', async () => {
+    const anchorRight = 400;
+    render(
+      <>
+        <style>{".fixed { position: fixed; width: 180px; }"}</style>
+        <ContextMenu
+          x={anchorRight}
+          y={40}
+          align="right"
+          onClose={() => {}}
+          items={[{ label: "右揃え確認", onSelect: () => {} }]}
+        />
+      </>
+    );
+    const btn = await itemByLabel("右揃え確認");
+    const menuEl = btn.parentElement!;
+    await waitFor(() => Math.round(menuEl.getBoundingClientRect().right) === anchorRight);
+    expect(Math.round(menuEl.getBoundingClientRect().right)).toBe(anchorRight);
+  });
 });

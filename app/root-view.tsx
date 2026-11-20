@@ -16,7 +16,7 @@ const Document = ({ page }: { page: PageObject }) => (
       {/* hashrock のサービス切り替え（components/ServiceSwitcher.tsx）。repos が落ちても読み込みが失敗するだけ */}
       <script type="module" src="https://repos.hashrock.info/switcher/v1.js" />
     </head>
-    <body className="bg-slate-50 min-h-screen">
+    <body className="bg-slate-50 min-h-screen text-slate-900">
       <script
         data-page="app"
         type="application/json"
