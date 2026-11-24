@@ -27,6 +27,7 @@ describe("loadPreferences", () => {
       enterBehavior: "edit",
       arrowBehavior: "navigate",
       branchSpacing: "wide",
+      customKeys: { bold: { key: "j", mod: true, shift: false, alt: false } },
     } as const;
     savePreferences(prefs, storage);
     expect(loadPreferences(storage)).toEqual(prefs);
@@ -42,6 +43,16 @@ describe("loadPreferences", () => {
         enterBehavior: "edit",
         arrowBehavior: "sideways",
         branchSpacing: "huge",
+        customKeys: {
+          bold: { key: "j", mod: true, shift: false, alt: false },
+          // Never assignable: an arrow, a plain letter, the clipboard chord.
+          "toggle-collapse": { key: "ArrowLeft", mod: true, shift: false, alt: false },
+          palette: { key: "p", mod: false, shift: false, alt: false },
+          present: { key: "c", mod: true, shift: false, alt: false },
+          // Same combo as bold: the later id loses it.
+          "toggle-task": { key: "j", mod: true, shift: false, alt: false },
+          nonsense: { key: "q", mod: true, shift: false, alt: false },
+        },
       })
     );
     expect(loadPreferences(storage)).toEqual({
@@ -50,6 +61,7 @@ describe("loadPreferences", () => {
       enterBehavior: "edit",
       arrowBehavior: DEFAULT_PREFERENCES.arrowBehavior,
       branchSpacing: DEFAULT_PREFERENCES.branchSpacing,
+      customKeys: { bold: { key: "j", mod: true, shift: false, alt: false } },
     });
   });
 

@@ -31,6 +31,7 @@ import {
   type EditorPreferences,
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
+import { CUSTOM_KEY_IDS, type CustomKeys, type KeyCombo } from "./keyCombo";
 
 /**
  * The `{kind:"branch"}` arm of `PasteSource`: the clipboard's own subtree (a
@@ -125,6 +126,30 @@ export function onTrailingEdge(model: MindMapDocument, nodeId: string): boolean 
   return true;
 }
 
+/**
+ * Any key a user could press, including the ones that must never be
+ * assignable (arrows, Enter, Tab, …) and the built-in chords — buildKeymap is
+ * expected to shrug those off, so the keyboard invariants are checked with
+ * hostile custom keys too.
+ */
+export const keyComboArb: fc.Arbitrary<KeyCombo> = fc.record({
+  key: fc.constantFrom(
+    "a", "b", "d", "e", "g", "k", "o", "z", ".", "/", "?", ";", "1",
+    "F2", "F5", "F7", "F12",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "Enter", "Tab", "Backspace", "Delete", "Escape", " "
+  ),
+  mod: fc.boolean(),
+  shift: fc.boolean(),
+  alt: fc.boolean(),
+});
+/** Raw (unvalidated) custom keys, as hand-edited storage might hold them. */
+export const customKeysArb: fc.Arbitrary<CustomKeys> = fc.dictionary(
+  fc.constantFrom(...CUSTOM_KEY_IDS),
+  keyComboArb,
+  { maxKeys: 4 }
+) as fc.Arbitrary<CustomKeys>;
+
 export const layoutArb = fc.constantFrom<EditorLayout>("canvas", "outline");
 export const arrowBehaviorArb = fc.constantFrom(...ARROW_BEHAVIORS);
 export const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
@@ -133,6 +158,7 @@ export const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   enterBehavior: fc.constantFrom(...ENTER_BEHAVIORS),
   arrowBehavior: arrowBehaviorArb,
   branchSpacing: fc.constantFrom(...BRANCH_SPACINGS),
+  customKeys: customKeysArb,
 });
 
 /** buildKeymap is pure in (prefs, layout); build each combination once. */
