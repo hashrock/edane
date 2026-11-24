@@ -19,6 +19,7 @@ import {
   firstRootId,
   getFlatOrder,
   isRoot,
+  locateNode,
   subtreeIds,
 } from "../domain/model";
 import {
@@ -48,6 +49,7 @@ import {
 } from "./stagePanZoom";
 import { zoomAt, panBy, MIN_SCALE } from "../lib/panZoom";
 import { edgeScrollVelocity } from "../lib/dragAutoScroll";
+import { createLongPress, type LongPress } from "../lib/longPress";
 import {
   useNoteEditor,
   leaveDialogMessage,
@@ -126,7 +128,18 @@ import ShortcutHelp from "./ShortcutHelp";
 import ConfirmDialog from "./ConfirmDialog";
 import MarkdownPasteDialog from "./MarkdownPasteDialog";
 import PublishNodeDialog from "./PublishNodeDialog";
-import type { EditorState, ViewState } from "../application/editorReducer";
+import type {
+  EditorAction,
+  EditorState,
+  UndoType,
+  ViewState,
+} from "../application/editorReducer";
+import {
+  detectKeyPlatform,
+  menuShortcut,
+  platformKeys,
+  type MenuCommand,
+} from "../application/menuShortcuts";
 import {
   buildKeymap,
   runKeymap,
@@ -597,6 +610,11 @@ export function MindmapEditorView({
   const updateGridRef = useRef<() => void>(() => {});
   const lineDataRef = useRef<Map<string, LineData>>(new Map());
   const dragStateRef = useRef<DragState | null>(null);
+  // Touch long-press → context menu (iOS never fires `contextmenu`). Armed by
+  // a one-finger touchstart on a node or on empty canvas; see lib/longPress.
+  const longPressRef = useRef<LongPress<
+    { nodeId: string } | { at: { x: number; y: number } }
+  > | null>(null);
   // Re-click on the already-selected node: the intent to enter edit mode is
   // recorded at mousedown but only committed on release, so a press that turns
   // into a drag (branch move / text selection) never flips into editing. Holds
@@ -1295,6 +1313,15 @@ export function MindmapEditorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pasteTextAsNodes, readOnly, locale, onPresent, noteId]);
 
+  // Central keymap: a single declarative table (see editorKeymap.ts) drives all
+  // shortcuts, so bindings stay auditable and the help overlay is generated
+  // from the same source — and so does the context menu's key hints.
+  const keymap = useMemo<KeyBinding[]>(
+    () => buildKeymap(prefs, "canvas", verticalMove),
+    [prefs]
+  );
+  const keyPlatform = useMemo(() => detectKeyPlatform(), []);
+
   // --- Right-click context menu items (for the node under the cursor) ---
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     if (!contextMenu) return [];
@@ -1343,6 +1370,29 @@ export function MindmapEditorView({
         ? selectedIds
         : [nodeId];
     const bulk = targetIds.length > 1;
+    /** The key that does the same as a menu item, if the current keymap has one. */
+    const keyHint = (command: MenuCommand): string | undefined => {
+      const keys = menuShortcut(keymap, command);
+      return keys === undefined ? undefined : platformKeys(keys, keyPlatform);
+    };
+    /**
+     * Run an active-node keyboard action (reorder / indent) on the clicked
+     * node: select it first, exactly as clicking it would, so the result is
+     * the same as pressing the hinted key on it.
+     */
+    const onClickedNode = (action: EditorAction, undoType: UndoType) => () => {
+      dispatch({
+        type: "activateNode",
+        nodeId,
+        cursorPos: 0,
+        selectionEnd: node.text.length,
+        editing: false,
+      });
+      const next = dispatch(action, undoType);
+      flashNodes([nodeId]);
+      if (noteId) saveNote(next.document.model);
+      focusEditorSoon();
+    };
     /** Save after a bulk edit and hand the keyboard back to the canvas. */
     const afterBulk = (next: EditorState) => {
       if (noteId) saveNote(next.document.model);
@@ -1377,9 +1427,27 @@ export function MindmapEditorView({
 
     // --- Structure: add child / collapse ---
     const structureGroup: ContextMenuAction[] = [];
+    if (!readOnly && !bulk) {
+      structureGroup.push({
+        label: t("menuEditText"),
+        shortcut: keyHint("edit"),
+        onSelect: () => {
+          dispatch({
+            type: "activateNode",
+            nodeId,
+            cursorPos: 0,
+            selectionEnd: node.text.length,
+            editing: false,
+          });
+          dispatch({ type: "startEditing" });
+          focusEditorSoon();
+        },
+      });
+    }
     if (!readOnly) {
       structureGroup.push({
         label: t("menuAddChild"),
+        shortcut: keyHint("addChild"),
         onSelect: () => {
           const next = dispatch({ type: "addChild", nodeId }, "add-child");
           if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
@@ -1394,32 +1462,13 @@ export function MindmapEditorView({
       if (!isRoot(modelRef.current, nodeId)) {
         structureGroup.push({
           label: t("menuAddSibling"),
+          shortcut: keyHint("addSibling"),
           onSelect: () => {
             const next = dispatch(
               { type: "insertSiblingAfter", nodeId },
               "insert-sibling"
             );
             if (next.view.activeNodeId) flashNodes([next.view.activeNodeId]);
-            if (noteId) saveNote(next.document.model);
-            focusEditorSoon();
-          },
-        });
-        // Cut the branch out of its tree and make it a tree of its own — the
-        // menu equivalent of dragging it onto empty canvas, for the same
-        // deliberate "trees are only created on purpose" list. It is placed
-        // at its current layout anchor so the branch itself doesn't move;
-        // the old tree reflows around the hole (they may overlap until the
-        // user drags one away — see treeLayout).
-        structureGroup.push({
-          label: t("menuDetachBranch"),
-          onSelect: () => {
-            const laid = nodesRef.current.find((n) => n.id === nodeId);
-            if (!laid) return;
-            const next = dispatch(
-              { type: "placeBranchAt", nodeId, x: laid.x, y: laid.y },
-              "move-branch"
-            );
-            flashNodes([nodeId]);
             if (noteId) saveNote(next.document.model);
             focusEditorSoon();
           },
@@ -1434,6 +1483,7 @@ export function MindmapEditorView({
     if (collapsePlan) {
       structureGroup.push({
         label: collapsePlan.collapsed ? t("menuCollapse") : t("menuExpand"),
+        shortcut: keyHint("toggleCollapse"),
         onSelect: () => {
           // The single-node path keeps going through the component's
           // toggleCollapse: it drives the fold/unfold morph animation, which
@@ -1456,6 +1506,67 @@ export function MindmapEditorView({
       });
     }
     groups.push(structureGroup);
+
+    // --- Arrange: reorder / re-parent / detach (single node, like the keys) ---
+    const arrangeGroup: ContextMenuAction[] = [];
+    if (!readOnly && !bulk) {
+      const loc = locateNode(modelRef.current, nodeId);
+      const index = loc ? loc.siblings.findIndex((n) => n.id === nodeId) : -1;
+      if (loc && index > 0) {
+        arrangeGroup.push({
+          label: t("kmMoveNodeUp"),
+          shortcut: keyHint("moveUp"),
+          onSelect: onClickedNode({ type: "moveNodeUp" }, "reorder"),
+        });
+      }
+      if (loc && index >= 0 && index < loc.siblings.length - 1) {
+        arrangeGroup.push({
+          label: t("kmMoveNodeDown"),
+          shortcut: keyHint("moveDown"),
+          onSelect: onClickedNode({ type: "moveNodeDown" }, "reorder"),
+        });
+      }
+      // Indent needs a previous sibling to nest under; outdent needs a parent.
+      if (loc && index > 0) {
+        arrangeGroup.push({
+          label: t("kmIndent"),
+          shortcut: keyHint("indent"),
+          onSelect: onClickedNode({ type: "tab", shift: false }, "indent"),
+        });
+      }
+      if (loc && loc.parent !== null) {
+        arrangeGroup.push({
+          label: t("kmOutdent"),
+          shortcut: keyHint("outdent"),
+          onSelect: onClickedNode({ type: "tab", shift: true }, "indent"),
+        });
+      }
+    }
+    // Detach stays single-node even over a selection (it was offered there
+    // before the arrange items joined it).
+    if (!readOnly && !isRoot(modelRef.current, nodeId)) {
+        // Cut the branch out of its tree and make it a tree of its own — the
+        // menu equivalent of dragging it onto empty canvas, for the same
+        // deliberate "trees are only created on purpose" list. It is placed
+        // at its current layout anchor so the branch itself doesn't move;
+        // the old tree reflows around the hole (they may overlap until the
+        // user drags one away — see treeLayout).
+        arrangeGroup.push({
+          label: t("menuDetachBranch"),
+          onSelect: () => {
+            const laid = nodesRef.current.find((n) => n.id === nodeId);
+            if (!laid) return;
+            const next = dispatch(
+              { type: "placeBranchAt", nodeId, x: laid.x, y: laid.y },
+              "move-branch"
+            );
+            flashNodes([nodeId]);
+            if (noteId) saveNote(next.document.model);
+            focusEditorSoon();
+          },
+        });
+    }
+    groups.push(arrangeGroup);
 
     // --- Kind conversion ---
     const typeGroup: ContextMenuAction[] = [];
@@ -1501,6 +1612,9 @@ export function MindmapEditorView({
       if (plain.length > 0) {
         taskGroup.push({
           label: t("menuAddCheckbox"),
+        // ⌘/Ctrl+Shift+D gives a box-less node its box on the first press;
+        // when a toggle item follows, the hint goes there instead.
+        shortcut: tasked.length === 0 ? keyHint("toggleTask") : undefined,
           // Only the nodes without a box: a task already in the selection
           // keeps its done/open state instead of being reopened by the same
           // call (the "add" reads as "give the ones that have none").
@@ -1516,6 +1630,7 @@ export function MindmapEditorView({
       if (plan) {
         taskGroup.push({
           label: plan.checked ? t("menuCheckTask") : t("menuUncheckTask"),
+          shortcut: keyHint("toggleTask"),
           onSelect: () => applyChecked(plan.nodeIds, plan.checked),
         });
         taskGroup.push({
@@ -1579,6 +1694,7 @@ export function MindmapEditorView({
       const allBold = styled.every((n) => n.bold);
       formatGroup.push({
         label: allBold ? t("menuBoldOff") : t("menuBoldOn"),
+        shortcut: keyHint("bold"),
         onSelect: () => applyStyle({ bold: !allBold }),
       });
     }
@@ -1618,6 +1734,7 @@ export function MindmapEditorView({
     if (!readOnly) {
       dangerGroup.push({
         label: t("menuDeleteNode"),
+        shortcut: keyHint("delete"),
         danger: true,
         onSelect: () => {
           // Every selected branch goes in one undo entry. Unlike the edits
@@ -1634,6 +1751,15 @@ export function MindmapEditorView({
       });
     }
     groups.push(dangerGroup);
+
+    // --- Where the rest of the keys live ---
+    groups.push([
+      {
+        label: t("kmShortcutList"),
+        shortcut: keyHint("shortcutList"),
+        onSelect: () => setHelpOpen(true),
+      },
+    ]);
 
     // Join non-empty groups with divider separators.
     const items: ContextMenuItem[] = [];
@@ -1656,16 +1782,11 @@ export function MindmapEditorView({
     focusEditorSoon,
     selectedIds,
     locale,
+    keymap,
+    keyPlatform,
   ]);
 
   // --- Keyboard handling ---
-  // Central keymap: a single declarative table (see editorKeymap.ts) drives all
-  // shortcuts, so bindings stay auditable and the help overlay is generated
-  // from the same source.
-  const keymap = useMemo<KeyBinding[]>(
-    () => buildKeymap(prefs, "canvas", verticalMove),
-    [prefs]
-  );
   // The keymap only describes what a key wants; this carries it out.
   const keyDeps = useMemo<KeyEffectDeps>(
     () => ({
@@ -1740,6 +1861,7 @@ export function MindmapEditorView({
     const container = canvasRef.current;
     let detachWindowDragListeners: (() => void) | null = null;
     let detachPanZoom: (() => void) | null = null;
+    let detachLongPress: (() => void) | null = null;
 
     import("konva").then((mod) => {
       const Konva = mod.default;
@@ -2012,6 +2134,70 @@ export function MindmapEditorView({
           },
         });
       });
+
+      // Long press (touch): the same menus as a right-click, on a node or on
+      // empty canvas. When it fires, the press stops being a click or a drag:
+      // the armed drag and the click-to-edit intent are dropped, and the
+      // release is swallowed so no compat mouse event closes the menu again.
+      const longPress = createLongPress<
+        { nodeId: string } | { at: { x: number; y: number } }
+      >({
+        onFire: (target, x, y) => {
+          dragStateRef.current = null;
+          clickEditIntentRef.current = null;
+          if (stage.isDragging()) stage.stopDrag();
+          stage.draggable(false); // no pan under the open menu until release
+          setContextMenu(
+            "nodeId" in target
+              ? { x, y, nodeId: target.nodeId }
+              : { x, y, at: target.at }
+          );
+        },
+      });
+      longPressRef.current = longPress;
+      stage.on("touchstart", (e: any) => {
+        if (e.target !== stage || readOnly) return;
+        const touches: TouchList | undefined = e.evt.touches;
+        if (!touches || touches.length !== 1) return;
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+        const scale = stage.scaleX();
+        longPress.start(
+          {
+            at: {
+              x: (pointer.x - stage.x()) / scale,
+              y: (pointer.y - stage.y()) / scale,
+            },
+          },
+          touches[0].clientX,
+          touches[0].clientY
+        );
+      });
+      const onTouchStart = (ev: TouchEvent) => {
+        if (ev.touches.length > 1) longPress.cancel(); // a pinch, not a press
+      };
+      const onTouchMove = (ev: TouchEvent) => {
+        const touch = ev.touches[0];
+        if (touch) longPress.move(touch.clientX, touch.clientY);
+      };
+      const onTouchEnd = (ev: TouchEvent) => {
+        longPress.cancel();
+        if (longPress.fired && ev.touches.length === 0) {
+          if (ev.cancelable) ev.preventDefault();
+          stage.draggable(true);
+        }
+      };
+      container.addEventListener("touchstart", onTouchStart, { passive: true });
+      container.addEventListener("touchmove", onTouchMove, { passive: true });
+      container.addEventListener("touchend", onTouchEnd);
+      container.addEventListener("touchcancel", onTouchEnd);
+      detachLongPress = () => {
+        longPress.cancel();
+        container.removeEventListener("touchstart", onTouchStart);
+        container.removeEventListener("touchmove", onTouchMove);
+        container.removeEventListener("touchend", onTouchEnd);
+        container.removeEventListener("touchcancel", onTouchEnd);
+      };
 
       // Click on empty space: keep the node selected, just leave edit mode
       // (exactly one node is always selected). Skip if just finished dragging.
@@ -2372,6 +2558,8 @@ export function MindmapEditorView({
     return () => {
       detachWindowDragListeners?.();
       detachPanZoom?.();
+      detachLongPress?.();
+      longPressRef.current = null;
       if (konvaStageRef.current) {
         konvaStageRef.current.destroy();
         konvaStageRef.current = null;
@@ -3124,6 +3312,15 @@ export function MindmapEditorView({
 
       // Click → activate node
       group.on("mousedown touchstart", (e: any) => {
+        // One finger held still on the node opens its menu (long press).
+        const touches: TouchList | undefined = e.evt?.touches;
+        if (touches?.length === 1) {
+          longPressRef.current?.start(
+            { nodeId: node.id },
+            touches[0].clientX,
+            touches[0].clientY
+          );
+        }
         if (isNonPrimaryButton(e)) return;
         if (readOnly) {
           // 閲覧専用: 選択だけ行い、ドラッグはステージのパンに任せる
@@ -4098,7 +4295,7 @@ export function MindmapEditorView({
         <div
           ref={canvasRef}
           data-testid="mm-canvas"
-          className="absolute inset-0 [background-size:20px_20px]"
+          className="absolute inset-0 select-none [-webkit-touch-callout:none] [background-size:20px_20px]"
         />
         {dropActive && (
           <div
