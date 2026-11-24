@@ -7,6 +7,11 @@ type ContextMenuActionBase = {
   danger?: boolean;
   /** Optional leading icon. */
   icon?: React.ReactNode;
+  /**
+   * Key hint shown at the right edge ("⌘ ."). Callers derive it from the live
+   * keymap (application/menuShortcuts.ts) so it only names keys that fire.
+   */
+  shortcut?: string;
 };
 
 /**
@@ -54,11 +59,15 @@ export default function ContextMenu({ x, y, align = "left", items, onClose }: Pr
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("mousedown", onDown, true);
+    // Touch: a tap outside may not produce a compat mousedown (the canvas
+    // cancels its touch events), so listen for the pointer too.
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", onClose);
     window.addEventListener("wheel", onClose, { passive: true });
     return () => {
       window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("resize", onClose);
       window.removeEventListener("wheel", onClose);
@@ -81,7 +90,7 @@ export default function ContextMenu({ x, y, align = "left", items, onClose }: Pr
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-[180px] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+      className="fixed z-50 max-h-[calc(100vh-16px)] min-w-[180px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
       style={
         pos
           ? { left: pos.x, top: pos.y }
@@ -118,6 +127,14 @@ export default function ContextMenu({ x, y, align = "left", items, onClose }: Pr
                 </span>
               )}
             </span>
+            {item.shortcut && (
+              <kbd
+                data-testid="menu-shortcut"
+                className="shrink-0 whitespace-nowrap pt-0.5 pl-4 font-sans text-xs text-slate-400"
+              >
+                {item.shortcut}
+              </kbd>
+            )}
           </button>
         )
       )}

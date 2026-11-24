@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { KeyBinding } from "../application/editorKeymap";
 import { t } from "../application/i18n";
 import type { MessageKey } from "../application/messages";
+import { detectKeyPlatform, platformKeys } from "../application/menuShortcuts";
 import { useLocale } from "./useLocale";
 
 interface Props {
@@ -45,6 +46,7 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
   }, [open, onClose]);
 
   if (!open) return null;
+  const platform = detectKeyPlatform();
 
   return (
     <div
@@ -86,7 +88,7 @@ export default function ShortcutHelp({ bindings, open, onClose }: Props) {
                         {b.label === "" ? "" : t(b.label)}
                       </span>
                       <kbd className="whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-600">
-                        {b.keys}
+                        {platformKeys(b.keys, platform)}
                       </kbd>
                     </li>
                   ))}
