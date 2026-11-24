@@ -11,6 +11,9 @@ import {
 } from "../application/accentColor";
 import { useAccent } from "./useAccent";
 import { useLocale } from "./useLocale";
+import ShortcutKeysSection from "./ShortcutKeysSection";
+import { buildKeymap } from "../application/editorKeymap";
+import { detectKeyPlatform, platformKeys } from "../application/menuShortcuts";
 
 const BRANCH_SPACING_TEXT = {
   compact: { label: "branchSpacingCompactLabel", desc: "branchSpacingCompactDesc" },
@@ -54,6 +57,14 @@ export default function EditorSettingsDialog({
   }, [open, onClose]);
 
   if (!open) return null;
+
+  // The always-edit hint names keys the user may have reassigned: read them
+  // from the keymap that actually runs.
+  const alwaysEditKeys = buildKeymap({ ...prefs, selectionMode: false }, "canvas");
+  const keyOf = (id: string) => {
+    const keys = alwaysEditKeys.find((b) => b.id === id)?.keys ?? "";
+    return platformKeys(keys, detectKeyPlatform());
+  };
 
   const radio = (
     name: string,
@@ -183,15 +194,15 @@ export default function EditorSettingsDialog({
               <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
                 {t("alwaysEditHintPrefix")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
-                  ⌘/Ctrl + Shift + Backspace
+                  {keyOf("edit-delete-branch")}
                 </kbd>
                 {t("alwaysEditHintCollapse")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
-                  ⌘/Ctrl + .
+                  {keyOf("toggle-collapse")}
                 </kbd>
                 {t("alwaysEditHintHelp")}{" "}
                 <kbd className="rounded border border-slate-200 bg-white px-1 font-mono">
-                  ⌘/Ctrl + /
+                  {keyOf("help-slash")}
                 </kbd>
                 {t("alwaysEditHintSuffix")}
               </div>
@@ -266,6 +277,7 @@ export default function EditorSettingsDialog({
               )}
             </div>
           </section>
+          <ShortcutKeysSection prefs={prefs} onChange={onChange} />
           <section>
             <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
               {t("branchSpacingHeading")}

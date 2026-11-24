@@ -47,6 +47,14 @@ import {
   type EditorPreferences,
 } from "./editorPreferences";
 import type { EditorLayout } from "./editSurface";
+import {
+  CUSTOM_KEY_IDS,
+  comboMatches,
+  comboProblem,
+  formatCombo,
+  type CustomKeyId,
+  type KeyCombo,
+} from "./keyCombo";
 import { verticalMove as measuredVerticalMove } from "../lib/textGeometry";
 
 export type KeyMode = "selection" | "editing";
@@ -487,7 +495,7 @@ export function buildKeymap(
     run: () => handled(dispatch({ type: "exitEditing" })),
   };
 
-  return [
+  const table: KeyBinding[] = [
     // ---- Global (work regardless of mode / active node) ----
     {
       id: "palette",
@@ -802,6 +810,70 @@ export function buildKeymap(
     },
     ...(prefs.selectionMode ? [editEscape] : []),
   ];
+  return applyCustomKeys(table, prefs.customKeys);
+}
+
+/** A keydown that spells `combo`, with ⌘ (`meta`) or Ctrl as the primary modifier. */
+function comboEvent(combo: KeyCombo, meta: boolean): KeymapKeyEvent {
+  return {
+    key: combo.shift && combo.key.length === 1 ? combo.key.toUpperCase() : combo.key,
+    metaKey: combo.mod && meta,
+    ctrlKey: combo.mod && !meta,
+    shiftKey: combo.shift,
+    altKey: combo.alt,
+  };
+}
+
+/**
+ * The binding other than `id` that `combo` would also trigger, or null. Any
+ * overlap counts — whichever mode or table position the other binding has —
+ * so an assigned key never changes what an existing key does.
+ */
+export function customKeyConflict(
+  bindings: readonly KeyBinding[],
+  id: string,
+  combo: KeyCombo
+): KeyBinding | null {
+  return (
+    bindings.find(
+      (b) =>
+        b.id !== id &&
+        (b.match(comboEvent(combo, true)) || b.match(comboEvent(combo, false)))
+    ) ?? null
+  );
+}
+
+/** `b` answering to `combo` instead of its built-in key. */
+function rebind(b: KeyBinding, combo: KeyCombo): KeyBinding {
+  return { ...b, keys: formatCombo(combo), match: (e) => comboMatches(combo, e) };
+}
+
+/**
+ * Swap in the user's keys. An entry is dropped (the binding keeps its
+ * built-in key) when the combo isn't assignable or collides with another
+ * binding; dropping one can expose a collision with the restored key, so
+ * repeat until nothing collides — each round restores one, so it ends.
+ */
+function applyCustomKeys(
+  table: KeyBinding[],
+  custom: EditorPreferences["customKeys"] | undefined
+): KeyBinding[] {
+  if (!custom) return table;
+  const original = new Map(table.map((b) => [b.id, b]));
+  const active = new Map<CustomKeyId, KeyCombo>();
+  for (const id of CUSTOM_KEY_IDS) {
+    const combo = custom[id];
+    if (combo && original.has(id) && comboProblem(combo) === null) active.set(id, combo);
+  }
+  for (;;) {
+    const current = table.map((b) => {
+      const combo = active.get(b.id as CustomKeyId);
+      return combo ? rebind(b, combo) : b;
+    });
+    const bad = [...active].find(([id, combo]) => customKeyConflict(current, id, combo));
+    if (!bad) return current;
+    active.delete(bad[0]);
+  }
 }
 
 /**

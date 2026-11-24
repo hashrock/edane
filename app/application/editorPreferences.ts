@@ -12,6 +12,7 @@
 import { defaultLocalStorage, type KeyValueStorage } from "./browserStorage";
 import { closedStringSet } from "../domain/isKeyOf";
 import { DEFAULT_BRANCH_SPACING, type BranchSpacing } from "../lib/treeLayout";
+import { parseCustomKeys, type CustomKeys } from "./keyCombo";
 
 export interface EditorPreferences {
   /**
@@ -54,6 +55,13 @@ export interface EditorPreferences {
    * look). Applies in either mode — it is a display setting.
    */
   branchSpacing: BranchSpacing;
+  /**
+   * Keys the user assigned in the settings dialog, by keymap binding id
+   * (only the ids in keyCombo.ts's closed list). An absent id keeps its
+   * built-in key; buildKeymap ignores an entry that would collide with
+   * another binding, so a stale entry can't break the keymap.
+   */
+  customKeys: CustomKeys;
 }
 
 export const DEFAULT_PREFERENCES: EditorPreferences = {
@@ -62,6 +70,7 @@ export const DEFAULT_PREFERENCES: EditorPreferences = {
   enterBehavior: "insert-sibling",
   arrowBehavior: "navigate",
   branchSpacing: DEFAULT_BRANCH_SPACING,
+  customKeys: {},
 };
 
 export const PREFERENCES_KEY = "edane:editor-preferences";
@@ -136,10 +145,10 @@ export { BRANCH_SPACINGS };
 export function loadPreferences(
   storage: KeyValueStorage | undefined = defaultLocalStorage()
 ): EditorPreferences {
-  if (!storage) return { ...DEFAULT_PREFERENCES };
+  if (!storage) return { ...DEFAULT_PREFERENCES, customKeys: {} };
   try {
     const raw = storage.getItem(PREFERENCES_KEY);
-    if (!raw) return { ...DEFAULT_PREFERENCES };
+    if (!raw) return { ...DEFAULT_PREFERENCES, customKeys: {} };
     const parsed = JSON.parse(raw) as Partial<EditorPreferences>;
     return {
       selectionMode:
@@ -158,9 +167,10 @@ export function loadPreferences(
       branchSpacing: isBranchSpacing(parsed.branchSpacing)
         ? parsed.branchSpacing
         : DEFAULT_PREFERENCES.branchSpacing,
+      customKeys: parseCustomKeys(parsed.customKeys),
     };
   } catch {
-    return { ...DEFAULT_PREFERENCES };
+    return { ...DEFAULT_PREFERENCES, customKeys: {} };
   }
 }
 

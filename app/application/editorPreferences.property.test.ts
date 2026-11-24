@@ -18,6 +18,8 @@ import {
   TAB_BEHAVIORS,
   type EditorPreferences,
 } from "./editorPreferences";
+import { parseCustomKeys } from "./keyCombo";
+import { customKeysArb } from "./editorState.arb";
 
 const VALID = {
   selectionMode: [true, false],
@@ -25,7 +27,8 @@ const VALID = {
   enterBehavior: ENTER_BEHAVIORS,
   arrowBehavior: ARROW_BEHAVIORS,
   branchSpacing: BRANCH_SPACINGS,
-} as const satisfies Record<keyof EditorPreferences, readonly unknown[]>;
+} as const satisfies Record<Exclude<keyof EditorPreferences, "customKeys">, readonly unknown[]>;
+type EnumKey = keyof typeof VALID;
 
 const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   selectionMode: fc.constantFrom(...VALID.selectionMode),
@@ -33,12 +36,16 @@ const prefsArb: fc.Arbitrary<EditorPreferences> = fc.record({
   enterBehavior: fc.constantFrom(...VALID.enterBehavior),
   arrowBehavior: fc.constantFrom(...VALID.arrowBehavior),
   branchSpacing: fc.constantFrom(...VALID.branchSpacing),
+  // What the settings dialog can store: validated custom keys.
+  customKeys: customKeysArb.map(parseCustomKeys),
 });
 
 function expectValid(p: EditorPreferences) {
-  for (const key of Object.keys(VALID) as (keyof EditorPreferences)[]) {
+  for (const key of Object.keys(VALID) as EnumKey[]) {
     expect(VALID[key] as readonly unknown[]).toContain(p[key]);
   }
+  // Custom keys come back already validated (parsing them again is a no-op).
+  expect(parseCustomKeys(p.customKeys)).toEqual(p.customKeys);
   expect(Object.keys(p).sort()).toEqual(Object.keys(DEFAULT_PREFERENCES).sort());
 }
 
@@ -86,7 +93,7 @@ describe("preferences persistence", () => {
         storage.setItem(PREFERENCES_KEY, JSON.stringify(stored));
         const loaded = loadPreferences(storage);
         expectValid(loaded);
-        for (const key of Object.keys(VALID) as (keyof EditorPreferences)[]) {
+        for (const key of Object.keys(VALID) as EnumKey[]) {
           const given = (stored as Record<string, unknown>)[key];
           const recognised = (VALID[key] as readonly unknown[]).includes(given);
           expect(loaded[key]).toBe(recognised ? given : DEFAULT_PREFERENCES[key]);
