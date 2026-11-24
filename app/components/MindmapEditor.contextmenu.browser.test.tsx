@@ -60,25 +60,55 @@ function setup(prefs: Partial<EditorPreferences> = {}) {
   );
 }
 
-/** Viewport coordinates of a node's click point. */
+/**
+ * Viewport coordinates of a node's click point — once the Konva stage has
+ * drawn the nodes (their event handlers are bound by that redraw; on a slow
+ * CI runner the layout point is known well before it).
+ */
 async function nodePoint(id: string) {
+  await waitFor(
+    () =>
+      canvasEl().querySelector("canvas") &&
+      api().getRedrawStats().redrawCount > 0
+  );
   const p = await waitFor(() => api().getNodeClickPoint(id));
   const rect = canvasEl().getBoundingClientRect();
   return { x: Math.round(rect.left + p.x), y: Math.round(rect.top + p.y) };
 }
 
+/**
+ * Right-click a node and wait for ITS menu. On CI the first tests can fire
+ * before the stage has settled (fonts loading reflow the layout after the
+ * first draw), so the click point is re-read and the click re-sent until the
+ * node's menu opens.
+ */
 async function rightClickNode(id: string) {
-  const { x, y } = await nodePoint(id);
-  const el = canvasEl();
-  (el.querySelector("canvas") ?? el).dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      button: 2,
-      clientX: x,
-      clientY: y,
-    })
-  );
+  const start = Date.now();
+  for (;;) {
+    const { x, y } = await nodePoint(id);
+    const el = canvasEl();
+    (el.querySelector("canvas") ?? el).dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: x,
+        clientY: y,
+      })
+    );
+    for (let i = 0; i < 10; i++) {
+      // A node's menu, not the empty-canvas one (a click that landed beside
+      // the node while the stage was still settling).
+      if (menuButton("Copy branch as text")) return;
+      if (menuButtons().length > 0) {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await waitFor(() => menuButtons().length === 0);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (Date.now() - start > 8000) throw new Error(`rightClickNode(${id}): no node menu`);
+  }
 }
 
 function touch(type: string, x: number, y: number, lifted = false) {
